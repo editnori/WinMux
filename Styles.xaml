@@ -12,6 +12,126 @@
     </ResourceDictionary.MergedDictionaries>
     <!-- Other app resources here -->
 
+    <SolidColorBrush x:Key="ShellPageBackgroundBrush" Color="#0F1217" />
+    <SolidColorBrush x:Key="ShellPaneBackgroundBrush" Color="#13171E" />
+    <SolidColorBrush x:Key="ShellSurfaceBackgroundBrush" Color="#10141A" />
+    <SolidColorBrush x:Key="ShellMutedSurfaceBrush" Color="#151B23" />
+    <SolidColorBrush x:Key="ShellBorderBrush" Color="#212834" />
+    <SolidColorBrush x:Key="ShellNavHoverBrush" Color="#141A22" />
+    <SolidColorBrush x:Key="ShellNavActiveBrush" Color="#1A212B" />
+    <SolidColorBrush x:Key="ShellTextPrimaryBrush" Color="#E8EDF3" />
+    <SolidColorBrush x:Key="ShellTextSecondaryBrush" Color="#98A2AF" />
+    <SolidColorBrush x:Key="ShellTextTertiaryBrush" Color="#6E7784" />
+    <SolidColorBrush x:Key="ShellSuccessBrush" Color="#9ECE6A" />
+
+    <Style x:Key="ShellButtonBaseStyle" TargetType="Button">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Foreground" Value="{StaticResource ShellTextSecondaryBrush}" />
+        <Setter Property="Padding" Value="8,5" />
+        <Setter Property="CornerRadius" Value="3" />
+        <Setter Property="HorizontalContentAlignment" Value="Left" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="UseSystemFocusVisuals" Value="True" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="RootBorder"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="{TemplateBinding CornerRadius}">
+                        <ContentPresenter x:Name="ContentPresenter"
+                                          Content="{TemplateBinding Content}"
+                                          Margin="{TemplateBinding Padding}"
+                                          HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                    </Border>
+
+                    <VisualStateManager.VisualStateGroups>
+                        <VisualStateGroup x:Name="CommonStates">
+                            <VisualState x:Name="Normal" />
+                            <VisualState x:Name="PointerOver">
+                                <Storyboard>
+                                    <ObjectAnimationUsingKeyFrames Storyboard.TargetName="RootBorder" Storyboard.TargetProperty="Background">
+                                        <DiscreteObjectKeyFrame KeyTime="0" Value="{StaticResource ShellNavHoverBrush}" />
+                                    </ObjectAnimationUsingKeyFrames>
+                                    <ObjectAnimationUsingKeyFrames Storyboard.TargetName="RootBorder" Storyboard.TargetProperty="BorderBrush">
+                                        <DiscreteObjectKeyFrame KeyTime="0" Value="{StaticResource ShellBorderBrush}" />
+                                    </ObjectAnimationUsingKeyFrames>
+                                    <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ContentPresenter" Storyboard.TargetProperty="Foreground">
+                                        <DiscreteObjectKeyFrame KeyTime="0" Value="{StaticResource ShellTextPrimaryBrush}" />
+                                    </ObjectAnimationUsingKeyFrames>
+                                </Storyboard>
+                            </VisualState>
+                            <VisualState x:Name="Pressed">
+                                <Storyboard>
+                                    <ObjectAnimationUsingKeyFrames Storyboard.TargetName="RootBorder" Storyboard.TargetProperty="Background">
+                                        <DiscreteObjectKeyFrame KeyTime="0" Value="{StaticResource ShellNavActiveBrush}" />
+                                    </ObjectAnimationUsingKeyFrames>
+                                    <ObjectAnimationUsingKeyFrames Storyboard.TargetName="RootBorder" Storyboard.TargetProperty="BorderBrush">
+                                        <DiscreteObjectKeyFrame KeyTime="0" Value="{StaticResource ShellBorderBrush}" />
+                                    </ObjectAnimationUsingKeyFrames>
+                                    <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ContentPresenter" Storyboard.TargetProperty="Foreground">
+                                        <DiscreteObjectKeyFrame KeyTime="0" Value="{StaticResource ShellTextPrimaryBrush}" />
+                                    </ObjectAnimationUsingKeyFrames>
+                                </Storyboard>
+                            </VisualState>
+                            <VisualState x:Name="Disabled">
+                                <Storyboard>
+                                    <DoubleAnimation Storyboard.TargetName="RootBorder"
+                                                     Storyboard.TargetProperty="Opacity"
+                                                     To="0.45"
+                                                     Duration="0" />
+                                </Storyboard>
+                            </VisualState>
+                        </VisualStateGroup>
+                    </VisualStateManager.VisualStateGroups>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="ShellNavButtonStyle" TargetType="Button" BasedOn="{StaticResource ShellButtonBaseStyle}">
+        <Setter Property="Height" Value="34" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    </Style>
+
+    <Style x:Key="ShellChromeButtonStyle" TargetType="Button" BasedOn="{StaticResource ShellButtonBaseStyle}">
+        <Setter Property="Width" Value="28" />
+        <Setter Property="Height" Value="28" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="HorizontalContentAlignment" Value="Center" />
+    </Style>
+
+    <Style x:Key="ShellTitleTextStyle" TargetType="TextBlock" BasedOn="{StaticResource BaseTextBlockStyle}">
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Foreground" Value="{StaticResource ShellTextPrimaryBrush}" />
+    </Style>
+
+    <Style x:Key="ShellBodyTextStyle" TargetType="TextBlock" BasedOn="{StaticResource BaseTextBlockStyle}">
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="Foreground" Value="{StaticResource ShellTextPrimaryBrush}" />
+    </Style>
+
+    <Style x:Key="ShellSectionTextStyle" TargetType="TextBlock" BasedOn="{StaticResource BaseTextBlockStyle}">
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Foreground" Value="{StaticResource ShellTextPrimaryBrush}" />
+    </Style>
+
+    <Style x:Key="ShellMetaTextStyle" TargetType="TextBlock" BasedOn="{StaticResource BaseTextBlockStyle}">
+        <Setter Property="FontSize" Value="11" />
+        <Setter Property="Foreground" Value="{StaticResource ShellTextSecondaryBrush}" />
+    </Style>
+
+    <Style x:Key="ShellHintTextStyle" TargetType="TextBlock" BasedOn="{StaticResource BaseTextBlockStyle}">
+        <Setter Property="FontSize" Value="11" />
+        <Setter Property="Foreground" Value="{StaticResource ShellTextTertiaryBrush}" />
+    </Style>
+
     <Style x:Key="SymbolButton" TargetType="ToggleButton">
         <Setter Property="FontSize" Value="16" />
         <Setter Property="FontFamily" Value="{StaticResource SymbolThemeFontFamily}" />

@@ -1,6 +1,3 @@
-﻿// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Navigation;
@@ -24,12 +21,11 @@ namespace SelfContainedDeployment
         private void OnThemeRadioButtonChecked(object sender, RoutedEventArgs e)
         {
             ElementTheme selectedTheme = (ElementTheme)((RadioButton)sender).Tag;
+            SampleConfig.CurrentTheme = selectedTheme;
 
-            Grid content = MainPage.Current.Content as Grid;
-            if (content is not null)
+            if (MainPage.Current?.Content is Grid content)
             {
                 content.RequestedTheme = selectedTheme;
-                SampleConfig.CurrentTheme = content.RequestedTheme;
             }
         }
     }

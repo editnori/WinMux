@@ -1,150 +1,185 @@
-﻿// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Navigation;
+using Microsoft.UI.Xaml.Media;
+using SelfContainedDeployment.Terminal;
 using System;
-using System.Collections.Generic;
-using System.Linq;
 
 namespace SelfContainedDeployment
 {
     public partial class MainPage : Page
     {
+        private int _tabSequence = 1;
+
         public static MainPage Current;
-        public List<Scenario> Scenarios => this.scenarios;
 
         public MainPage()
         {
             InitializeComponent();
-
-            // This is a static public property that allows downstream pages to get a handle to the MainPage instance
-            // in order to call methods that are in this class.
             Current = this;
+            WorkspacePathText.Text = Environment.CurrentDirectory;
+            Loaded += OnLoaded;
         }
 
-        public void NotifyUser(string strMessage, InfoBarSeverity severity, bool isOpen = true)
+        private void OnLoaded(object sender, RoutedEventArgs e)
         {
-            // If called from the UI thread, then update immediately.
-            // Otherwise, schedule a task on the UI thread to perform the update.
-            if (DispatcherQueue.HasThreadAccess)
+            Loaded -= OnLoaded;
+            EnsureAtLeastOneTab();
+            UpdatePaneLayout();
+            ShowTerminalShell();
+        }
+
+        private void OnPaneToggleClicked(object sender, RoutedEventArgs e)
+        {
+            ShellSplitView.IsPaneOpen = !ShellSplitView.IsPaneOpen;
+            UpdatePaneLayout();
+        }
+
+        private void OnTerminalNavClicked(object sender, RoutedEventArgs e)
+        {
+            ShowTerminalShell();
+        }
+
+        private void OnSettingsNavClicked(object sender, RoutedEventArgs e)
+        {
+            SettingsFrame.Navigate(typeof(SettingsPage));
+            SettingsFrame.Visibility = Visibility.Visible;
+            TerminalTabs.Visibility = Visibility.Collapsed;
+            UpdateRailVisualState(showTerminal: false);
+        }
+
+        private void OnNewTabClicked(object sender, RoutedEventArgs e)
+        {
+            ShowTerminalShell();
+            AddTerminalTab();
+        }
+
+        private void TerminalTabs_AddTabButtonClick(TabView sender, object args)
+        {
+            AddTerminalTab();
+        }
+
+        private void TerminalTabs_TabCloseRequested(TabView sender, TabViewTabCloseRequestedEventArgs args)
+        {
+            if (args.Item is TabViewItem item)
             {
-                UpdateStatus(strMessage, severity, isOpen);
-            }
-            else
-            {
-                DispatcherQueue.TryEnqueue(() =>
+                if (item.Content is TerminalControl terminal)
                 {
-                    UpdateStatus(strMessage, severity, isOpen);
-                });
-            }
-        }
-
-        private void UpdateStatus(string strMessage, InfoBarSeverity severity, bool isOpen)
-        {
-            infoBar.Message = strMessage;
-            infoBar.IsOpen = isOpen;
-            infoBar.Severity = severity;
-        }
-
-        private void NavView_Loaded(object sender, RoutedEventArgs e)
-        {
-            foreach (Scenario item in scenarios)
-            {
-                NavView.MenuItems.Add(new NavigationViewItem
-                {
-                    Content = item.Title,
-                    Tag = item.ClassName,
-                    Icon = new FontIcon() { FontFamily = new("Segoe MDL2 Assets"), Glyph = "\uE82D" }
-                });
-            }
-
-            // NavView doesn't load any page by default, so load home page.
-            NavView.SelectedItem = NavView.MenuItems[0];
-
-            // If navigation occurs on SelectionChanged, this isn't needed.
-            // Because we use ItemInvoked to navigate, we need to call Navigate
-            // here to load the home page.
-            if (scenarios is not null && scenarios.Count > 0)
-            {
-                NavView_Navigate(scenarios.First().ClassName, new Microsoft.UI.Xaml.Media.Animation.EntranceNavigationTransitionInfo());
-            }
-        }
-
-        private void NavView_Navigate(string navItemTag, Microsoft.UI.Xaml.Media.Animation.NavigationTransitionInfo transitionInfo)
-        {
-            Type page;
-
-            if (navItemTag == nameof(SettingsPage))
-            {
-                page = typeof(SettingsPage);
-            }
-            else
-            {
-                Scenario item = scenarios.First(p => p.ClassName.Equals(navItemTag));
-                page = Type.GetType(item.ClassName);
-            }
-
-            // Get the page type before navigation so you can prevent duplicate
-            // entries in the backstack.
-            var preNavPageType = ContentFrame.CurrentSourcePageType;
-
-            // Only navigate if the selected page isn't currently loaded.
-            if ((page is not null) && !Type.Equals(preNavPageType, page))
-            {
-                ContentFrame.Navigate(page, null, transitionInfo);
-            }
-        }
-
-        private void NavView_BackRequested(NavigationView sender, NavigationViewBackRequestedEventArgs args)
-        {
-            if (ContentFrame.CanGoBack)
-            {
-                ContentFrame.GoBack();
-            }
-        }
-
-        private void NavView_ItemInvoked(NavigationView sender, NavigationViewItemInvokedEventArgs args)
-        {
-            var naViewItemInvoked = (NavigationViewItem)args.InvokedItemContainer;
-
-            if (args.IsSettingsInvoked)
-            {
-                NavView_Navigate(nameof(SettingsPage), args.RecommendedNavigationTransitionInfo);
-            }
-            else if (args.InvokedItemContainer is not null)
-            {
-                var navItemTag = args.InvokedItemContainer.Tag?.ToString();
-                if (!string.IsNullOrEmpty(navItemTag))
-                {
-                    NavView_Navigate(navItemTag, new Microsoft.UI.Xaml.Media.Animation.EntranceNavigationTransitionInfo());
+                    terminal.DisposeTerminal();
                 }
+
+                sender.TabItems.Remove(item);
+            }
+
+            EnsureAtLeastOneTab();
+            FocusSelectedTerminal();
+        }
+
+        private void TerminalTabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            FocusSelectedTerminal();
+        }
+
+        private void EnsureAtLeastOneTab()
+        {
+            if (TerminalTabs.TabItems.Count == 0)
+            {
+                AddTerminalTab();
             }
         }
 
-        private void ContentFrame_Navigated(object sender, NavigationEventArgs e)
+        private void AddTerminalTab()
         {
-            NavView.IsBackEnabled = ContentFrame.CanGoBack;
-
-            if (ContentFrame.SourcePageType == typeof(SettingsPage))
+            var terminal = new TerminalControl
             {
-                // SettingsItem is not part of NavView.MenuItems, and doesn't have a Tag.
-                NavView.SelectedItem = (NavigationViewItem)NavView.SettingsItem;
-                NavView.Header = "Settings";
-            }
-            else if (ContentFrame.SourcePageType != null)
+                InitialWorkingDirectory = Environment.CurrentDirectory,
+            };
+
+            var item = new TabViewItem
             {
-                var item = scenarios.First(p => p.ClassName == e.SourcePageType.FullName);
-                var menuItems = NavView.MenuItems;
+                Header = $"Session {_tabSequence++}",
+                Content = terminal,
+                IsClosable = true,
+            };
 
-                NavView.SelectedItem = NavView.MenuItems
-                    .OfType<NavigationViewItem>()
-                    .First(n => n.Tag.Equals(item.ClassName));
+            terminal.SessionTitleChanged += (_, title) => item.Header = FormatTabHeader(title);
+            terminal.SessionExited += (_, _) =>
+            {
+                if (item.Header is string title && !title.EndsWith(" (ended)", StringComparison.Ordinal))
+                {
+                    item.Header = $"{title} (ended)";
+                }
+            };
 
-                NavView.Header =
-                    ((NavigationViewItem)NavView.SelectedItem)?.Content?.ToString();
+            TerminalTabs.TabItems.Add(item);
+            TerminalTabs.SelectedItem = item;
+            ShowTerminalShell();
+        }
+
+        private void ShowTerminalShell()
+        {
+            SettingsFrame.Visibility = Visibility.Collapsed;
+            TerminalTabs.Visibility = Visibility.Visible;
+            UpdateRailVisualState(showTerminal: true);
+            FocusSelectedTerminal();
+        }
+
+        private void FocusSelectedTerminal()
+        {
+            if (TerminalTabs.SelectedItem is TabViewItem item && item.Content is TerminalControl terminal)
+            {
+                terminal.FocusTerminal();
             }
+        }
+
+        private void UpdateRailVisualState(bool showTerminal)
+        {
+            ApplyRailState(TerminalNavButton, TerminalNavText, showTerminal);
+            ApplyRailState(SettingsNavButton, SettingsNavText, !showTerminal);
+            NewTabRailButton.Foreground = AppBrush("ShellTextSecondaryBrush");
+            NewTabText.Foreground = AppBrush("ShellTextSecondaryBrush");
+        }
+
+        private void UpdatePaneLayout()
+        {
+            bool isOpen = ShellSplitView.IsPaneOpen;
+
+            PaneBrandText.Visibility = isOpen ? Visibility.Visible : Visibility.Collapsed;
+            TerminalNavText.Visibility = isOpen ? Visibility.Visible : Visibility.Collapsed;
+            SettingsNavText.Visibility = isOpen ? Visibility.Visible : Visibility.Collapsed;
+            NewTabText.Visibility = isOpen ? Visibility.Visible : Visibility.Collapsed;
+
+            ToolTipService.SetToolTip(PaneToggleButton, isOpen ? "Collapse sidebar" : "Expand sidebar");
+        }
+
+        private static Brush AppBrush(string key)
+        {
+            return (Brush)Application.Current.Resources[key];
+        }
+
+        private static void ApplyRailState(Button button, TextBlock label, bool active)
+        {
+            button.Background = active ? AppBrush("ShellNavActiveBrush") : null;
+            button.BorderBrush = active ? AppBrush("ShellBorderBrush") : null;
+            button.Foreground = active ? AppBrush("ShellTextPrimaryBrush") : AppBrush("ShellTextSecondaryBrush");
+            label.Foreground = active ? AppBrush("ShellTextPrimaryBrush") : AppBrush("ShellTextSecondaryBrush");
+        }
+
+        private static string FormatTabHeader(string title)
+        {
+            if (string.IsNullOrWhiteSpace(title))
+            {
+                return "shell";
+            }
+
+            string trimmed = title.Trim().TrimEnd('\\', '/');
+            int slashIndex = Math.Max(trimmed.LastIndexOf('\\'), trimmed.LastIndexOf('/'));
+
+            if (slashIndex >= 0 && slashIndex < trimmed.Length - 1)
+            {
+                return trimmed[(slashIndex + 1)..];
+            }
+
+            return trimmed.Length > 28 ? trimmed[..28] : trimmed;
         }
     }
 }

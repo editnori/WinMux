@@ -1,0 +1,67 @@
+:root {
+    color-scheme: dark;
+    --app-bg: #0f1217;
+    --border: rgba(255, 255, 255, 0.08);
+    --overlay-bg: rgba(16, 20, 26, 0.92);
+    --text-muted: #8e99a7;
+}
+
+html,
+body {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+    background: var(--app-bg);
+    font-family: "Segoe UI", sans-serif;
+}
+
+body {
+    position: relative;
+}
+
+#terminal-root {
+    width: 100%;
+    height: 100%;
+}
+
+#terminal-root .xterm,
+#terminal-root .xterm-screen,
+#terminal-root .xterm-viewport {
+    height: 100%;
+}
+
+#terminal-root .xterm {
+    padding: 8px 10px 6px;
+}
+
+#terminal-root .xterm-viewport {
+    overflow-y: auto;
+    scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+}
+
+#terminal-root .xterm-viewport::-webkit-scrollbar {
+    width: 10px;
+}
+
+#terminal-root .xterm-viewport::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 999px;
+}
+
+.status-line {
+    position: absolute;
+    right: 8px;
+    bottom: 8px;
+    max-width: 50%;
+    padding: 4px 6px;
+    border: 1px solid var(--border);
+    background: var(--overlay-bg);
+    color: var(--text-muted);
+    font-size: 11px;
+    pointer-events: none;
+}
+
+.status-line[data-visible="false"] {
+    display: none;
+}
