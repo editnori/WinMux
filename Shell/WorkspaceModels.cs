@@ -34,6 +34,9 @@ namespace SelfContainedDeployment.Shell
 
     public static class ShellProfiles
     {
+        private const string WslLocalhostPrefix = @"\\wsl.localhost\";
+        private const string WslDollarPrefix = @"\\wsl$\";
+
         private static readonly IReadOnlyDictionary<string, ShellProfileDefinition> Definitions =
             new Dictionary<string, ShellProfileDefinition>(StringComparer.OrdinalIgnoreCase)
             {
@@ -73,7 +76,7 @@ namespace SelfContainedDeployment.Shell
             return Resolve(shellProfileId).Id switch
             {
                 ShellProfileIds.PowerShell => "powershell.exe -NoLogo",
-                ShellProfileIds.Wsl => $"wsl.exe --cd \"{ResolveDisplayPath(projectPath, ShellProfileIds.Wsl)}\"",
+                ShellProfileIds.Wsl => BuildWslLaunchCommand(projectPath),
                 _ => Environment.GetEnvironmentVariable("COMSPEC") ?? "cmd.exe",
             };
         }
@@ -83,6 +86,11 @@ namespace SelfContainedDeployment.Shell
             string normalizedPath = NormalizeProjectPath(projectPath);
             if (Resolve(shellProfileId).UsesTranslatedWslPath)
             {
+                if (TryParseWslSharePath(normalizedPath, out WslSharePath wslSharePath))
+                {
+                    return wslSharePath.LinuxPath;
+                }
+
                 return ToWslPath(normalizedPath);
             }
 
@@ -110,6 +118,11 @@ namespace SelfContainedDeployment.Shell
             }
 
             string trimmed = projectPath.Trim();
+            if (TryParseWslSharePath(trimmed, out WslSharePath wslSharePath))
+            {
+                return wslSharePath.CanonicalUncPath;
+            }
+
             if (TryConvertToWindowsPath(trimmed, out string windowsPath))
             {
                 return Path.GetFullPath(windowsPath);
@@ -126,7 +139,9 @@ namespace SelfContainedDeployment.Shell
         public static bool TryResolveLocalStoragePath(string projectPath, out string localPath)
         {
             string normalizedPath = NormalizeProjectPath(projectPath);
-            if (!string.IsNullOrWhiteSpace(normalizedPath) && !IsWslPath(normalizedPath))
+            if (!string.IsNullOrWhiteSpace(normalizedPath) &&
+                !IsWslPath(normalizedPath) &&
+                !TryParseWslSharePath(normalizedPath, out _))
             {
                 localPath = normalizedPath;
                 return true;
@@ -166,6 +181,11 @@ namespace SelfContainedDeployment.Shell
 
         private static string ToWslPath(string path)
         {
+            if (TryParseWslSharePath(path, out WslSharePath wslSharePath))
+            {
+                return wslSharePath.LinuxPath;
+            }
+
             if (IsWslPath(path))
             {
                 return path.Replace('\\', '/');
@@ -218,6 +238,68 @@ namespace SelfContainedDeployment.Shell
                 : Path.Combine(root, suffix);
             return true;
         }
+
+        private static string BuildWslLaunchCommand(string projectPath)
+        {
+            string normalizedPath = NormalizeProjectPath(projectPath);
+            if (TryParseWslSharePath(normalizedPath, out WslSharePath wslSharePath))
+            {
+                return $"wsl.exe -d \"{wslSharePath.DistroName}\" --cd \"{wslSharePath.LinuxPath}\"";
+            }
+
+            return $"wsl.exe --cd \"{ResolveDisplayPath(normalizedPath, ShellProfileIds.Wsl)}\"";
+        }
+
+        private static bool TryParseWslSharePath(string path, out WslSharePath wslSharePath)
+        {
+            wslSharePath = null;
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return false;
+            }
+
+            string trimmed = path.Trim();
+            if (trimmed.StartsWith("//", StringComparison.Ordinal))
+            {
+                trimmed = @"\\" + trimmed[2..].Replace('/', '\\');
+            }
+            else
+            {
+                trimmed = trimmed.Replace('/', '\\');
+            }
+
+            string prefix = trimmed.StartsWith(WslLocalhostPrefix, StringComparison.OrdinalIgnoreCase)
+                ? WslLocalhostPrefix
+                : trimmed.StartsWith(WslDollarPrefix, StringComparison.OrdinalIgnoreCase)
+                    ? WslDollarPrefix
+                    : null;
+
+            if (prefix is null)
+            {
+                return false;
+            }
+
+            string remainder = trimmed[prefix.Length..];
+            string[] segments = remainder.Split('\\', StringSplitOptions.RemoveEmptyEntries);
+            if (segments.Length == 0)
+            {
+                return false;
+            }
+
+            string distroName = segments[0];
+            string linuxSuffix = string.Join('/', segments.Skip(1));
+            string linuxPath = string.IsNullOrWhiteSpace(linuxSuffix) ? "/" : "/" + linuxSuffix;
+            string canonicalUncPath = WslLocalhostPrefix + distroName;
+            if (segments.Length > 1)
+            {
+                canonicalUncPath += @"\" + string.Join('\\', segments.Skip(1));
+            }
+
+            wslSharePath = new WslSharePath(distroName, linuxPath, canonicalUncPath);
+            return true;
+        }
+
+        private sealed record WslSharePath(string DistroName, string LinuxPath, string CanonicalUncPath);
     }
 
     public sealed class WorkspaceProject

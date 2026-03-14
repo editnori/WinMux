@@ -1,6 +1,8 @@
 param(
     [int]$Port = 9331,
     [string]$OutputDirectory = "",
+    [string]$ProjectPath = "",
+    [string]$ShellProfileId = "wsl",
     [int]$Fps = 12,
     [int]$WindowWidth = 1560,
     [int]$WindowHeight = 1040,
@@ -16,8 +18,14 @@ if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
     $OutputDirectory = Join-Path $repoRoot "tmp/automation-captures/winmux-new-project-$timestamp"
 }
 
-$tempProjectPath = Join-Path $env:TEMP ("winmux-project-" + [Guid]::NewGuid().ToString("N"))
-if (Test-Path $tempProjectPath) {
+$tempProjectPath = if ([string]::IsNullOrWhiteSpace($ProjectPath)) {
+    Join-Path $env:TEMP ("winmux-project-" + [Guid]::NewGuid().ToString("N"))
+}
+else {
+    $ProjectPath
+}
+
+if ([string]::IsNullOrWhiteSpace($ProjectPath) -and (Test-Path $tempProjectPath)) {
     Remove-Item -Recurse -Force $tempProjectPath
 }
 
@@ -239,7 +247,7 @@ try {
     $null = Invoke-AutomationPost "/ui-action" @{
         action = "setText"
         automationId = "dialog-project-shell-profile"
-        value = "wsl"
+        value = $ShellProfileId
     }
     Pause-Step 500
 

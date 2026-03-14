@@ -2431,9 +2431,15 @@ namespace SelfContainedDeployment
 
             Button browseButton = new()
             {
-                Content = "Browse…",
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-                MinWidth = 108,
+                Content = new TextBlock
+                {
+                    Text = "Browse…",
+                    TextWrapping = TextWrapping.NoWrap,
+                },
+                HorizontalAlignment = HorizontalAlignment.Left,
+                HorizontalContentAlignment = HorizontalAlignment.Center,
+                MinWidth = 132,
+                Width = 132,
                 Style = (Style)Application.Current.Resources["ShellNavButtonStyle"],
             };
             AutomationProperties.SetAutomationId(browseButton, "dialog-project-browse");
@@ -2462,16 +2468,13 @@ namespace SelfContainedDeployment
             };
             AutomationProperties.SetAutomationId(helperText, "dialog-project-helper");
 
-            Grid pathRow = new()
+            StackPanel pathSection = new()
             {
-                ColumnSpacing = 10,
+                Spacing = 8,
                 HorizontalAlignment = HorizontalAlignment.Stretch,
             };
-            pathRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            pathRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            pathRow.Children.Add(pathBox);
-            Grid.SetColumn(browseButton, 1);
-            pathRow.Children.Add(browseButton);
+            pathSection.Children.Add(pathBox);
+            pathSection.Children.Add(browseButton);
 
             StackPanel body = new()
             {
@@ -2484,7 +2487,7 @@ namespace SelfContainedDeployment
                 Text = "Project directory",
                 Style = (Style)Application.Current.Resources["ShellHintTextStyle"],
             });
-            body.Children.Add(pathRow);
+            body.Children.Add(pathSection);
             body.Children.Add(new TextBlock
             {
                 Text = "Shell profile",
