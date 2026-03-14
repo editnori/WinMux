@@ -35,15 +35,22 @@ Write-Host "  chromium.connectOverCDP('http://127.0.0.1:$Port')"
 Write-Host ""
 
 $targetsUrl = "http://127.0.0.1:$Port/json/list"
+$lastTargets = $null
 
 for ($i = 0; $i -lt 40; $i++) {
     Start-Sleep -Milliseconds 250
 
     try {
         $targets = Invoke-RestMethod -Uri $targetsUrl -TimeoutSec 2
-        if ($targets) {
+        $lastTargets = $targets
+
+        $rendererTargets = @($targets | Where-Object {
+            $_.url -like "*terminal-host.html*" -or $_.title -like "*terminal*"
+        })
+
+        if ($rendererTargets.Count -gt 0) {
             Write-Host "Detected WebView2 targets:"
-            $targets | Select-Object title, url, type | Format-Table -AutoSize
+            $rendererTargets | Select-Object title, url, type | Format-Table -AutoSize
             exit 0
         }
     }
@@ -51,4 +58,10 @@ for ($i = 0; $i -lt 40; $i++) {
     }
 }
 
-Write-Warning "WebView2 debug port did not report targets yet. The app may still be starting."
+if ($lastTargets) {
+    Write-Warning "Only transient WebView2 targets were detected so far. The renderer may still be navigating."
+    $lastTargets | Select-Object title, url, type | Format-Table -AutoSize
+}
+else {
+    Write-Warning "WebView2 debug port did not report targets yet. The app may still be starting."
+}

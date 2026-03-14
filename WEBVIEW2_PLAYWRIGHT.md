@@ -13,12 +13,14 @@ What this does not give you:
 - full automation of the native XAML shell
 - direct inspection of non-WebView WinUI controls
 
-The repo-local npm scripts intentionally run the Playwright helpers through Windows `node`, not WSL `node`, because the WebView2 CDP port is Windows-local and Windows Node can reach it reliably.
+The repo uses Bun for package management and script entrypoints.
+
+The repo-local Bun scripts intentionally run the Playwright helpers through Windows `node`, not WSL `node`, because the WebView2 CDP port is Windows-local and Windows Node can reach it reliably.
 
 ## Start the native app in debug mode
 
 ```powershell
-npm run webview2:start
+bun run webview2:start
 ```
 
 This does three things:
@@ -38,13 +40,13 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-webview2
 ## Inspect available targets
 
 ```bash
-npm run webview2:targets
+bun run webview2:targets
 ```
 
 ## Capture the current renderer
 
 ```bash
-npm run webview2:screenshot
+bun run webview2:screenshot
 ```
 
 Or write to a specific file:
@@ -56,7 +58,7 @@ node ./tools/webview2-screenshot.mjs ./tmp/native-shot.png
 ## Evaluate live page state
 
 ```bash
-npm run webview2:eval -- "document.title"
+bun run webview2:eval -- "document.title"
 ```
 
 Or inspect something deeper:
@@ -98,6 +100,14 @@ await page.reload({ waitUntil: "domcontentloaded" });
 ```
 
 Native shell or startup changes still require relaunching the app.
+
+## Setup
+
+Install the repo-local tooling with Bun:
+
+```bash
+bun install
+```
 
 ## Why this works
 

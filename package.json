@@ -1,12 +1,13 @@
 {
   "name": "native-terminal-starter",
   "private": true,
+  "packageManager": "bun@1.3.10",
   "description": "Playwright helpers for attaching to the native WebView2 terminal renderer.",
   "scripts": {
-    "webview2:start": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\start-webview2-debug.ps1",
-    "webview2:targets": "powershell.exe -NoProfile -Command \"node .\\tools\\webview2-targets.mjs\"",
-    "webview2:screenshot": "powershell.exe -NoProfile -Command \"node .\\tools\\webview2-screenshot.mjs\"",
-    "webview2:eval": "powershell.exe -NoProfile -Command \"node .\\tools\\webview2-eval.mjs\""
+    "webview2:start": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/start-webview2-debug.ps1\")\"",
+    "webview2:targets": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-webview2-tool.ps1\")\" targets",
+    "webview2:screenshot": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-webview2-tool.ps1\")\" screenshot",
+    "webview2:eval": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-webview2-tool.ps1\")\" eval"
   },
   "devDependencies": {
     "playwright": "^1.58.2"
