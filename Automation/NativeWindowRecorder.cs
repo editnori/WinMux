@@ -251,7 +251,7 @@ namespace SelfContainedDeployment.Automation
             ProcessStartInfo startInfo = new()
             {
                 FileName = ffmpeg,
-                Arguments = $"-y -framerate {_targetFps} -i \"{Path.Combine(outputDirectory, "frame-%06d.jpg")}\" -pix_fmt yuv420p \"{videoPath}\"",
+                Arguments = $"-hide_banner -loglevel error -nostdin -y -framerate {_targetFps} -i \"{Path.Combine(outputDirectory, "frame-%06d.jpg")}\" -c:v libx264 -preset veryfast -pix_fmt yuv420p -movflags +faststart \"{videoPath}\"",
                 UseShellExecute = false,
                 CreateNoWindow = true,
                 RedirectStandardError = true,
@@ -266,8 +266,11 @@ namespace SelfContainedDeployment.Automation
                     return null;
                 }
 
-                await process.WaitForExitAsync().ConfigureAwait(false);
-                if (process.ExitCode == 0 && File.Exists(videoPath))
+                Task<string> stdoutTask = process.StandardOutput.ReadToEndAsync();
+                Task<string> stderrTask = process.StandardError.ReadToEndAsync();
+                await Task.WhenAll(process.WaitForExitAsync(), stdoutTask, stderrTask).ConfigureAwait(false);
+
+                if (process.ExitCode == 0 && File.Exists(videoPath) && new FileInfo(videoPath).Length > 1024)
                 {
                     NativeAutomationEventLog.Record("recording", "recording.encoded", "Encoded native recording to mp4", new Dictionary<string, string>
                     {
@@ -276,12 +279,44 @@ namespace SelfContainedDeployment.Automation
                     });
                     return videoPath;
                 }
+
+                string stderr = (await stderrTask.ConfigureAwait(false))?.Trim();
+                string stdout = (await stdoutTask.ConfigureAwait(false))?.Trim();
+                if (File.Exists(videoPath))
+                {
+                    try
+                    {
+                        File.Delete(videoPath);
+                    }
+                    catch
+                    {
+                    }
+                }
+
+                NativeAutomationEventLog.Record("recording", "recording.encode-failed", "Failed to encode native recording to mp4", new Dictionary<string, string>
+                {
+                    ["manifestPath"] = manifestPath,
+                    ["exitCode"] = process.ExitCode.ToString(),
+                    ["stderr"] = TruncateForLog(stderr),
+                    ["stdout"] = TruncateForLog(stdout),
+                });
             }
             catch
             {
             }
 
             return null;
+        }
+
+        private static string TruncateForLog(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return string.Empty;
+            }
+
+            const int maxLength = 600;
+            return value.Length <= maxLength ? value : value[..maxLength];
         }
 
         private static string ResolveFfmpegExecutable()
