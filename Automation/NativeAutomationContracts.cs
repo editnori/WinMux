@@ -321,6 +321,10 @@ namespace SelfContainedDeployment.Automation
 
         public double? EndY { get; set; }
 
+        public double? Width { get; set; }
+
+        public double? Height { get; set; }
+
         public int DurationMs { get; set; }
 
         public string Value { get; set; }

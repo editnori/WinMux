@@ -67,6 +67,7 @@ bun run native:terminal-state
 bun run native:recording-start -- '{"fps":24,"maxDurationMs":5000,"keepFrames":false}'
 bun run native:recording-stop
 bun run native:demo-recording
+bun run native:demo-recording:cinematic
 bun run native:render-trace
 bun run native:smoke
 bun run webview2:targets

@@ -172,6 +172,7 @@ bun run native:render-trace
 bun run native:recording-start -- '{"fps":24,"maxDurationMs":5000,"keepFrames":false}'
 bun run native:recording-stop
 bun run native:demo-recording
+bun run native:demo-recording:cinematic
 bun run native:action -- '{"action":"newThread"}'
 bun run native:action -- '{"action":"moveTabAfter","tabId":"...","targetTabId":"..."}'
 bun run native:screenshot

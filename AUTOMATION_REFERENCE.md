@@ -47,6 +47,7 @@ bun run native:terminal-state
 bun run native:recording-start -- '{"fps":24,"maxDurationMs":5000,"keepFrames":false}'
 bun run native:recording-stop
 bun run native:demo-recording
+bun run native:demo-recording:cinematic
 bun run native:render-trace
 bun run native:screenshot
 bun run native:screenshot:annotated
@@ -155,6 +156,7 @@ These routes expose top-level and child windows outside the WinUI visual tree.
 - `rightClickPoint`
 - `hoverPoint`
 - `dragPoint`
+- `resizeWindow`
 - `sendKeys`
 - `typeText`
 
@@ -163,11 +165,14 @@ Relevant targeting fields:
 - `handle`
 - `titleContains`
 - `className`
+- `width`
+- `height`
 
 Notes:
 
 - if `handle` is provided and no coordinates are given, click actions target the window center
 - if coordinates are provided alongside a `handle`, they are treated as offsets from that window’s top-left corner
+- `resizeWindow` uses `width` and `height` to resize the outer native window, which is useful for higher-resolution captures
 - `sendKeys` supports common chords such as `Ctrl+A`, `Shift+Tab`, `F2`, `Delete`, and `Esc`
 - `typeText` types through Win32 keyboard injection, so it works against external picker/edit controls if they have focus
 
@@ -372,18 +377,29 @@ Important behavior:
 - `recording.mp4`
 - `manifest.json`
 
+`bun run native:demo-recording:cinematic` runs a slower and higher-resolution variant.
+
 The demo currently covers:
 
 - pane collapse and expand
 - terminal input
 - thread creation and rename
-- tab creation, switching, and semantic reorder
+- tab creation, switching, close, and semantic reorder
 - settings view
 - theme switching
 - shell-profile switching
 - thread duplication, rename, and delete
 - new-project dialog
+- empty-project recovery
 - project switching
+
+Useful knobs on `scripts/run-native-demo-recording.ps1`:
+
+- `-Mode standard|cinematic`
+- `-Fps`
+- `-WindowWidth`
+- `-WindowHeight`
+- `-KeepFrames`
 
 ### Screenshots
 

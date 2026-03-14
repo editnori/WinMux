@@ -8,6 +8,8 @@ namespace SelfContainedDeployment.Automation
     internal static class NativeDesktopAutomation
     {
         private const int SwRestore = 9;
+        private const uint SwpNoZOrder = 0x0004;
+        private const uint SwpNoActivate = 0x0010;
         private const uint MouseEventMove = 0x0001;
         private const uint MouseEventLeftDown = 0x0002;
         private const uint MouseEventLeftUp = 0x0004;
@@ -66,6 +68,9 @@ namespace SelfContainedDeployment.Automation
                         break;
                     case "dragpoint":
                         DragBetweenPoints(request, target);
+                        break;
+                    case "resizewindow":
+                        ResizeWindow(target, request);
                         break;
                     case "sendkeys":
                         FocusWindow(target);
@@ -253,6 +258,31 @@ namespace SelfContainedDeployment.Automation
                 ["handle"] = FormatHandle(hwnd),
                 ["start"] = $"{(int)start.X},{(int)start.Y}",
                 ["end"] = $"{(int)end.X},{(int)end.Y}",
+            });
+        }
+
+        private static void ResizeWindow(IntPtr hwnd, NativeAutomationDesktopActionRequest request)
+        {
+            if (hwnd == IntPtr.Zero)
+            {
+                throw new InvalidOperationException("No window handle was resolved for resize.");
+            }
+
+            if (!GetWindowRect(hwnd, out Rect rect))
+            {
+                throw new InvalidOperationException("Could not resolve window bounds for resize.");
+            }
+
+            int width = Math.Max(640, (int)Math.Round(request.Width ?? (rect.Right - rect.Left)));
+            int height = Math.Max(480, (int)Math.Round(request.Height ?? (rect.Bottom - rect.Top)));
+            ShowWindow(hwnd, SwRestore);
+            SetWindowPos(hwnd, IntPtr.Zero, rect.Left, rect.Top, width, height, SwpNoZOrder | SwpNoActivate);
+
+            NativeAutomationEventLog.Record("desktop", "window.resized", $"Resized window to {width}x{height}", new Dictionary<string, string>
+            {
+                ["handle"] = FormatHandle(hwnd),
+                ["width"] = width.ToString(),
+                ["height"] = height.ToString(),
             });
         }
 
@@ -537,6 +567,9 @@ namespace SelfContainedDeployment.Automation
 
         [DllImport("user32.dll")]
         private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint uFlags);
 
         [DllImport("user32.dll")]
         private static extern bool SetCursorPos(int x, int y);

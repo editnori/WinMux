@@ -28,7 +28,8 @@
     "native:screenshot": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-automation.ps1\")\" screenshot",
     "native:screenshot:annotated": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-automation.ps1\")\" screenshot \"\" true",
     "native:smoke": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-automation-smoke.ps1\")\"",
-    "native:demo-recording": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-demo-recording.ps1\")\""
+    "native:demo-recording": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-demo-recording.ps1\")\" -Mode standard",
+    "native:demo-recording:cinematic": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-demo-recording.ps1\")\" -Mode cinematic"
   },
   "devDependencies": {
     "playwright": "^1.58.2"
