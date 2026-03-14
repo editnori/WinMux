@@ -3,31 +3,52 @@
 
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Navigation;
-using System;
-using System.Collections.Generic;
-using System.Linq;
+using System.Collections.ObjectModel;
 
 namespace SelfContainedDeployment
 {
     public partial class MainPage : Page
     {
         public static MainPage Current;
-        public List<Scenario> Scenarios => this.scenarios;
+        private readonly ObservableCollection<SidebarSession> sessions;
+        private readonly TerminalTabsController tabsController = new();
+        private readonly TerminalTabsStrip tabsStrip;
+        private readonly TerminalSurfaceControl terminalSurface;
+        private int wslCount = 2;
+        private int powerShellCount = 2;
+        private int codexCount = 2;
+        private int claudeCount = 2;
 
         public MainPage()
         {
             InitializeComponent();
-
-            // This is a static public property that allows downstream pages to get a handle to the MainPage instance
-            // in order to call methods that are in this class.
             Current = this;
+            sessions = SidebarSessionSeedBuilder.Create();
+            SessionList.ItemsSource = sessions;
+            tabsStrip = new TerminalTabsStrip();
+            tabsStrip.SetModel(tabsController);
+            tabsStrip.TabAdded += TabsStrip_TabAdded;
+            tabsStrip.TabClosed += TabsStrip_TabClosed;
+            tabsStrip.TabRenamedRequested += TabsStrip_TabRenamedRequested;
+            tabsStrip.ActiveTabChanged += TabsStrip_ActiveTabChanged;
+            TabsHostPresenter.Content = tabsStrip;
+
+            terminalSurface = new TerminalSurfaceControl();
+            TerminalHostPresenter.Content = terminalSurface;
+
+            foreach (var session in sessions)
+            {
+                AttachTabForSession(session);
+            }
+
+            if (sessions.Count > 0)
+            {
+                SessionList.SelectedIndex = 0;
+            }
         }
 
         public void NotifyUser(string strMessage, InfoBarSeverity severity, bool isOpen = true)
         {
-            // If called from the UI thread, then update immediately.
-            // Otherwise, schedule a task on the UI thread to perform the update.
             if (DispatcherQueue.HasThreadAccess)
             {
                 UpdateStatus(strMessage, severity, isOpen);
@@ -48,102 +69,193 @@ namespace SelfContainedDeployment
             infoBar.Severity = severity;
         }
 
-        private void NavView_Loaded(object sender, RoutedEventArgs e)
+        private void SessionList_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            foreach (Scenario item in scenarios)
+            var session = SessionList.SelectedItem as SidebarSession;
+            if (session is null)
             {
-                NavView.MenuItems.Add(new NavigationViewItem
+                SelectedSessionTitleText.Text = "No session selected";
+                SelectedSessionMetaText.Text = "Pick a session from the sidebar to target the terminal host.";
+                SessionNameBox.Text = string.Empty;
+                ShellContractText.Text = "The shell contract becomes active once a session is selected.";
+                terminalSurface.AttachSession(null);
+                return;
+            }
+
+            SessionNameBox.Text = session.DisplayName;
+            SelectedSessionTitleText.Text = session.DisplayName;
+            SelectedSessionMetaText.Text = session.KindLabel + " • " + session.StatusText;
+            ShellContractText.Text =
+                "The selected sidebar session owns a real ConPTY-backed host. " +
+                "Tabs stay synchronized with the same session object, and the embedded surface is attached directly to that host.";
+            if (session.Tab is not null && !ReferenceEquals(tabsController.SelectedTab, session.Tab))
+            {
+                tabsController.SelectedTab = session.Tab;
+                tabsStrip.SetModel(tabsController);
+            }
+
+            terminalSurface.AttachSession(session);
+        }
+
+        private void RenameSession_Click(object sender, RoutedEventArgs e)
+        {
+            var session = SessionList.SelectedItem as SidebarSession;
+            var nextName = SessionNameBox.Text.Trim();
+            if (session is null || string.IsNullOrWhiteSpace(nextName))
+            {
+                NotifyUser("Select a session and enter a name first.", InfoBarSeverity.Warning);
+                return;
+            }
+
+            session.DisplayName = nextName;
+            if (session.Tab is not null)
+            {
+                tabsController.RenameTab(session.Tab, nextName);
+                tabsStrip.SetModel(tabsController);
+            }
+
+            SelectedSessionTitleText.Text = session.DisplayName;
+            SessionList.UpdateLayout();
+            NotifyUser("Renamed session to " + session.DisplayName, InfoBarSeverity.Success);
+        }
+
+        private void AddWslSession_Click(object sender, RoutedEventArgs e)
+        {
+            AddSession(SidebarSessionSeedBuilder.CreateWslSession("WSL " + wslCount++));
+        }
+
+        private void AddPowerShellSession_Click(object sender, RoutedEventArgs e)
+        {
+            AddSession(SidebarSessionSeedBuilder.CreatePowerShellSession("PowerShell " + powerShellCount++));
+        }
+
+        private void AddCodexSession_Click(object sender, RoutedEventArgs e)
+        {
+            AddSession(SidebarSessionSeedBuilder.CreateCodexSession("Codex Thread " + codexCount++));
+        }
+
+        private void AddClaudeSession_Click(object sender, RoutedEventArgs e)
+        {
+            AddSession(SidebarSessionSeedBuilder.CreateClaudeSession("Claude Thread " + claudeCount++));
+        }
+
+        private void AddSession(SidebarSession session)
+        {
+            AttachTabForSession(session);
+            sessions.Add(session);
+            SessionList.SelectedItem = session;
+            NotifyUser("Added " + session.DisplayName, InfoBarSeverity.Success);
+        }
+
+        private void AttachTabForSession(SidebarSession session)
+        {
+            if (session.Tab is not null)
+            {
+                return;
+            }
+
+            var tab = tabsController.AddNewTab(session.DisplayName, session.KindLabel);
+            session.Tab = tab;
+        }
+
+        private void TabsStrip_ActiveTabChanged(object sender, TerminalTabEventArgs e)
+        {
+            if (e.Tab is null)
+            {
+                return;
+            }
+
+            foreach (var session in sessions)
+            {
+                if (ReferenceEquals(session.Tab, e.Tab))
                 {
-                    Content = item.Title,
-                    Tag = item.ClassName,
-                    Icon = new FontIcon() { FontFamily = new("Segoe MDL2 Assets"), Glyph = "\uE82D" }
-                });
-            }
+                    if (!ReferenceEquals(SessionList.SelectedItem, session))
+                    {
+                        SessionList.SelectedItem = session;
+                    }
 
-            // NavView doesn't load any page by default, so load home page.
-            NavView.SelectedItem = NavView.MenuItems[0];
-
-            // If navigation occurs on SelectionChanged, this isn't needed.
-            // Because we use ItemInvoked to navigate, we need to call Navigate
-            // here to load the home page.
-            if (scenarios is not null && scenarios.Count > 0)
-            {
-                NavView_Navigate(scenarios.First().ClassName, new Microsoft.UI.Xaml.Media.Animation.EntranceNavigationTransitionInfo());
-            }
-        }
-
-        private void NavView_Navigate(string navItemTag, Microsoft.UI.Xaml.Media.Animation.NavigationTransitionInfo transitionInfo)
-        {
-            Type page;
-
-            if (navItemTag == nameof(SettingsPage))
-            {
-                page = typeof(SettingsPage);
-            }
-            else
-            {
-                Scenario item = scenarios.First(p => p.ClassName.Equals(navItemTag));
-                page = Type.GetType(item.ClassName);
-            }
-
-            // Get the page type before navigation so you can prevent duplicate
-            // entries in the backstack.
-            var preNavPageType = ContentFrame.CurrentSourcePageType;
-
-            // Only navigate if the selected page isn't currently loaded.
-            if ((page is not null) && !Type.Equals(preNavPageType, page))
-            {
-                ContentFrame.Navigate(page, null, transitionInfo);
-            }
-        }
-
-        private void NavView_BackRequested(NavigationView sender, NavigationViewBackRequestedEventArgs args)
-        {
-            if (ContentFrame.CanGoBack)
-            {
-                ContentFrame.GoBack();
-            }
-        }
-
-        private void NavView_ItemInvoked(NavigationView sender, NavigationViewItemInvokedEventArgs args)
-        {
-            var naViewItemInvoked = (NavigationViewItem)args.InvokedItemContainer;
-
-            if (args.IsSettingsInvoked)
-            {
-                NavView_Navigate(nameof(SettingsPage), args.RecommendedNavigationTransitionInfo);
-            }
-            else if (args.InvokedItemContainer is not null)
-            {
-                var navItemTag = args.InvokedItemContainer.Tag?.ToString();
-                if (!string.IsNullOrEmpty(navItemTag))
-                {
-                    NavView_Navigate(navItemTag, new Microsoft.UI.Xaml.Media.Animation.EntranceNavigationTransitionInfo());
+                    return;
                 }
             }
         }
 
-        private void ContentFrame_Navigated(object sender, NavigationEventArgs e)
+        private void TabsStrip_TabAdded(object sender, TerminalTabEventArgs e)
         {
-            NavView.IsBackEnabled = ContentFrame.CanGoBack;
+            var session = SidebarSessionSeedBuilder.CreatePowerShellSession(e.Tab.Title);
+            session.Tab = e.Tab;
+            sessions.Add(session);
+            SessionList.SelectedItem = session;
+            NotifyUser("Added " + session.DisplayName, InfoBarSeverity.Success);
+        }
 
-            if (ContentFrame.SourcePageType == typeof(SettingsPage))
+        private async void TabsStrip_TabClosed(object sender, TerminalTabEventArgs e)
+        {
+            SidebarSession sessionToRemove = null;
+            foreach (var session in sessions)
             {
-                // SettingsItem is not part of NavView.MenuItems, and doesn't have a Tag.
-                NavView.SelectedItem = (NavigationViewItem)NavView.SettingsItem;
-                NavView.Header = "Settings";
+                if (ReferenceEquals(session.Tab, e.Tab))
+                {
+                    sessionToRemove = session;
+                    break;
+                }
             }
-            else if (ContentFrame.SourcePageType != null)
+
+            if (sessionToRemove is null)
             {
-                var item = scenarios.First(p => p.ClassName == e.SourcePageType.FullName);
-                var menuItems = NavView.MenuItems;
+                return;
+            }
 
-                NavView.SelectedItem = NavView.MenuItems
-                    .OfType<NavigationViewItem>()
-                    .First(n => n.Tag.Equals(item.ClassName));
+            await sessionToRemove.Host.StopAsync();
+            sessions.Remove(sessionToRemove);
 
-                NavView.Header =
-                    ((NavigationViewItem)NavView.SelectedItem)?.Content?.ToString();
+            if (sessions.Count > 0)
+            {
+                SessionList.SelectedIndex = 0;
+            }
+        }
+
+        private void TabsStrip_TabRenamedRequested(object sender, TerminalTabEventArgs e)
+        {
+            SidebarSession sessionToRename = null;
+            foreach (var session in sessions)
+            {
+                if (ReferenceEquals(session.Tab, e.Tab))
+                {
+                    sessionToRename = session;
+                    break;
+                }
+            }
+
+            if (sessionToRename is null)
+            {
+                return;
+            }
+
+            SessionList.SelectedItem = sessionToRename;
+            SessionNameBox.Focus(FocusState.Programmatic);
+            NotifyUser("Edit the session name box, then click Apply Rename.", InfoBarSeverity.Informational);
+        }
+
+        private void Page_Loaded(object sender, RoutedEventArgs e)
+        {
+            var selected = SessionList.SelectedItem as SidebarSession;
+            if (selected is null && sessions.Count > 0)
+            {
+                SessionList.SelectedIndex = 0;
+                selected = SessionList.SelectedItem as SidebarSession;
+            }
+
+            if (selected is not null)
+            {
+                terminalSurface.AttachSession(selected);
+            }
+        }
+
+        private void Page_Unloaded(object sender, RoutedEventArgs e)
+        {
+            foreach (var session in sessions)
+            {
+                session.Host.Dispose();
             }
         }
     }

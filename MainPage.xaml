@@ -7,23 +7,206 @@
     xmlns:local="using:SelfContainedDeployment"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-    mc:Ignorable="d">
+    mc:Ignorable="d"
+    Loaded="Page_Loaded"
+    Unloaded="Page_Unloaded">
 
     <Grid Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
-        <NavigationView x:Name="NavView"
-                         Loaded="NavView_Loaded"
-                         ItemInvoked="NavView_ItemInvoked"
-                         BackRequested="NavView_BackRequested">
-            <NavigationView.MenuItems>
-                <NavigationViewItemHeader x:Name="MainPagesHeader" Content="Starter"/>
-            </NavigationView.MenuItems>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
 
-            <Grid RowDefinitions="*,Auto">
-                <ScrollViewer>
-                    <Frame Padding="50" x:Name="ContentFrame" Navigated="ContentFrame_Navigated" />
-                </ScrollViewer>
-                <InfoBar x:Name="infoBar" Grid.Row="1" />
-            </Grid>
-        </NavigationView>
+        <Grid Grid.Row="0" Margin="24,24,24,16">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <StackPanel Spacing="6">
+                <TextBlock Text="Native Terminal Shell"
+                           Style="{StaticResource SampleHeaderTextStyle}" />
+                <TextBlock Text="Sessions live in the sidebar. The right side is reserved for the real embedded terminal and tabs."
+                           Style="{StaticResource ScenarioDescriptionTextStyle}"
+                           TextWrapping="Wrap" />
+            </StackPanel>
+
+            <TextBlock Grid.Column="1"
+                       VerticalAlignment="Bottom"
+                       Text="No overview page. No fake terminal."
+                       Style="{StaticResource BaseMessageStyle}" />
+        </Grid>
+
+        <Grid Grid.Row="1" Margin="24,0,24,24">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="320" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Column="0"
+                    Margin="0,0,16,0"
+                    Padding="16"
+                    Background="{ThemeResource ApplicationPageBackgroundThemeBrush}"
+                    BorderBrush="{ThemeResource SystemControlForegroundBaseLowBrush}"
+                    BorderThickness="1"
+                    CornerRadius="14">
+                <Grid RowDefinitions="Auto,*,Auto,Auto,Auto">
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="Live Sessions"
+                                   Style="{StaticResource ScenarioHeaderTextStyle}" />
+                        <TextBlock Text="Selecting a session should retarget the embedded terminal once the real host is mounted."
+                                   Style="{StaticResource BaseMessageStyle}"
+                                   TextWrapping="Wrap" />
+                    </StackPanel>
+
+                        <ListView x:Name="SessionList"
+                              Grid.Row="1"
+                              Margin="0,16,0,0"
+                              MinHeight="420"
+                              SelectionChanged="SessionList_SelectionChanged">
+                        <ListView.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Spacing="2" Margin="0,8,0,8">
+                                    <TextBlock Text="{Binding DisplayName}"
+                                               Style="{StaticResource ScenarioHeaderTextStyle}" />
+                                    <TextBlock Text="{Binding KindLabel}"
+                                               Style="{StaticResource BaseMessageStyle}" />
+                                    <TextBlock Text="{Binding StatusText}"
+                                               Style="{StaticResource BaseMessageStyle}" />
+                                    <TextBlock Text="{Binding Subtitle}"
+                                               Style="{StaticResource BaseMessageStyle}"
+                                               TextWrapping="Wrap" />
+                                </StackPanel>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+
+                    <TextBox x:Name="SessionNameBox"
+                             Grid.Row="2"
+                             Margin="0,16,0,0"
+                             Header="Rename selected session" />
+
+                    <Button Grid.Row="3"
+                            Margin="0,12,0,0"
+                            HorizontalAlignment="Left"
+                            Content="Apply Rename"
+                            Click="RenameSession_Click" />
+
+                    <Grid Grid.Row="4" Margin="0,16,0,0">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <Button Content="New WSL"
+                                Margin="0,0,8,8"
+                                Click="AddWslSession_Click" />
+                        <Button Grid.Column="1"
+                                Content="New PowerShell"
+                                Margin="8,0,0,8"
+                                Click="AddPowerShellSession_Click" />
+                        <Button Grid.Row="1"
+                                Content="New Codex"
+                                Margin="0,8,8,0"
+                                Click="AddCodexSession_Click" />
+                        <Button Grid.Row="1"
+                                Grid.Column="1"
+                                Content="New Claude"
+                                Margin="8,8,0,0"
+                                Click="AddClaudeSession_Click" />
+                    </Grid>
+                </Grid>
+            </Border>
+
+            <Border Grid.Column="1"
+                    Padding="16"
+                    Background="{ThemeResource ApplicationPageBackgroundThemeBrush}"
+                    BorderBrush="{ThemeResource SystemControlForegroundBaseLowBrush}"
+                    BorderThickness="1"
+                    CornerRadius="14">
+                <Grid RowDefinitions="Auto,Auto,Auto,*">
+                    <StackPanel Spacing="4">
+                        <TextBlock x:Name="SelectedSessionTitleText"
+                                   Text="No session selected"
+                                   Style="{StaticResource ScenarioHeaderTextStyle}" />
+                        <TextBlock x:Name="SelectedSessionMetaText"
+                                   Text="Pick a session from the sidebar to target the terminal host."
+                                   Style="{StaticResource BaseMessageStyle}"
+                                   TextWrapping="Wrap" />
+                    </StackPanel>
+
+                    <Border Grid.Row="1"
+                            Margin="0,20,0,0"
+                            Padding="14"
+                            Background="{ThemeResource ApplicationPageBackgroundThemeBrush}"
+                            BorderBrush="{ThemeResource SystemControlForegroundBaseLowBrush}"
+                            BorderThickness="1"
+                            CornerRadius="12">
+                        <Grid>
+                            <StackPanel Spacing="6">
+                                <TextBlock Text="Terminal Tabs Host"
+                                           Style="{StaticResource ScenarioHeaderTextStyle}" />
+                                <TextBlock Text="Session tabs stay synchronized with the sidebar and active terminal."
+                                           Style="{StaticResource BaseMessageStyle}"
+                                           TextWrapping="Wrap" />
+                            </StackPanel>
+                            <ContentControl x:Name="TabsHostPresenter"
+                                            Margin="0,52,0,0"
+                                            MinHeight="44" />
+                        </Grid>
+                    </Border>
+
+                    <Border Grid.Row="2"
+                            Margin="0,16,0,0"
+                            Padding="14"
+                            Background="{ThemeResource ApplicationPageBackgroundThemeBrush}"
+                            BorderBrush="{ThemeResource SystemControlForegroundBaseLowBrush}"
+                            BorderThickness="1"
+                            CornerRadius="12">
+                        <Grid>
+                            <StackPanel Spacing="6">
+                                <TextBlock Text="Embedded Terminal Host"
+                                           Style="{StaticResource ScenarioHeaderTextStyle}" />
+                                <TextBlock Text="This surface is mounted to the real ConPTY-backed session host."
+                                           Style="{StaticResource BaseMessageStyle}"
+                                           TextWrapping="Wrap" />
+                            </StackPanel>
+                            <ContentControl x:Name="TerminalHostPresenter"
+                                            Margin="0,60,0,0"
+                                            MinHeight="420" />
+                        </Grid>
+                    </Border>
+
+                    <Border Grid.Row="3"
+                            Margin="0,16,0,0"
+                            Padding="14"
+                            Background="{ThemeResource ApplicationPageBackgroundThemeBrush}"
+                            BorderBrush="{ThemeResource SystemControlForegroundBaseLowBrush}"
+                            BorderThickness="1"
+                            CornerRadius="12">
+                        <StackPanel Spacing="6">
+                            <TextBlock Text="Shell Contract"
+                                       Style="{StaticResource ScenarioHeaderTextStyle}" />
+                            <TextBlock x:Name="ShellContractText"
+                                       Style="{StaticResource BaseMessageStyle}"
+                                       TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Border>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <InfoBar x:Name="infoBar"
+                 Grid.Row="2"
+                 Margin="24,0,24,24"
+                 IsOpen="True"
+                 Severity="Informational"
+                 Title="Terminal shell ready"
+                 Message="Select or create a sidebar session. The embedded terminal and tabs are now wired to live session objects." />
     </Grid>
 </Page>
