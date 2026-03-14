@@ -221,6 +221,7 @@ try {
     }
 
     Pause-Step 1400
+    $state = Invoke-AutomationGet "/state"
     $afterSelectedTabId = $state.activeTabId
     Wait-ForTerminalReady -TabId $afterSelectedTabId | Out-Null
     Pause-Step 900

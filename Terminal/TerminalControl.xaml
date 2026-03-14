@@ -5,10 +5,15 @@
     Loaded="OnLoaded"
     Unloaded="OnUnloaded">
 
-    <Grid AutomationProperties.AutomationId="terminal-root"
+    <Grid x:Name="TerminalRoot"
+          AutomationProperties.AutomationId="terminal-root"
           Background="{ThemeResource ShellPageBackgroundBrush}">
         <WebView2 x:Name="TerminalView"
                   AutomationProperties.AutomationId="terminal-webview" />
+
+        <Border x:Name="StartupMask"
+                AutomationProperties.AutomationId="terminal-startup-mask"
+                Background="{ThemeResource ShellPageBackgroundBrush}" />
 
         <Border x:Name="StatusBadge"
                 AutomationProperties.AutomationId="terminal-status-badge"

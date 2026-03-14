@@ -8,6 +8,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Windows.ApplicationModel.DataTransfer;
+using Windows.UI;
 
 namespace SelfContainedDeployment.Terminal
 {
@@ -33,6 +34,7 @@ namespace SelfContainedDeployment.Terminal
         private readonly Dictionary<string, TaskCompletionSource<NativeAutomationTerminalSnapshot>> _inspectionRequests = new();
 
         public event EventHandler<string> SessionTitleChanged;
+        public event EventHandler RendererReady;
         public event EventHandler SessionExited;
 
         public TerminalControl()
@@ -41,6 +43,7 @@ namespace SelfContainedDeployment.Terminal
             InitialWorkingDirectory = Environment.CurrentDirectory;
             ActualThemeChanged += OnActualThemeChanged;
             SizeChanged += OnTerminalSizeChanged;
+            ApplyBackgroundColor();
         }
 
         public string ShellCommand { get; set; }
@@ -52,6 +55,8 @@ namespace SelfContainedDeployment.Terminal
         public string ProcessWorkingDirectory { get; set; }
 
         public string SessionTitle => _sessionTitle;
+
+        public string InitialTitleHint => GetInitialTitle();
 
         private void LogTerminalEvent(string name, string message = null, IReadOnlyDictionary<string, string> data = null)
         {
@@ -116,8 +121,11 @@ namespace SelfContainedDeployment.Terminal
                 case "ready":
                     _rendererReady = true;
                     LogTerminalEvent("renderer.ready", "Terminal renderer reported ready");
+                    ApplyBackgroundColor();
                     PostCurrentTheme();
+                    RendererReady?.Invoke(this, EventArgs.Empty);
                     EnsureStarted();
+                    HideStartupMask();
                     break;
                 case "resize":
                     _cols = Math.Max(1, message.Cols);
@@ -215,6 +223,7 @@ namespace SelfContainedDeployment.Terminal
                 }
 
                 AppendOutput(text);
+                HideStartupMask();
                 PostMessage(new HostMessage { Type = "output", Data = text });
                 HideStatus();
             });
@@ -251,6 +260,7 @@ namespace SelfContainedDeployment.Terminal
         public void ApplyTheme(ElementTheme theme)
         {
             _themePreference = theme;
+            ApplyBackgroundColor();
             PostCurrentTheme();
         }
 
@@ -369,6 +379,11 @@ namespace SelfContainedDeployment.Terminal
                 return;
             }
 
+            if (string.Equals(_sessionTitle, title, StringComparison.Ordinal))
+            {
+                return;
+            }
+
             _sessionTitle = title;
             LogTerminalEvent("title.updated", $"Session title set to {title}", new Dictionary<string, string>
             {
@@ -482,6 +497,7 @@ namespace SelfContainedDeployment.Terminal
 
         private void OnActualThemeChanged(FrameworkElement sender, object args)
         {
+            ApplyBackgroundColor();
             if (_themePreference == ElementTheme.Default)
             {
                 PostCurrentTheme();
@@ -507,6 +523,38 @@ namespace SelfContainedDeployment.Terminal
             };
 
             return resolved == ElementTheme.Light ? "light" : "dark";
+        }
+
+        private void ApplyBackgroundColor()
+        {
+            Color backgroundColor = ResolveThemeName() == "light"
+                ? new Color { A = 255, R = 255, G = 255, B = 255 }
+                : new Color { A = 255, R = 9, G = 9, B = 11 };
+
+            if (TerminalRoot is not null)
+            {
+                TerminalRoot.Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(backgroundColor);
+            }
+
+            if (StartupMask is not null)
+            {
+                StartupMask.Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(backgroundColor);
+            }
+
+            if (TerminalView is null)
+            {
+                return;
+            }
+
+            TerminalView.DefaultBackgroundColor = backgroundColor;
+        }
+
+        private void HideStartupMask()
+        {
+            if (StartupMask is not null)
+            {
+                StartupMask.Visibility = Visibility.Collapsed;
+            }
         }
 
         private static string ResolveRendererPath()

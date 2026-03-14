@@ -22,12 +22,13 @@ namespace SelfContainedDeployment
     public partial class MainPage : Page
     {
         private readonly List<WorkspaceProject> _projects = new();
+        private readonly Dictionary<string, TabViewItem> _tabItemsById = new(StringComparer.Ordinal);
         private WorkspaceProject _activeProject;
         private WorkspaceThread _activeThread;
         private bool _showingSettings;
+        private bool _suppressTabSelectionChanged;
         private bool _suppressThreadNameSync;
         private int _threadSequence = 1;
-        private int _tabSequence = 1;
 
         public static MainPage Current;
 
@@ -553,7 +554,7 @@ namespace SelfContainedDeployment
 
         private void TerminalTabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            if (_activeThread is null)
+            if (_activeThread is null || _suppressTabSelectionChanged)
             {
                 return;
             }
@@ -659,7 +660,7 @@ namespace SelfContainedDeployment
 
             terminal.ApplyTheme(ResolveTheme(SampleConfig.CurrentTheme));
 
-            TerminalTabRecord tab = new($"Tab {_tabSequence++}", terminal);
+            TerminalTabRecord tab = new(terminal.InitialTitleHint, terminal);
             terminal.SessionTitleChanged += (_, title) =>
             {
                 tab.Header = title;
@@ -672,7 +673,7 @@ namespace SelfContainedDeployment
                 });
                 if (thread == _activeThread)
                 {
-                    RefreshTabView();
+                    UpdateTabViewItem(tab);
                 }
             };
             terminal.SessionExited += (_, _) =>
@@ -686,7 +687,7 @@ namespace SelfContainedDeployment
                 });
                 if (thread == _activeThread)
                 {
-                    RefreshTabView();
+                    UpdateTabViewItem(tab);
                 }
 
                 RefreshProjectTree();
@@ -730,6 +731,7 @@ namespace SelfContainedDeployment
                         continue;
                     }
 
+                    RemoveTabViewItem(tab.Id);
                     tab.Terminal.DisposeTerminal();
                     thread.Tabs.Remove(tab);
 
@@ -955,6 +957,7 @@ namespace SelfContainedDeployment
 
             foreach (TerminalTabRecord tab in thread.Tabs)
             {
+                RemoveTabViewItem(tab.Id);
                 tab.Terminal.DisposeTerminal();
             }
 
@@ -1193,39 +1196,63 @@ namespace SelfContainedDeployment
 
         private void RefreshTabView()
         {
-            foreach (TabViewItem existingItem in TerminalTabs.TabItems.OfType<TabViewItem>())
-            {
-                existingItem.Content = null;
-            }
-
-            TerminalTabs.TabItems.Clear();
-
             if (_activeThread is null)
             {
+                if (TerminalTabs.TabItems.Count > 0)
+                {
+                    TerminalTabs.TabItems.Clear();
+                }
+
                 UpdateWorkspaceVisibility();
                 return;
             }
 
-            foreach (TerminalTabRecord tab in _activeThread.Tabs)
-            {
-                TabViewItem item = new()
-                {
-                    Header = FormatTabHeader(tab.Header, tab.IsExited),
-                    Content = tab.Terminal,
-                    IsClosable = true,
-                    Tag = tab,
-                };
+            List<TabViewItem> desiredItems = _activeThread.Tabs
+                .Select(GetOrCreateTabViewItem)
+                .ToList();
 
-                TerminalTabs.TabItems.Add(item);
+            foreach (TabViewItem existingItem in TerminalTabs.TabItems.OfType<TabViewItem>().ToList())
+            {
+                if (!desiredItems.Contains(existingItem))
+                {
+                    TerminalTabs.TabItems.Remove(existingItem);
+                }
+            }
+
+            for (int index = 0; index < desiredItems.Count; index++)
+            {
+                TabViewItem desiredItem = desiredItems[index];
+                int existingIndex = FindTabViewIndex(desiredItem);
+                if (existingIndex == index)
+                {
+                    continue;
+                }
+
+                if (existingIndex >= 0)
+                {
+                    TerminalTabs.TabItems.RemoveAt(existingIndex);
+                }
+
+                TerminalTabs.TabItems.Insert(index, desiredItem);
             }
 
             string selectedTabId = _activeThread.SelectedTabId ?? _activeThread.Tabs.FirstOrDefault()?.Id;
-            TabViewItem selectedItem = TerminalTabs.TabItems
-                .OfType<TabViewItem>()
+            TabViewItem selectedItem = desiredItems
                 .FirstOrDefault(item => (item.Tag as TerminalTabRecord)?.Id == selectedTabId)
-                ?? TerminalTabs.TabItems.OfType<TabViewItem>().FirstOrDefault();
+                ?? desiredItems.FirstOrDefault();
 
-            TerminalTabs.SelectedItem = selectedItem;
+            if (!ReferenceEquals(TerminalTabs.SelectedItem, selectedItem))
+            {
+                _suppressTabSelectionChanged = true;
+                try
+                {
+                    TerminalTabs.SelectedItem = selectedItem;
+                }
+                finally
+                {
+                    _suppressTabSelectionChanged = false;
+                }
+            }
 
             if (selectedItem?.Tag is TerminalTabRecord selectedTab)
             {
@@ -1239,6 +1266,70 @@ namespace SelfContainedDeployment
                 ["projectId"] = _activeProject?.Id ?? string.Empty,
                 ["tabCount"] = _activeThread.Tabs.Count.ToString(),
             });
+        }
+
+        private TabViewItem GetOrCreateTabViewItem(TerminalTabRecord tab)
+        {
+            if (!_tabItemsById.TryGetValue(tab.Id, out TabViewItem item))
+            {
+                item = new TabViewItem
+                {
+                    Content = tab.Terminal,
+                    IsClosable = true,
+                    Tag = tab,
+                };
+                AutomationProperties.SetAutomationId(item, $"shell-tab-{tab.Id}");
+                _tabItemsById[tab.Id] = item;
+            }
+
+            item.Tag = tab;
+            object nextHeader = FormatTabHeader(tab.Header, tab.IsExited);
+            if (!Equals(item.Header, nextHeader))
+            {
+                item.Header = nextHeader;
+            }
+            item.IsClosable = true;
+            return item;
+        }
+
+        private void UpdateTabViewItem(TerminalTabRecord tab)
+        {
+            if (tab is null)
+            {
+                return;
+            }
+
+            TabViewItem item = GetOrCreateTabViewItem(tab);
+            object nextHeader = FormatTabHeader(tab.Header, tab.IsExited);
+            if (!Equals(item.Header, nextHeader))
+            {
+                item.Header = nextHeader;
+            }
+        }
+
+        private void RemoveTabViewItem(string tabId)
+        {
+            if (string.IsNullOrWhiteSpace(tabId) || !_tabItemsById.TryGetValue(tabId, out TabViewItem item))
+            {
+                return;
+            }
+
+            TerminalTabs.TabItems.Remove(item);
+            item.Content = null;
+            _tabItemsById.Remove(tabId);
+        }
+
+        private int FindTabViewIndex(TabViewItem target)
+        {
+            for (int index = 0; index < TerminalTabs.TabItems.Count; index++)
+            {
+                if (ReferenceEquals(TerminalTabs.TabItems[index], target))
+                {
+                    return index;
+                }
+            }
+
+            return -1;
         }
 
         private void ShowSettings()
