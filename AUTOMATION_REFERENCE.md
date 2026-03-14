@@ -44,8 +44,9 @@ bun run native:ui-action -- '{"action":"click","automationId":"shell-nav-setting
 bun run native:desktop-action -- '{"action":"focusWindow","titleContains":"WinMux"}'
 bun run native:desktop-uia-action -- '{"action":"invoke","titleContains":"Browse for Folder","name":"OK"}'
 bun run native:terminal-state
-bun run native:recording-start -- '{"fps":24,"maxDurationMs":5000}'
+bun run native:recording-start -- '{"fps":24,"maxDurationMs":5000,"keepFrames":false}'
 bun run native:recording-stop
+bun run native:demo-recording
 bun run native:render-trace
 bun run native:screenshot
 bun run native:screenshot:annotated
@@ -346,6 +347,7 @@ This is the main tool for transient native behaviors like tab insertion, rerende
 - `maxDurationMs`
 - `jpegQuality`
 - `outputDirectory`
+- `keepFrames`
 
 `POST /recording/stop` finalizes the frame capture and returns:
 
@@ -360,7 +362,28 @@ Important behavior:
 - the recorder captures native window frames directly from the running app
 - it writes a frame manifest even if `ffmpeg` is not installed
 - if `ffmpeg` is available, it also encodes an `.mp4`
+- frame JPEGs are deleted after a successful encode unless `keepFrames` is `true`
 - this is the highest-fidelity native visual capture path for animation review right now
+
+### Demo recording
+
+`bun run native:demo-recording` runs a paced walkthrough of the major shell behaviors and saves:
+
+- `recording.mp4`
+- `manifest.json`
+
+The demo currently covers:
+
+- pane collapse and expand
+- terminal input
+- thread creation and rename
+- tab creation, switching, and semantic reorder
+- settings view
+- theme switching
+- shell-profile switching
+- thread duplication, rename, and delete
+- new-project dialog
+- project switching
 
 ### Screenshots
 

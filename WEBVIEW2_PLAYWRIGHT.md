@@ -64,8 +64,9 @@ bun run native:recording-status
 bun run native:desktop-action -- '{"action":"focusWindow","titleContains":"WinMux"}'
 bun run native:desktop-uia-action -- '{"action":"focus","titleContains":"WinMux","name":"WinMux"}'
 bun run native:terminal-state
-bun run native:recording-start -- '{"fps":24,"maxDurationMs":5000}'
+bun run native:recording-start -- '{"fps":24,"maxDurationMs":5000,"keepFrames":false}'
 bun run native:recording-stop
+bun run native:demo-recording
 bun run native:render-trace
 bun run native:smoke
 bun run webview2:targets

@@ -169,8 +169,9 @@ bun run native:desktop-action -- '{"action":"focusWindow","titleContains":"WinMu
 bun run native:desktop-uia-action -- '{"action":"focus","titleContains":"WinMux","name":"WinMux"}'
 bun run native:terminal-state
 bun run native:render-trace
-bun run native:recording-start -- '{"fps":24,"maxDurationMs":5000}'
+bun run native:recording-start -- '{"fps":24,"maxDurationMs":5000,"keepFrames":false}'
 bun run native:recording-stop
+bun run native:demo-recording
 bun run native:action -- '{"action":"newThread"}'
 bun run native:action -- '{"action":"moveTabAfter","tabId":"...","targetTabId":"..."}'
 bun run native:screenshot

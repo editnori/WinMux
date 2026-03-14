@@ -381,6 +381,8 @@ namespace SelfContainedDeployment.Automation
         public int JpegQuality { get; set; }
 
         public string OutputDirectory { get; set; }
+
+        public bool KeepFrames { get; set; }
     }
 
     public sealed class NativeAutomationRecordingStatusResponse
@@ -398,6 +400,10 @@ namespace SelfContainedDeployment.Automation
         public string VideoPath { get; set; }
 
         public string ManifestPath { get; set; }
+
+        public bool KeepFrames { get; set; }
+
+        public bool FramesRetained { get; set; }
     }
 
     public sealed class NativeAutomationRecordingStopResponse
@@ -413,6 +419,10 @@ namespace SelfContainedDeployment.Automation
         public string VideoPath { get; set; }
 
         public string ManifestPath { get; set; }
+
+        public bool KeepFrames { get; set; }
+
+        public bool FramesRetained { get; set; }
     }
 
     public sealed class NativeAutomationDesktopUiaTreeRequest

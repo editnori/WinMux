@@ -30,6 +30,8 @@ namespace SelfContainedDeployment.Automation
         private int _targetFps;
         private int _capturedFrames;
         private int _jpegQuality;
+        private bool _keepFrames;
+        private bool _framesRetained;
         private readonly List<FrameManifestEntry> _frames = new();
 
         public NativeWindowRecorder(Func<(Bitmap Bitmap, int Width, int Height)> captureFrame)
@@ -50,6 +52,8 @@ namespace SelfContainedDeployment.Automation
                     CapturedFrames = _capturedFrames,
                     VideoPath = _videoPath,
                     ManifestPath = _manifestPath,
+                    KeepFrames = _keepFrames,
+                    FramesRetained = _framesRetained,
                 };
             }
         }
@@ -71,6 +75,8 @@ namespace SelfContainedDeployment.Automation
                 _capturedFrames = 0;
                 _videoPath = null;
                 _manifestPath = null;
+                _keepFrames = request.KeepFrames;
+                _framesRetained = false;
                 _frames.Clear();
                 _outputDirectory = string.IsNullOrWhiteSpace(request.OutputDirectory)
                     ? Path.Combine(Path.GetTempPath(), $"native-recording-{_recordingId}")
@@ -146,6 +152,8 @@ namespace SelfContainedDeployment.Automation
                     CapturedFrames = _capturedFrames,
                     VideoPath = _videoPath,
                     ManifestPath = _manifestPath,
+                    KeepFrames = _keepFrames,
+                    FramesRetained = _framesRetained,
                 };
             }
         }
@@ -221,21 +229,38 @@ namespace SelfContainedDeployment.Automation
                 frames = _frames.ToList();
             }
 
+            string videoPath = await TryEncodeVideoAsync(outputDirectory, manifestPath).ConfigureAwait(false);
+            bool framesRetained = _keepFrames || string.IsNullOrWhiteSpace(videoPath);
+
+            if (!framesRetained)
+            {
+                DeleteFrameFiles(frames);
+            }
+
             string json = JsonSerializer.Serialize(new
             {
                 recordingId,
                 targetFps = _targetFps,
                 capturedFrames = frames.Count,
-                frames,
+                keepFrames = _keepFrames,
+                framesRetained,
+                videoPath,
+                frames = frames.Select(frame => new
+                {
+                    frame.Index,
+                    frame.TimestampMs,
+                    frame.Width,
+                    frame.Height,
+                    path = framesRetained ? Path.GetFileName(frame.Path) : null,
+                }),
             }, JsonOptions);
             await File.WriteAllTextAsync(manifestPath, json).ConfigureAwait(false);
-
-            string videoPath = await TryEncodeVideoAsync(outputDirectory, manifestPath).ConfigureAwait(false);
 
             lock (_sync)
             {
                 _manifestPath = manifestPath;
                 _videoPath = videoPath;
+                _framesRetained = framesRetained;
             }
         }
 
@@ -317,6 +342,25 @@ namespace SelfContainedDeployment.Automation
 
             const int maxLength = 600;
             return value.Length <= maxLength ? value : value[..maxLength];
+        }
+
+        private static void DeleteFrameFiles(IEnumerable<FrameManifestEntry> frames)
+        {
+            foreach (FrameManifestEntry frame in frames)
+            {
+                if (string.IsNullOrWhiteSpace(frame.Path) || !File.Exists(frame.Path))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    File.Delete(frame.Path);
+                }
+                catch
+                {
+                }
+            }
         }
 
         private static string ResolveFfmpegExecutable()
