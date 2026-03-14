@@ -237,6 +237,7 @@ What this is good for:
 - semantically inspecting and acting on external OS windows through `scripts/run-desktop-uia.ps1`
 - tracing multiple native render frames after an action
 - recording native frame sequences with manifest output and optional mp4 encoding
+- controlling native window state directly with move, center, resize, maximize, and topmost actions
 - reading event logs for tab/thread/render sequencing
 - creating threads and tabs from the outside
 - switching theme and capturing native window screenshots

@@ -159,6 +159,37 @@ function Resize-WinMuxWindow {
     }
 }
 
+function Center-WinMuxWindow {
+    $null = Invoke-AutomationPost "/desktop-action" @{
+        action = "centerWindow"
+        titleContains = "WinMux"
+    }
+}
+
+function Set-WinMuxTopmost {
+    param([bool]$Enabled)
+
+    $null = Invoke-AutomationPost "/desktop-action" @{
+        action = "setTopmost"
+        titleContains = "WinMux"
+        value = if ($Enabled) { "true" } else { "false" }
+    }
+}
+
+function Move-WinMuxWindow {
+    param(
+        [int]$X,
+        [int]$Y
+    )
+
+    $null = Invoke-AutomationPost "/desktop-action" @{
+        action = "moveWindow"
+        titleContains = "WinMux"
+        x = $X
+        y = $Y
+    }
+}
+
 function Show-Hover {
     param(
         [string]$AutomationId,
@@ -225,8 +256,14 @@ try {
     $originalWindow = Get-WinMuxWindow
     Focus-WinMuxWindow | Out-Null
 
+    Set-WinMuxTopmost -Enabled $true
+    Pause-Step 300
+    Center-WinMuxWindow
+    Pause-Step 450
     Resize-WinMuxWindow -Width $targetWindowWidth -Height $targetWindowHeight
     Pause-Step 1200
+    Center-WinMuxWindow
+    Pause-Step 500
     Focus-WinMuxWindow | Out-Null
 
     $null = Invoke-AutomationPost "/action" @{ action = "showTerminal" }
@@ -505,7 +542,9 @@ finally {
 
     if ($originalWindow) {
         try {
+            Set-WinMuxTopmost -Enabled $false
             Resize-WinMuxWindow -Width ([int]$originalWindow.width) -Height ([int]$originalWindow.height)
+            Move-WinMuxWindow -X ([int]$originalWindow.x) -Y ([int]$originalWindow.y)
             Focus-WinMuxWindow | Out-Null
         }
         catch {

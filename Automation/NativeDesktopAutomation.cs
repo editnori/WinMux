@@ -7,9 +7,15 @@ namespace SelfContainedDeployment.Automation
 {
     internal static class NativeDesktopAutomation
     {
+        private static readonly IntPtr HwndTopmost = new(-1);
+        private static readonly IntPtr HwndNotTopmost = new(-2);
+        private const int SwMaximize = 3;
         private const int SwRestore = 9;
         private const uint SwpNoZOrder = 0x0004;
         private const uint SwpNoActivate = 0x0010;
+        private const uint SwpNoMove = 0x0002;
+        private const uint SwpNoSize = 0x0001;
+        private const uint MonitorDefaultToNearest = 0x00000002;
         private const uint MouseEventMove = 0x0001;
         private const uint MouseEventLeftDown = 0x0002;
         private const uint MouseEventLeftUp = 0x0004;
@@ -69,8 +75,20 @@ namespace SelfContainedDeployment.Automation
                     case "dragpoint":
                         DragBetweenPoints(request, target);
                         break;
+                    case "movewindow":
+                        MoveWindow(target, request);
+                        break;
+                    case "centerwindow":
+                        CenterWindow(target);
+                        break;
                     case "resizewindow":
                         ResizeWindow(target, request);
+                        break;
+                    case "maximizewindow":
+                        MaximizeWindow(target);
+                        break;
+                    case "settopmost":
+                        SetTopmost(target, ParseBoolean(request.Value));
                         break;
                     case "sendkeys":
                         FocusWindow(target);
@@ -284,6 +302,118 @@ namespace SelfContainedDeployment.Automation
                 ["width"] = width.ToString(),
                 ["height"] = height.ToString(),
             });
+        }
+
+        private static void MoveWindow(IntPtr hwnd, NativeAutomationDesktopActionRequest request)
+        {
+            if (hwnd == IntPtr.Zero)
+            {
+                throw new InvalidOperationException("No window handle was resolved for move.");
+            }
+
+            if (!GetWindowRect(hwnd, out Rect rect))
+            {
+                throw new InvalidOperationException("Could not resolve window bounds for move.");
+            }
+
+            int x = (int)Math.Round(request.X ?? rect.Left);
+            int y = (int)Math.Round(request.Y ?? rect.Top);
+            int width = rect.Right - rect.Left;
+            int height = rect.Bottom - rect.Top;
+
+            ShowWindow(hwnd, SwRestore);
+            SetWindowPos(hwnd, IntPtr.Zero, x, y, width, height, SwpNoZOrder | SwpNoActivate);
+
+            NativeAutomationEventLog.Record("desktop", "window.moved", $"Moved window to {x},{y}", new Dictionary<string, string>
+            {
+                ["handle"] = FormatHandle(hwnd),
+                ["x"] = x.ToString(),
+                ["y"] = y.ToString(),
+            });
+        }
+
+        private static void CenterWindow(IntPtr hwnd)
+        {
+            if (hwnd == IntPtr.Zero)
+            {
+                throw new InvalidOperationException("No window handle was resolved for centering.");
+            }
+
+            if (!GetWindowRect(hwnd, out Rect rect))
+            {
+                throw new InvalidOperationException("Could not resolve window bounds for centering.");
+            }
+
+            IntPtr monitor = MonitorFromWindow(hwnd, MonitorDefaultToNearest);
+            MonitorInfo monitorInfo = new()
+            {
+                cbSize = Marshal.SizeOf<MonitorInfo>(),
+            };
+
+            if (!GetMonitorInfo(monitor, ref monitorInfo))
+            {
+                throw new InvalidOperationException("Could not resolve monitor bounds for centering.");
+            }
+
+            int width = rect.Right - rect.Left;
+            int height = rect.Bottom - rect.Top;
+            int x = monitorInfo.rcWork.Left + ((monitorInfo.rcWork.Right - monitorInfo.rcWork.Left - width) / 2);
+            int y = monitorInfo.rcWork.Top + ((monitorInfo.rcWork.Bottom - monitorInfo.rcWork.Top - height) / 2);
+
+            ShowWindow(hwnd, SwRestore);
+            SetWindowPos(hwnd, IntPtr.Zero, x, y, width, height, SwpNoZOrder | SwpNoActivate);
+
+            NativeAutomationEventLog.Record("desktop", "window.centered", $"Centered window to {x},{y}", new Dictionary<string, string>
+            {
+                ["handle"] = FormatHandle(hwnd),
+                ["x"] = x.ToString(),
+                ["y"] = y.ToString(),
+                ["width"] = width.ToString(),
+                ["height"] = height.ToString(),
+            });
+        }
+
+        private static void MaximizeWindow(IntPtr hwnd)
+        {
+            if (hwnd == IntPtr.Zero)
+            {
+                throw new InvalidOperationException("No window handle was resolved for maximize.");
+            }
+
+            ShowWindow(hwnd, SwMaximize);
+            NativeAutomationEventLog.Record("desktop", "window.maximized", "Maximized window", new Dictionary<string, string>
+            {
+                ["handle"] = FormatHandle(hwnd),
+            });
+        }
+
+        private static void SetTopmost(IntPtr hwnd, bool topmost)
+        {
+            if (hwnd == IntPtr.Zero)
+            {
+                throw new InvalidOperationException("No window handle was resolved for topmost.");
+            }
+
+            SetWindowPos(hwnd, topmost ? HwndTopmost : HwndNotTopmost, 0, 0, 0, 0, SwpNoMove | SwpNoSize | SwpNoActivate);
+            NativeAutomationEventLog.Record("desktop", topmost ? "window.topmost-on" : "window.topmost-off", topmost ? "Enabled topmost" : "Disabled topmost", new Dictionary<string, string>
+            {
+                ["handle"] = FormatHandle(hwnd),
+            });
+        }
+
+        private static bool ParseBoolean(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return true;
+            }
+
+            return value.Trim().ToLowerInvariant() switch
+            {
+                "1" or "true" or "yes" or "on" => true,
+                "0" or "false" or "no" or "off" => false,
+                _ => throw new InvalidOperationException($"Could not parse boolean value '{value}'."),
+            };
         }
 
         private static void ClickAbsolute(Point point, string button, int clickCount)
@@ -520,6 +650,15 @@ namespace SelfContainedDeployment.Automation
             public int Bottom;
         }
 
+        [StructLayout(LayoutKind.Sequential)]
+        private struct MonitorInfo
+        {
+            public int cbSize;
+            public Rect rcMonitor;
+            public Rect rcWork;
+            public uint dwFlags;
+        }
+
         private readonly struct Point
         {
             public Point(double x, double y)
@@ -567,6 +706,12 @@ namespace SelfContainedDeployment.Automation
 
         [DllImport("user32.dll")]
         private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr MonitorFromWindow(IntPtr hWnd, uint dwFlags);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool GetMonitorInfo(IntPtr hMonitor, ref MonitorInfo lpmi);
 
         [DllImport("user32.dll", SetLastError = true)]
         private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint uFlags);

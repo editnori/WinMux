@@ -156,7 +156,11 @@ These routes expose top-level and child windows outside the WinUI visual tree.
 - `rightClickPoint`
 - `hoverPoint`
 - `dragPoint`
+- `moveWindow`
+- `centerWindow`
 - `resizeWindow`
+- `maximizeWindow`
+- `setTopmost`
 - `sendKeys`
 - `typeText`
 
@@ -173,6 +177,7 @@ Notes:
 - if `handle` is provided and no coordinates are given, click actions target the window center
 - if coordinates are provided alongside a `handle`, they are treated as offsets from that window’s top-left corner
 - `resizeWindow` uses `width` and `height` to resize the outer native window, which is useful for higher-resolution captures
+- `moveWindow`, `centerWindow`, `maximizeWindow`, and `setTopmost` are the main window-state controls for reliable native recordings
 - `sendKeys` supports common chords such as `Ctrl+A`, `Shift+Tab`, `F2`, `Delete`, and `Esc`
 - `typeText` types through Win32 keyboard injection, so it works against external picker/edit controls if they have focus
 
