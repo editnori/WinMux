@@ -1,0 +1,14 @@
+{
+  "name": "native-terminal-starter",
+  "private": true,
+  "description": "Playwright helpers for attaching to the native WebView2 terminal renderer.",
+  "scripts": {
+    "webview2:start": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\start-webview2-debug.ps1",
+    "webview2:targets": "powershell.exe -NoProfile -Command \"node .\\tools\\webview2-targets.mjs\"",
+    "webview2:screenshot": "powershell.exe -NoProfile -Command \"node .\\tools\\webview2-screenshot.mjs\"",
+    "webview2:eval": "powershell.exe -NoProfile -Command \"node .\\tools\\webview2-eval.mjs\""
+  },
+  "devDependencies": {
+    "playwright": "^1.58.2"
+  }
+}

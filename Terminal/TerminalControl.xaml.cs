@@ -53,7 +53,7 @@ namespace SelfContainedDeployment.Terminal
                 TerminalView.CoreWebView2.Settings.AreBrowserAcceleratorKeysEnabled = true;
                 TerminalView.CoreWebView2.WebMessageReceived += OnWebMessageReceived;
 
-                string rendererPath = Path.Combine(AppContext.BaseDirectory, "Web", "terminal-host.html");
+                string rendererPath = ResolveRendererPath();
                 TerminalView.Source = new Uri(rendererPath);
                 _webViewInitialized = true;
             }
@@ -254,6 +254,21 @@ namespace SelfContainedDeployment.Terminal
             string leaf = Path.GetFileName(trimmed);
 
             return string.IsNullOrWhiteSpace(leaf) ? trimmed : leaf;
+        }
+
+        private static string ResolveRendererPath()
+        {
+            string overrideRoot = Environment.GetEnvironmentVariable("NATIVE_TERMINAL_WEB_ROOT");
+            if (!string.IsNullOrWhiteSpace(overrideRoot))
+            {
+                string candidate = Path.Combine(overrideRoot, "terminal-host.html");
+                if (File.Exists(candidate))
+                {
+                    return candidate;
+                }
+            }
+
+            return Path.Combine(AppContext.BaseDirectory, "Web", "terminal-host.html");
         }
 
         private void PostMessage(HostMessage message)
