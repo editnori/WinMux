@@ -2431,16 +2431,18 @@ namespace SelfContainedDeployment
 
             Button browseButton = new()
             {
-                Content = new FontIcon
+                Content = new TextBlock
                 {
-                    Glyph = "\uE8B7",
+                    Text = "Browse…",
                     FontSize = 12,
+                    TextWrapping = TextWrapping.NoWrap,
                 },
-                HorizontalAlignment = HorizontalAlignment.Stretch,
+                HorizontalAlignment = HorizontalAlignment.Left,
                 HorizontalContentAlignment = HorizontalAlignment.Center,
-                Width = 28,
+                Width = 132,
+                MinWidth = 132,
                 Height = 28,
-                Style = (Style)Application.Current.Resources["ShellChromeButtonStyle"],
+                Style = (Style)Application.Current.Resources["ShellNavButtonStyle"],
                 Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["ShellMutedSurfaceBrush"],
                 BorderBrush = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["ShellBorderBrush"],
             };
@@ -2472,41 +2474,50 @@ namespace SelfContainedDeployment
             };
             AutomationProperties.SetAutomationId(helperText, "dialog-project-helper");
 
-            Grid pathSection = new()
+            TextBlock shellProfileLabel = new()
             {
-                ColumnSpacing = 8,
-                HorizontalAlignment = HorizontalAlignment.Stretch,
+                Text = "Shell profile",
+                Style = (Style)Application.Current.Resources["ShellHintTextStyle"],
             };
-            pathSection.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            pathSection.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });
-            pathSection.Children.Add(pathBox);
-            Grid.SetColumn(browseButton, 1);
-            pathSection.Children.Add(browseButton);
+            TextBlock terminalPathLabel = new()
+            {
+                Text = "Terminal path",
+                Style = (Style)Application.Current.Resources["ShellHintTextStyle"],
+            };
 
-            StackPanel body = new()
+            Grid body = new()
             {
-                Spacing = 14,
-                Width = 560,
+                Width = 620,
+                RowSpacing = 14,
             };
+            body.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            body.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            body.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            body.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            body.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            body.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            body.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            body.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             AutomationProperties.SetAutomationId(body, "dialog-project-body");
+
             body.Children.Add(new TextBlock
             {
                 Text = "Project directory",
                 Style = (Style)Application.Current.Resources["ShellHintTextStyle"],
             });
-            body.Children.Add(pathSection);
-            body.Children.Add(new TextBlock
-            {
-                Text = "Shell profile",
-                Style = (Style)Application.Current.Resources["ShellHintTextStyle"],
-            });
+            Grid.SetRow(pathBox, 1);
+            body.Children.Add(pathBox);
+            Grid.SetRow(browseButton, 2);
+            body.Children.Add(browseButton);
+            Grid.SetRow(shellProfileLabel, 3);
+            body.Children.Add(shellProfileLabel);
+            Grid.SetRow(profileBox, 4);
             body.Children.Add(profileBox);
-            body.Children.Add(new TextBlock
-            {
-                Text = "Terminal path",
-                Style = (Style)Application.Current.Resources["ShellHintTextStyle"],
-            });
+            Grid.SetRow(terminalPathLabel, 5);
+            body.Children.Add(terminalPathLabel);
+            Grid.SetRow(previewValue, 6);
             body.Children.Add(previewValue);
+            Grid.SetRow(helperText, 7);
             body.Children.Add(helperText);
 
             ContentDialog dialog = new()
@@ -2517,7 +2528,7 @@ namespace SelfContainedDeployment
                 CloseButtonText = "Cancel",
                 DefaultButton = ContentDialogButton.Primary,
                 Content = body,
-                MinWidth = 620,
+                MinWidth = 680,
             };
 
             string selectedPath = null;
