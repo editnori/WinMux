@@ -175,8 +175,6 @@ namespace SelfContainedDeployment.Terminal
             Environment.SetEnvironmentVariable("TERM_PROGRAM_VERSION", "0.1");
             Environment.SetEnvironmentVariable("COLORTERM", "truecolor");
             Environment.SetEnvironmentVariable("TERM", "xterm-256color");
-            Environment.SetEnvironmentVariable("WT_SESSION", SelfContainedDeployment.SampleConfig.FeatureName);
-            Environment.SetEnvironmentVariable("WT_PROFILE_ID", SelfContainedDeployment.SampleConfig.FeatureName);
         }
 
         public void WriteInput(string text)

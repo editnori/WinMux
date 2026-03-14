@@ -57,6 +57,7 @@
 
                                 <StackPanel x:Name="ProjectListPanel"
                                             AutomationProperties.AutomationId="shell-project-list"
+                                            HorizontalAlignment="Stretch"
                                             Margin="8,0,8,0"
                                             Spacing="10" />
                             </StackPanel>
@@ -95,7 +96,8 @@
                 </Border>
             </SplitView.Pane>
 
-            <Grid Background="{ThemeResource ShellPageBackgroundBrush}">
+            <Grid Background="{ThemeResource ShellPageBackgroundBrush}"
+                  Margin="4,0,0,0">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="40" />
                     <RowDefinition Height="*" />
@@ -106,16 +108,19 @@
                       Background="{ThemeResource ShellSurfaceBackgroundBrush}"
                       BorderBrush="{ThemeResource ShellBorderBrush}"
                       BorderThickness="0,0,0,1"
-                      ColumnDefinitions="Auto,*"
-                      ColumnSpacing="10">
+                      ColumnDefinitions="*,Auto,*">
                     <TextBox x:Name="ThreadNameBox"
                              AutomationProperties.AutomationId="shell-thread-name"
-                             Style="{StaticResource ShellInlineInputStyle}"
+                             Grid.Column="1"
+                             HorizontalAlignment="Center"
+                             Style="{StaticResource ShellHeaderInputStyle}"
                              TextChanged="OnThreadNameTextChanged" />
 
                     <TextBlock x:Name="ActiveDirectoryText"
-                               Grid.Column="1"
+                               Grid.Column="2"
                                AutomationProperties.AutomationId="shell-active-directory"
+                               Margin="14,0,0,0"
+                               HorizontalAlignment="Left"
                                VerticalAlignment="Center"
                                Style="{StaticResource ShellMetaTextStyle}"
                                TextTrimming="CharacterEllipsis" />

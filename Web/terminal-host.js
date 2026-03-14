@@ -269,6 +269,17 @@
         }
     }
 
+    function copySelectionToHost() {
+        const selection = term.getSelection();
+        if (!selection) {
+            return;
+        }
+
+        post({ type: "copy", data: selection });
+        setStatus("Copied selection", true);
+        window.setTimeout(() => setStatus("", false), 900);
+    }
+
     document.addEventListener("pointerdown", () => term.focus());
 
     term.onData((data) => {
@@ -284,6 +295,20 @@
         setTitle(title);
         post({ type: "title", title });
     });
+
+    window.addEventListener("keydown", (event) => {
+        const wantsCopy = (event.ctrlKey || event.metaKey) && ((event.shiftKey && event.key.toLowerCase() === "c") || event.key === "Insert");
+        if (!wantsCopy) {
+            return;
+        }
+
+        if (!term.hasSelection()) {
+            return;
+        }
+
+        event.preventDefault();
+        copySelectionToHost();
+    }, true);
 
     window.addEventListener("resize", scheduleFit);
     new ResizeObserver(() => scheduleFit()).observe(document.body);

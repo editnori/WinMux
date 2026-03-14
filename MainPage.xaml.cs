@@ -553,6 +553,7 @@ namespace SelfContainedDeployment
                 StackPanel group = new()
                 {
                     Spacing = 4,
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
                 };
 
                 Button projectButton = new()
@@ -630,6 +631,7 @@ namespace SelfContainedDeployment
                         new ColumnDefinition { Width = GridLength.Auto },
                     },
                     ColumnSpacing = 6,
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
                 };
                 projectHeader.Children.Add(projectButton);
                 Grid.SetColumn(addThreadButton, 1);
@@ -640,6 +642,7 @@ namespace SelfContainedDeployment
                 {
                     Spacing = 2,
                     Margin = new Thickness(18, 0, 0, 0),
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
                 };
 
                 foreach (WorkspaceThread thread in project.Threads)
@@ -649,6 +652,7 @@ namespace SelfContainedDeployment
                         Style = (Style)Application.Current.Resources["ShellSidebarThreadButtonStyle"],
                         Tag = thread.Id,
                         HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                        HorizontalAlignment = HorizontalAlignment.Stretch,
                     };
                     AutomationProperties.SetAutomationId(threadButton, $"shell-thread-{thread.Id}");
                     threadButton.Click += OnThreadButtonClicked;

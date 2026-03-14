@@ -3,6 +3,7 @@ using Microsoft.UI.Xaml.Controls;
 using System;
 using System.IO;
 using System.Text.Json;
+using Windows.ApplicationModel.DataTransfer;
 
 namespace SelfContainedDeployment.Terminal
 {
@@ -123,6 +124,9 @@ namespace SelfContainedDeployment.Terminal
                 case "input":
                     _connection?.WriteInput(message.Data);
                     break;
+                case "copy":
+                    CopySelectionToClipboard(message.Data);
+                    break;
                 case "title":
                     UpdateSessionTitle(string.IsNullOrWhiteSpace(message.Title) ? _sessionTitle : message.Title.Trim());
                     break;
@@ -216,6 +220,19 @@ namespace SelfContainedDeployment.Terminal
 
             EnsureStarted();
             _connection?.WriteInput(text);
+        }
+
+        private static void CopySelectionToClipboard(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return;
+            }
+
+            DataPackage package = new();
+            package.SetText(text);
+            Clipboard.SetContent(package);
+            Clipboard.Flush();
         }
 
         public void RequestFit()
