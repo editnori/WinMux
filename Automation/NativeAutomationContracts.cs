@@ -78,6 +78,8 @@ namespace SelfContainedDeployment.Automation
 
         public string TabId { get; set; }
 
+        public string TargetTabId { get; set; }
+
         public string Value { get; set; }
     }
 
@@ -368,5 +370,139 @@ namespace SelfContainedDeployment.Automation
         public NativeAutomationState State { get; set; }
 
         public List<NativeAutomationUiNode> InteractiveNodes { get; set; } = new();
+    }
+
+    public sealed class NativeAutomationRecordingRequest
+    {
+        public int Fps { get; set; }
+
+        public int MaxDurationMs { get; set; }
+
+        public int JpegQuality { get; set; }
+
+        public string OutputDirectory { get; set; }
+    }
+
+    public sealed class NativeAutomationRecordingStatusResponse
+    {
+        public bool Recording { get; set; }
+
+        public string RecordingId { get; set; }
+
+        public string OutputDirectory { get; set; }
+
+        public int TargetFps { get; set; }
+
+        public int CapturedFrames { get; set; }
+
+        public string VideoPath { get; set; }
+
+        public string ManifestPath { get; set; }
+    }
+
+    public sealed class NativeAutomationRecordingStopResponse
+    {
+        public bool Ok { get; set; }
+
+        public string RecordingId { get; set; }
+
+        public string OutputDirectory { get; set; }
+
+        public int CapturedFrames { get; set; }
+
+        public string VideoPath { get; set; }
+
+        public string ManifestPath { get; set; }
+    }
+
+    public sealed class NativeAutomationDesktopUiaTreeRequest
+    {
+        public string Handle { get; set; }
+
+        public string TitleContains { get; set; }
+
+        public string ClassName { get; set; }
+
+        public int MaxDepth { get; set; }
+    }
+
+    public sealed class NativeAutomationDesktopUiaTreeResponse
+    {
+        public NativeAutomationExternalUiNode Root { get; set; }
+
+        public List<NativeAutomationExternalUiNode> InteractiveNodes { get; set; } = new();
+    }
+
+    public sealed class NativeAutomationExternalUiNode
+    {
+        public string ElementId { get; set; }
+
+        public string Handle { get; set; }
+
+        public string AutomationId { get; set; }
+
+        public string Name { get; set; }
+
+        public string ClassName { get; set; }
+
+        public string ControlType { get; set; }
+
+        public string Text { get; set; }
+
+        public bool Visible { get; set; }
+
+        public bool Enabled { get; set; }
+
+        public bool Focused { get; set; }
+
+        public bool Selected { get; set; }
+
+        public bool Expanded { get; set; }
+
+        public bool Checked { get; set; }
+
+        public bool Interactive { get; set; }
+
+        public string RefLabel { get; set; }
+
+        public double X { get; set; }
+
+        public double Y { get; set; }
+
+        public double Width { get; set; }
+
+        public double Height { get; set; }
+
+        public List<NativeAutomationExternalUiNode> Children { get; set; } = new();
+    }
+
+    public sealed class NativeAutomationDesktopUiaActionRequest
+    {
+        public string Action { get; set; }
+
+        public string Handle { get; set; }
+
+        public string TitleContains { get; set; }
+
+        public string ClassName { get; set; }
+
+        public string ElementId { get; set; }
+
+        public string AutomationId { get; set; }
+
+        public string Name { get; set; }
+
+        public string Text { get; set; }
+
+        public string Value { get; set; }
+    }
+
+    public sealed class NativeAutomationDesktopUiaActionResponse
+    {
+        public bool Ok { get; set; }
+
+        public string Message { get; set; }
+
+        public NativeAutomationExternalUiNode Target { get; set; }
     }
 }

@@ -340,6 +340,10 @@ namespace SelfContainedDeployment
                         SelectTab(request.TabId);
                         ShowTerminalShell();
                         break;
+                    case "movetabafter":
+                        MoveTabAfter(request.TabId, request.TargetTabId);
+                        ShowTerminalShell();
+                        break;
                     case "closetab":
                         CloseTab(request.TabId);
                         break;
@@ -784,6 +788,52 @@ namespace SelfContainedDeployment
             }
 
             throw new InvalidOperationException($"Unknown tab '{tabId}'.");
+        }
+
+        private void MoveTabAfter(string tabId, string targetTabId)
+        {
+            if (string.IsNullOrWhiteSpace(tabId) || string.IsNullOrWhiteSpace(targetTabId) || string.Equals(tabId, targetTabId, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            foreach (WorkspaceProject project in _projects)
+            {
+                foreach (WorkspaceThread thread in project.Threads)
+                {
+                    int sourceIndex = thread.Tabs.FindIndex(candidate => candidate.Id == tabId);
+                    int targetIndex = thread.Tabs.FindIndex(candidate => candidate.Id == targetTabId);
+                    if (sourceIndex < 0 || targetIndex < 0)
+                    {
+                        continue;
+                    }
+
+                    TerminalTabRecord source = thread.Tabs[sourceIndex];
+                    thread.Tabs.RemoveAt(sourceIndex);
+                    if (sourceIndex < targetIndex)
+                    {
+                        targetIndex--;
+                    }
+
+                    thread.Tabs.Insert(targetIndex + 1, source);
+
+                    if (thread == _activeThread)
+                    {
+                        RefreshTabView();
+                    }
+
+                    LogAutomationEvent("shell", "tab.moved", $"Moved tab {tabId} after {targetTabId}", new Dictionary<string, string>
+                    {
+                        ["tabId"] = tabId,
+                        ["targetTabId"] = targetTabId,
+                        ["threadId"] = thread.Id,
+                        ["projectId"] = project.Id,
+                    });
+                    return;
+                }
+            }
+
+            throw new InvalidOperationException($"Could not move tab '{tabId}' after '{targetTabId}'.");
         }
 
         private void ActivateProject(WorkspaceProject project)

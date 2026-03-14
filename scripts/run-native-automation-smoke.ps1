@@ -4,6 +4,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $baseUrl = "http://127.0.0.1:$Port"
+$desktopUiaScript = Join-Path $PSScriptRoot "run-desktop-uia.ps1"
 $results = [System.Collections.Generic.List[object]]::new()
 $tempProjectPath = Join-Path $env:TEMP ("winmux-smoke-" + [Guid]::NewGuid().ToString("N"))
 
@@ -45,6 +46,20 @@ function Invoke-AutomationPost {
 
     $json = if ($null -eq $Body) { "" } else { $Body | ConvertTo-Json -Depth 20 }
     return Invoke-RestMethod -Method Post -Uri "$baseUrl$Path" -ContentType "application/json" -Body $json -TimeoutSec 10
+}
+
+function Invoke-DesktopUiaTree {
+    param([object]$Body)
+
+    $json = $Body | ConvertTo-Json -Depth 20 -Compress
+    return (& $desktopUiaScript tree $json) | ConvertFrom-Json
+}
+
+function Invoke-DesktopUiaAction {
+    param([object]$Body)
+
+    $json = $Body | ConvertTo-Json -Depth 20 -Compress
+    return (& $desktopUiaScript action $json) | ConvertFrom-Json
 }
 
 function Wait-Until {
@@ -131,6 +146,21 @@ try {
     Assert-True (@($activeThread.tabs).Count -eq ($tabCountBefore + 1)) "newTab did not create a second tab."
     Add-Check "new-tab" "$(@($activeThread.tabs).Count) tab(s) on active thread"
 
+    $originalFirstTabId = $activeThread.tabs[0].id
+    $originalSecondTabId = $activeThread.tabs[1].id
+    $moveTab = Invoke-AutomationPost "/action" @{
+        action = "moveTabAfter"
+        tabId = $originalFirstTabId
+        targetTabId = $originalSecondTabId
+    }
+    Assert-True ($moveTab.ok -eq $true) "moveTabAfter action failed."
+
+    $state = Invoke-AutomationGet "/state"
+    $activeProject = Get-ProjectById -State $state -ProjectId $state.projectId
+    $activeThread = Get-ThreadById -Project $activeProject -ThreadId $state.activeThreadId
+    Assert-True ($activeThread.tabs[0].id -eq $originalSecondTabId -and $activeThread.tabs[1].id -eq $originalFirstTabId) "moveTabAfter did not reorder the tab list."
+    Add-Check "move-tab-after" "semantic tab reorder is available"
+
     $selectedSnapshot = Wait-Until -FailureMessage "terminal-state reported a tab that is not ready." -Condition {
         $terminalState = Invoke-AutomationPost "/terminal-state" @{ tabId = $state.activeTabId }
         $snapshot = @($terminalState.tabs) | Where-Object { $_.tabId -eq $state.activeTabId } | Select-Object -First 1
@@ -151,6 +181,22 @@ try {
         automationId = "shell-nav-settings"
     }
     Assert-True ($settingsResponse.ok -eq $true) "Could not open settings via ui-action."
+
+    $desktopUiaTree = Invoke-DesktopUiaTree @{
+        titleContains = "WinMux"
+        maxDepth = 3
+    }
+    Assert-True ($null -ne $desktopUiaTree.root) "Desktop UIA tree did not return a root."
+    Assert-True (@($desktopUiaTree.interactiveNodes).Count -gt 0) "Desktop UIA tree did not expose interactive nodes."
+    Add-Check "desktop-uia-tree" "$(@($desktopUiaTree.interactiveNodes).Count) desktop UIA node(s)"
+
+    $desktopUiaFocus = Invoke-DesktopUiaAction @{
+        action = "focus"
+        titleContains = "WinMux"
+        name = "WinMux"
+    }
+    Assert-True ($desktopUiaFocus.ok -eq $true) "Desktop UIA focus action failed."
+    Add-Check "desktop-uia-action" "desktop UIA actions are available"
 
     $settingsTree = Wait-Until -FailureMessage "Settings controls were not visible after opening Preferences." -Condition {
         $tree = Invoke-AutomationGet "/ui-tree"
@@ -349,6 +395,25 @@ try {
     $annotatedShot = Invoke-AutomationPost "/screenshot" @{ path = ""; annotated = $true }
     Assert-True ($annotatedShot.ok -eq $true) "Annotated screenshot failed."
     Add-Check "annotated-screenshot" $annotatedShot.path
+
+    $recordingStart = Invoke-AutomationPost "/recording/start" @{
+        fps = 12
+        maxDurationMs = 2000
+        jpegQuality = 78
+    }
+    Assert-True ($recordingStart.recording -eq $true) "Native recording did not start."
+
+    $recordingAction = Invoke-AutomationPost "/action" @{
+        action = "newTab"
+    }
+    Assert-True ($recordingAction.ok -eq $true) "Could not create a tab during recording."
+    Start-Sleep -Milliseconds 700
+
+    $recordingStop = Invoke-AutomationPost "/recording/stop" $null
+    Assert-True ($recordingStop.ok -eq $true) "Native recording did not stop cleanly."
+    Assert-True ($recordingStop.capturedFrames -gt 0) "Native recording captured zero frames."
+    Assert-True (-not [string]::IsNullOrWhiteSpace($recordingStop.manifestPath)) "Native recording did not write a manifest."
+    Add-Check "recording" "$($recordingStop.capturedFrames) frame(s) captured"
 
     $renderTrace = Invoke-AutomationPost "/render-trace" @{
         frames = 3

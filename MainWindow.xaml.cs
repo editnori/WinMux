@@ -20,9 +20,12 @@ namespace SelfContainedDeployment
 {
     public partial class MainWindow : Window
     {
+        private readonly NativeWindowRecorder _windowRecorder;
+
         public MainWindow()
         {
             this.InitializeComponent();
+            _windowRecorder = new NativeWindowRecorder(CaptureAutomationBitmapInternal);
 
             Title = SampleConfig.FeatureName;
 
@@ -83,6 +86,21 @@ namespace SelfContainedDeployment
         public NativeAutomationDesktopActionResponse PerformDesktopAction(NativeAutomationDesktopActionRequest request)
         {
             return NativeDesktopAutomation.PerformAction(request);
+        }
+
+        public NativeAutomationRecordingStatusResponse StartRecording(NativeAutomationRecordingRequest request)
+        {
+            return _windowRecorder.Start(request);
+        }
+
+        public NativeAutomationRecordingStatusResponse GetRecordingStatus()
+        {
+            return _windowRecorder.GetStatus();
+        }
+
+        public Task<NativeAutomationRecordingStopResponse> StopRecordingAsync()
+        {
+            return _windowRecorder.StopAsync();
         }
 
         public async Task<NativeAutomationRenderTraceResponse> CaptureRenderTraceAsync(NativeAutomationRenderTraceRequest request)
@@ -203,12 +221,6 @@ namespace SelfContainedDeployment
 
         private NativeAutomationScreenshotResponse CaptureAutomationScreenshotInternal(string outputPath)
         {
-            HWND hwnd = (HWND)WinRT.Interop.WindowNative.GetWindowHandle(this);
-            GetWindowRect(hwnd, out RECT rect);
-
-            int width = rect.right - rect.left;
-            int height = rect.bottom - rect.top;
-
             string finalPath = string.IsNullOrWhiteSpace(outputPath)
                 ? Path.Combine(Path.GetTempPath(), $"native-terminal-{Environment.ProcessId}.png")
                 : outputPath;
@@ -219,9 +231,8 @@ namespace SelfContainedDeployment
                 Directory.CreateDirectory(targetDirectory);
             }
 
-            using var bitmap = new Bitmap(width, height);
-            using var graphics = Graphics.FromImage(bitmap);
-            graphics.CopyFromScreen(rect.left, rect.top, 0, 0, bitmap.Size);
+            (Bitmap bitmap, int width, int height) = CaptureAutomationBitmapInternal();
+            using var ownedBitmap = bitmap;
             bitmap.Save(finalPath, ImageFormat.Png);
 
             NativeAutomationEventLog.Record("automation", "screenshot.captured", "Captured native window screenshot", new System.Collections.Generic.Dictionary<string, string>
@@ -238,6 +249,20 @@ namespace SelfContainedDeployment
                 Width = width,
                 Height = height,
             };
+        }
+
+        private (Bitmap Bitmap, int Width, int Height) CaptureAutomationBitmapInternal()
+        {
+            HWND hwnd = (HWND)WinRT.Interop.WindowNative.GetWindowHandle(this);
+            GetWindowRect(hwnd, out RECT rect);
+
+            int width = rect.right - rect.left;
+            int height = rect.bottom - rect.top;
+
+            Bitmap bitmap = new(width, height);
+            using Graphics graphics = Graphics.FromImage(bitmap);
+            graphics.CopyFromScreen(rect.left, rect.top, 0, 0, bitmap.Size);
+            return (bitmap, width, height);
         }
 
         private static Task WaitForNextRenderAsync()

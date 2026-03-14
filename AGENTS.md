@@ -13,6 +13,7 @@ The current shape of the app is:
 - `WebView2` terminal renderer using local HTML/CSS/JS
 - Bun-managed debug helpers for attaching Playwright to the embedded renderer
 - native automation endpoints for shell state, UI-tree inspection, style metadata, generic UI actions, desktop window automation, render tracing, event logging, terminal inspection, and screenshots
+- native frame recording and external semantic UIA helpers for OS-owned windows
 
 This file is the handoff document for future agents.
 
@@ -29,6 +30,7 @@ What exists now:
 - shared renderer under `Web/` hosted inside `WebView2`
 - WebView2 CDP debug workflow for Playwright-style inspection
 - native automation loop for shell state, UI-tree snapshots, style metadata, generic UI actions, desktop window automation, render traces, terminal snapshots, event logs, and native window screenshots
+- native frame recording and script-backed semantic UIA control for external windows
 
 What does not exist yet:
 
@@ -56,6 +58,8 @@ What does not exist yet:
 
 - [Automation/NativeAutomationContracts.cs](/mnt/c/Users/lqassem/native-terminal-starter/Automation/NativeAutomationContracts.cs)
 - [Automation/NativeAutomationServer.cs](/mnt/c/Users/lqassem/native-terminal-starter/Automation/NativeAutomationServer.cs)
+- [Automation/NativeDesktopAutomation.cs](/mnt/c/Users/lqassem/native-terminal-starter/Automation/NativeDesktopAutomation.cs)
+- [Automation/NativeWindowRecorder.cs](/mnt/c/Users/lqassem/native-terminal-starter/Automation/NativeWindowRecorder.cs)
 - [MainWindow.xaml.cs](/mnt/c/Users/lqassem/native-terminal-starter/MainWindow.xaml.cs)
 - [AUTOMATION_REFERENCE.md](/mnt/c/Users/lqassem/native-terminal-starter/AUTOMATION_REFERENCE.md)
 
@@ -74,6 +78,7 @@ What does not exist yet:
 - [bun.lock](/mnt/c/Users/lqassem/native-terminal-starter/bun.lock)
 - [scripts/start-webview2-debug.ps1](/mnt/c/Users/lqassem/native-terminal-starter/scripts/start-webview2-debug.ps1)
 - [scripts/run-native-automation.ps1](/mnt/c/Users/lqassem/native-terminal-starter/scripts/run-native-automation.ps1)
+- [scripts/run-desktop-uia.ps1](/mnt/c/Users/lqassem/native-terminal-starter/scripts/run-desktop-uia.ps1)
 - [tools/webview2-debug-utils.mjs](/mnt/c/Users/lqassem/native-terminal-starter/tools/webview2-debug-utils.mjs)
 - [tools/webview2-targets.mjs](/mnt/c/Users/lqassem/native-terminal-starter/tools/webview2-targets.mjs)
 - [tools/webview2-screenshot.mjs](/mnt/c/Users/lqassem/native-terminal-starter/tools/webview2-screenshot.mjs)
@@ -155,13 +160,19 @@ bun run native:state
 bun run native:ui-tree
 bun run native:ui-refs
 bun run native:desktop-windows
+bun run native:desktop-uia-tree
 bun run native:events
 bun run native:events:clear
+bun run native:recording-status
 bun run native:ui-action -- '{"action":"click","refLabel":"e2"}'
 bun run native:desktop-action -- '{"action":"focusWindow","titleContains":"WinMux"}'
+bun run native:desktop-uia-action -- '{"action":"focus","titleContains":"WinMux","name":"WinMux"}'
 bun run native:terminal-state
 bun run native:render-trace
+bun run native:recording-start -- '{"fps":24,"maxDurationMs":5000}'
+bun run native:recording-stop
 bun run native:action -- '{"action":"newThread"}'
+bun run native:action -- '{"action":"moveTabAfter","tabId":"...","targetTabId":"..."}'
 bun run native:screenshot
 bun run native:screenshot:annotated
 bun run native:smoke
@@ -221,7 +232,9 @@ What this is good for:
 - reading resolved colors, padding, margins, and sizing from the same tree
 - targeting native controls by `automationId`, `elementId`, `name`, or annotated `refLabel`
 - controlling external OS windows through desktop window enumeration and Win32 input injection
+- semantically inspecting and acting on external OS windows through `scripts/run-desktop-uia.ps1`
 - tracing multiple native render frames after an action
+- recording native frame sequences with manifest output and optional mp4 encoding
 - reading event logs for tab/thread/render sequencing
 - creating threads and tabs from the outside
 - switching theme and capturing native window screenshots

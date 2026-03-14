@@ -10,14 +10,22 @@ Native automation server:
 - `GET /state`
 - `GET /ui-tree`
 - `GET /desktop-windows`
+- `GET /recording-status`
 - `GET /events`
 - `POST /action`
 - `POST /ui-action`
 - `POST /desktop-action`
 - `POST /terminal-state`
+- `POST /recording/start`
+- `POST /recording/stop`
 - `POST /render-trace`
 - `POST /screenshot`
 - `POST /events/clear`
+
+External semantic desktop automation helper:
+
+- `scripts/run-desktop-uia.ps1 tree <json>`
+- `scripts/run-desktop-uia.ps1 action <json>`
 
 Bun wrappers:
 
@@ -27,12 +35,17 @@ bun run native:state
 bun run native:ui-tree
 bun run native:ui-refs
 bun run native:desktop-windows
+bun run native:desktop-uia-tree
 bun run native:events
 bun run native:events:clear
+bun run native:recording-status
 bun run native:action -- '{"action":"newThread"}'
 bun run native:ui-action -- '{"action":"click","automationId":"shell-nav-settings"}'
 bun run native:desktop-action -- '{"action":"focusWindow","titleContains":"WinMux"}'
+bun run native:desktop-uia-action -- '{"action":"invoke","titleContains":"Browse for Folder","name":"OK"}'
 bun run native:terminal-state
+bun run native:recording-start -- '{"fps":24,"maxDurationMs":5000}'
+bun run native:recording-stop
 bun run native:render-trace
 bun run native:screenshot
 bun run native:screenshot:annotated
@@ -56,6 +69,7 @@ Supported `action` values:
 - `selectProject`
 - `selectThread`
 - `selectTab`
+- `moveTabAfter`
 - `closeTab`
 - `setTheme`
 - `setProfile`
@@ -69,12 +83,14 @@ Relevant payload fields:
 - `projectId`
 - `threadId`
 - `tabId`
+- `targetTabId`
 - `value`
 
 Notes:
 
 - `newProject` on the semantic route creates a project directly from `value` without opening the dialog.
 - `input` sends text to the selected terminal tab, not to arbitrary native controls.
+- `moveTabAfter` provides a semantic tab reorder path without coordinate dragging.
 
 ### Generic UI actions
 
@@ -155,6 +171,48 @@ Notes:
 - `typeText` types through Win32 keyboard injection, so it works against external picker/edit controls if they have focus
 
 This is the path for OS-owned UI such as the external Windows folder picker.
+
+### External desktop UIA
+
+This is a separate PowerShell-backed semantic helper, not an app-hosted HTTP route.
+
+`bun run native:desktop-uia-tree` returns:
+
+- a semantic UI Automation tree for a matching external window
+- interactive descendants with stable `elementId` paths
+- automation ids, names, class names, control types, bounds, selection, expansion, and checked states
+
+Request fields:
+
+- `handle`
+- `titleContains`
+- `className`
+- `maxDepth`
+
+`bun run native:desktop-uia-action` supports:
+
+- `focus`
+- `invoke`
+- `click`
+- `setValue`
+- `setText`
+- `select`
+- `toggle`
+- `expand`
+- `collapse`
+
+Targeting fields:
+
+- `handle`
+- `titleContains`
+- `className`
+- `elementId`
+- `automationId`
+- `name`
+- `text`
+- `value`
+
+This is the semantic path for external windows such as the Windows folder picker after it opens.
 
 ### Native UI discovery
 
@@ -278,6 +336,32 @@ Each returned frame can include:
 
 This is the main tool for transient native behaviors like tab insertion, rerender churn, and quick shell-state transitions.
 
+### Native recording
+
+`GET /recording-status` returns the current recorder state.
+
+`POST /recording/start` supports:
+
+- `fps`
+- `maxDurationMs`
+- `jpegQuality`
+- `outputDirectory`
+
+`POST /recording/stop` finalizes the frame capture and returns:
+
+- `recordingId`
+- `outputDirectory`
+- `capturedFrames`
+- `manifestPath`
+- optional `videoPath`
+
+Important behavior:
+
+- the recorder captures native window frames directly from the running app
+- it writes a frame manifest even if `ffmpeg` is not installed
+- if `ffmpeg` is available, it also encodes an `.mp4`
+- this is the highest-fidelity native visual capture path for animation review right now
+
 ### Screenshots
 
 `POST /screenshot` supports:
@@ -296,7 +380,10 @@ The current smoke run validates:
 - visible interactive node discovery
 - add thread
 - add tab
+- semantic tab reorder
 - terminal readiness and metrics
+- desktop UIA tree discovery
+- desktop UIA action
 - settings discovery
 - theme switching
 - duplicate thread through context menu
@@ -307,6 +394,7 @@ The current smoke run validates:
 - recover from the empty project state by creating a new thread
 - annotated screenshot capture
 - desktop window enumeration
+- native recording start/stop
 - render trace capture
 - event logging
 
@@ -316,12 +404,20 @@ This is the current regression baseline for native automation coverage.
 
 ### OS-owned surfaces
 
-These are not app-owned UI:
+These are not app-owned UI, but they are now partly controllable:
 
 - the Windows folder picker launched by `Browse...`
-- any system modal or external shell window
+- system dialogs and external shell windows that expose Win32 handles or UIA trees
 
-The app-owned new-project dialog is automatable. The external picker is not.
+Current coverage:
+
+- discoverable through `desktop-windows`
+- semantically inspectable through `desktop-uia-tree`
+- actionable through `desktop-action` and `desktop-uia-action`
+
+Remaining gap:
+
+- there is still no app-owned wrapper around every possible third-party or system-specific UIA pattern
 
 ### Render-time and animation introspection
 
@@ -335,8 +431,8 @@ That is enough to inspect many transient behaviors around tab creation, layout r
 
 I still do not have:
 
-- a high-FPS video recorder for native frames
 - automatic diff summaries between successive native frames
+- guaranteed smooth capture on every machine at the highest requested FPS, because capture is screen-copy based
 
 ### Style and spacing introspection
 
@@ -372,11 +468,11 @@ I now have:
 - app-owned double-click rename
 - real coordinate pointer injection
 - drag support through desktop actions
+- semantic tab reorder through `moveTabAfter`
 
 I still do not have:
 
-- element-aware drag handles inside the native shell without using coordinates
-- higher-level drag semantics like “drag this tab after that tab”
+- element-aware semantic drag for arbitrary shell objects beyond the tab reorder path
 
 ### Keyboard nuance outside the terminal
 
@@ -419,14 +515,14 @@ Add an endpoint that returns per-element:
 
 This would solve color consistency, spacing, and container-tagging problems directly.
 
-### 2. Animation/frame tracing
+### 2. Frame diffing and richer recording analysis
 
-Add an opt-in trace around UI actions that captures:
+Add a layer on top of the existing recorder and render trace that captures:
 
-- pre-action UI tree
-- post-layout UI tree
-- post-animation UI tree
-- screenshots at each phase
+- per-frame tree diffs
+- layout deltas by element id
+- event log correlation per frame
+- a summary of what changed between successive frames
 
 This is the missing piece for “I clicked new tab and something flashed weird for 150ms.”
 
@@ -455,7 +551,10 @@ For app-owned shell behavior, I now have strong control over:
 - event logging
 - hover/pressed visual-state inspection
 - desktop window enumeration and external window actions
+- semantic external UIA inspection and actions
+- native frame recording with manifest output and optional video encoding
+- semantic tab reorder without coordinate dragging
 - render trace capture
 - annotated screenshots
 
-The biggest remaining observability gap is higher-level semantic tracing for complex animations and richer drag semantics, not basic access.
+The biggest remaining observability gap is richer frame-to-frame diffing and more semantic drag/reorder support outside the current tab path, not basic access.

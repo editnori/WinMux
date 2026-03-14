@@ -129,6 +129,11 @@ namespace SelfContainedDeployment.Automation
                         await WriteJsonAsync(stream, 200, desktopWindows).ConfigureAwait(false);
                         break;
 
+                    case ("GET", "/recording-status"):
+                        var recordingStatus = _window.GetRecordingStatus();
+                        await WriteJsonAsync(stream, 200, recordingStatus).ConfigureAwait(false);
+                        break;
+
                     case ("GET", "/events"):
                         await WriteJsonAsync(stream, 200, NativeAutomationEventLog.Snapshot()).ConfigureAwait(false);
                         break;
@@ -161,6 +166,17 @@ namespace SelfContainedDeployment.Automation
                         var renderTraceRequest = ReadJson<NativeAutomationRenderTraceRequest>(request.Body);
                         var renderTrace = await InvokeOnUiThreadAsync(() => _window.CaptureRenderTraceAsync(renderTraceRequest)).ConfigureAwait(false);
                         await WriteJsonAsync(stream, 200, renderTrace).ConfigureAwait(false);
+                        break;
+
+                    case ("POST", "/recording/start"):
+                        var recordingRequest = ReadJson<NativeAutomationRecordingRequest>(request.Body);
+                        var recordingStart = _window.StartRecording(recordingRequest);
+                        await WriteJsonAsync(stream, 200, recordingStart).ConfigureAwait(false);
+                        break;
+
+                    case ("POST", "/recording/stop"):
+                        var recordingStop = await _window.StopRecordingAsync().ConfigureAwait(false);
+                        await WriteJsonAsync(stream, 200, recordingStop).ConfigureAwait(false);
                         break;
 
                     case ("POST", "/screenshot"):

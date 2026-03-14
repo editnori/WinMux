@@ -10,7 +10,9 @@ What this gives you:
 - trigger thread, tab, and theme actions without manual clicking
 - target native controls by `automationId`, `elementId`, `name`, or annotated `refLabel`
 - inspect external desktop windows and drive them with Win32 input injection
+- inspect and act on external desktop windows semantically through the UIA helper
 - capture multi-frame native render traces after actions
+- capture native frame recordings with manifest output and optional mp4 encoding
 - inspect native event logs for tab/thread/render sequencing
 - capture native window screenshots from the running WinUI app
 - capture annotated native screenshots with overlay labels
@@ -56,9 +58,14 @@ bun run native:state
 bun run native:ui-tree
 bun run native:ui-refs
 bun run native:desktop-windows
+bun run native:desktop-uia-tree
 bun run native:events
+bun run native:recording-status
 bun run native:desktop-action -- '{"action":"focusWindow","titleContains":"WinMux"}'
+bun run native:desktop-uia-action -- '{"action":"focus","titleContains":"WinMux","name":"WinMux"}'
 bun run native:terminal-state
+bun run native:recording-start -- '{"fps":24,"maxDurationMs":5000}'
+bun run native:recording-stop
 bun run native:render-trace
 bun run native:smoke
 bun run webview2:targets
@@ -69,6 +76,7 @@ bun run webview2:targets
 ```bash
 bun run native:action -- '{"action":"newThread"}'
 bun run native:action -- '{"action":"newTab"}'
+bun run native:action -- '{"action":"moveTabAfter","tabId":"...","targetTabId":"..."}'
 bun run native:action -- '{"action":"setTheme","value":"light"}'
 bun run native:ui-action -- '{"action":"click","refLabel":"e2"}'
 bun run native:ui-action -- '{"action":"click","automationId":"shell-nav-settings"}'
@@ -139,6 +147,8 @@ The native automation loop covers the shell-level gaps that CDP cannot:
 - shell state inspection
 - native control discovery and generic UI actions
 - desktop window enumeration and Win32 pointer/keyboard control
+- external semantic UIA inspection and actions through `scripts/run-desktop-uia.ps1`
+- native frame recording
 - render trace capture
 - native event logs
 - thread and tab actions

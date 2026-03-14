@@ -10,6 +10,7 @@ $ErrorActionPreference = "Stop"
 
 $port = if ($env:NATIVE_TERMINAL_AUTOMATION_PORT) { [int]$env:NATIVE_TERMINAL_AUTOMATION_PORT } else { 9331 }
 $baseUrl = "http://127.0.0.1:$port"
+$desktopUiaScript = Join-Path $PSScriptRoot "run-desktop-uia.ps1"
 
 switch ($Tool) {
     "health" {
@@ -28,8 +29,17 @@ switch ($Tool) {
         Invoke-RestMethod -Uri "$baseUrl/desktop-windows" | ConvertTo-Json -Depth 20
         break
     }
+    "desktop-uia-tree" {
+        $body = if ($ForwardArgs.Count -gt 0) { $ForwardArgs -join " " } else { @{ titleContains = "WinMux"; maxDepth = 4 } | ConvertTo-Json }
+        & $desktopUiaScript tree $body
+        break
+    }
     "events" {
         Invoke-RestMethod -Uri "$baseUrl/events" | ConvertTo-Json -Depth 20
+        break
+    }
+    "recording-status" {
+        Invoke-RestMethod -Uri "$baseUrl/recording-status" | ConvertTo-Json -Depth 20
         break
     }
     "events-clear" {
@@ -70,10 +80,28 @@ switch ($Tool) {
         Invoke-RestMethod -Method Post -Uri "$baseUrl/desktop-action" -ContentType "application/json" -Body $body | ConvertTo-Json -Depth 20
         break
     }
+    "desktop-uia-action" {
+        if (-not $ForwardArgs -or $ForwardArgs.Count -eq 0) {
+            throw "Provide a JSON payload, for example: bun run native:desktop-uia-action -- '{`"action`":`"invoke`",`"titleContains`":`"Browse for Folder`",`"name`":`"OK`"}'"
+        }
+
+        $body = $ForwardArgs -join " "
+        & $desktopUiaScript action $body
+        break
+    }
     "terminal-state" {
         $tabId = if ($ForwardArgs.Count -gt 0) { $ForwardArgs[0] } else { "" }
         $body = @{ tabId = $tabId } | ConvertTo-Json
         Invoke-RestMethod -Method Post -Uri "$baseUrl/terminal-state" -ContentType "application/json" -Body $body | ConvertTo-Json -Depth 20
+        break
+    }
+    "recording-start" {
+        $body = if ($ForwardArgs.Count -gt 0) { $ForwardArgs -join " " } else { @{ fps = 24; maxDurationMs = 5000; jpegQuality = 82 } | ConvertTo-Json }
+        Invoke-RestMethod -Method Post -Uri "$baseUrl/recording/start" -ContentType "application/json" -Body $body | ConvertTo-Json -Depth 20
+        break
+    }
+    "recording-stop" {
+        Invoke-RestMethod -Method Post -Uri "$baseUrl/recording/stop" -ContentType "application/json" -Body "" | ConvertTo-Json -Depth 20
         break
     }
     "render-trace" {
@@ -92,6 +120,6 @@ switch ($Tool) {
         break
     }
     default {
-        throw "Unknown automation tool '$Tool'. Expected one of: health, state, ui-tree, ui-refs, desktop-windows, events, events-clear, action, ui-action, desktop-action, terminal-state, render-trace, screenshot"
+        throw "Unknown automation tool '$Tool'. Expected one of: health, state, ui-tree, ui-refs, desktop-windows, desktop-uia-tree, events, events-clear, recording-status, action, ui-action, desktop-action, desktop-uia-action, terminal-state, recording-start, recording-stop, render-trace, screenshot"
     }
 }
