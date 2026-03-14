@@ -9,6 +9,7 @@ using SelfContainedDeployment.Automation;
 using SelfContainedDeployment.Shell;
 using SelfContainedDeployment.Terminal;
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using Windows.Storage.Pickers;
@@ -64,7 +65,26 @@ namespace SelfContainedDeployment
         public NativeAutomationUiTreeResponse GetAutomationUiTree()
         {
             int interactiveIndex = 0;
-            NativeAutomationUiNode root = BuildUiNodeTree(ShellRoot, "root", ref interactiveIndex);
+            List<NativeAutomationUiNode> children = new();
+            List<DependencyObject> automationRoots = GetAutomationRoots();
+            for (int index = 0; index < automationRoots.Count; index++)
+            {
+                NativeAutomationUiNode child = BuildUiNodeTree(automationRoots[index], $"root/{index}", ref interactiveIndex);
+                if (child is not null)
+                {
+                    children.Add(child);
+                }
+            }
+
+            NativeAutomationUiNode root = new()
+            {
+                ElementId = "root",
+                ControlType = "AutomationRoot",
+                Visible = true,
+                Enabled = true,
+                Children = children,
+            };
+
             List<NativeAutomationUiNode> interactiveNodes = FlattenUiNodes(root)
                 .Where(node => node.Interactive && node.Visible)
                 .ToList();
@@ -1083,7 +1103,7 @@ namespace SelfContainedDeployment
             string name = element is not null ? AutomationProperties.GetName(element) : null;
             string text = ExtractNodeText(node);
             bool interactive = IsInteractiveUiNode(node, automationId);
-            bool visible = element?.Visibility != Visibility.Collapsed && (element?.ActualWidth > 0 || element?.ActualHeight > 0 || node is Page);
+            bool visible = IsNodeVisible(node);
             bool enabled = node is Control control ? control.IsEnabled : true;
             bool focused = element is Control controlForFocus
                 ? controlForFocus.FocusState != FocusState.Unfocused
@@ -1181,7 +1201,9 @@ namespace SelfContainedDeployment
                 case ContentControl contentControl:
                     return ExtractContentText(contentControl.Content);
                 default:
-                    return TryExtractPropertyText(node, "Header") ?? TryExtractPropertyText(node, "Text");
+                    return TryExtractPropertyText(node, "Header")
+                        ?? TryExtractPropertyText(node, "Text")
+                        ?? ExtractTextFromVisual(node);
             }
         }
 
@@ -1193,14 +1215,66 @@ namespace SelfContainedDeployment
                 string text => text,
                 TextBlock textBlock => textBlock.Text,
                 FontIcon fontIcon => fontIcon.Glyph,
+                FrameworkElement element => ExtractTextFromVisual(element),
                 _ => content.ToString(),
             };
         }
 
         private static string TryExtractPropertyText(object instance, string propertyName)
         {
+            if (instance is null || string.IsNullOrWhiteSpace(propertyName))
+            {
+                return null;
+            }
+
             var property = instance?.GetType().GetProperty(propertyName);
             return property is null ? null : ExtractContentText(property.GetValue(instance));
+        }
+
+        private static string ExtractTextFromVisual(DependencyObject node)
+        {
+            if (node is null)
+            {
+                return null;
+            }
+
+            List<string> parts = new();
+            CollectVisualText(node, parts);
+
+            string[] filtered = parts
+                .Where(part => !string.IsNullOrWhiteSpace(part))
+                .Select(part => part.Trim())
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
+
+            return filtered.Length == 0 ? null : string.Join(" ", filtered);
+        }
+
+        private static void CollectVisualText(DependencyObject node, List<string> parts)
+        {
+            switch (node)
+            {
+                case TextBlock textBlock when !string.IsNullOrWhiteSpace(textBlock.Text):
+                    parts.Add(textBlock.Text);
+                    break;
+                case MenuFlyoutItem menuItem when !string.IsNullOrWhiteSpace(menuItem.Text):
+                    parts.Add(menuItem.Text);
+                    break;
+                case TextBox textBox when !string.IsNullOrWhiteSpace(textBox.Text):
+                    parts.Add(textBox.Text);
+                    break;
+            }
+
+            if (node is Microsoft.UI.Xaml.Controls.WebView2)
+            {
+                return;
+            }
+
+            int childCount = VisualTreeHelper.GetChildrenCount(node);
+            for (int index = 0; index < childCount; index++)
+            {
+                CollectVisualText(VisualTreeHelper.GetChild(node, index), parts);
+            }
         }
 
         private bool IsNodeSelected(DependencyObject node, string automationId)
@@ -1254,12 +1328,44 @@ namespace SelfContainedDeployment
             }
         }
 
+        private static bool IsNodeVisible(DependencyObject node)
+        {
+            if (node is not FrameworkElement element)
+            {
+                return true;
+            }
+
+            if (element.Visibility == Visibility.Collapsed)
+            {
+                return false;
+            }
+
+            if (node is not Page && element.ActualWidth <= 0 && element.ActualHeight <= 0)
+            {
+                return false;
+            }
+
+            DependencyObject current = node;
+            while (current is not null)
+            {
+                if (current is FrameworkElement ancestor && ancestor.Visibility == Visibility.Collapsed)
+                {
+                    return false;
+                }
+
+                current = VisualTreeHelper.GetParent(current);
+            }
+
+            return true;
+        }
+
         private DependencyObject FindUiElement(NativeAutomationUiActionRequest request)
         {
             if (!string.IsNullOrWhiteSpace(request.AutomationId))
             {
-                return FindFirstElement(ShellRoot, candidate =>
+                return FindFirstElementAcrossRoots(candidate =>
                     candidate is FrameworkElement element &&
+                    IsNodeVisible(candidate) &&
                     string.Equals(AutomationProperties.GetAutomationId(element), request.AutomationId, StringComparison.OrdinalIgnoreCase));
             }
 
@@ -1269,20 +1375,67 @@ namespace SelfContainedDeployment
                     .FirstOrDefault(node => string.Equals(node.RefLabel, request.RefLabel, StringComparison.OrdinalIgnoreCase));
                 if (match is not null)
                 {
-                    return FindElementByPath(ShellRoot, match.ElementId);
+                    return FindElementByPath(match.ElementId);
                 }
             }
 
             if (!string.IsNullOrWhiteSpace(request.ElementId))
             {
-                return FindElementByPath(ShellRoot, request.ElementId);
+                return FindElementByPath(request.ElementId);
             }
 
             if (!string.IsNullOrWhiteSpace(request.Name))
             {
-                return FindFirstElement(ShellRoot, candidate =>
+                return FindFirstElementAcrossRoots(candidate =>
                     candidate is FrameworkElement element &&
+                    IsNodeVisible(candidate) &&
                     string.Equals(AutomationProperties.GetName(element), request.Name, StringComparison.OrdinalIgnoreCase));
+            }
+
+            if (!string.IsNullOrWhiteSpace(request.Text))
+            {
+                NativeAutomationUiNode match = GetAutomationUiTree().InteractiveNodes
+                    .FirstOrDefault(node => string.Equals(node.Text, request.Text, StringComparison.OrdinalIgnoreCase));
+                if (match is not null)
+                {
+                    return FindElementByPath(match.ElementId);
+                }
+            }
+
+            return null;
+        }
+
+        private List<DependencyObject> GetAutomationRoots()
+        {
+            List<DependencyObject> roots = new();
+            if (ShellRoot is not null)
+            {
+                roots.Add(ShellRoot);
+            }
+
+            if (ShellRoot?.XamlRoot is not null)
+            {
+                foreach (Popup popup in VisualTreeHelper.GetOpenPopupsForXamlRoot(ShellRoot.XamlRoot))
+                {
+                    if (popup?.Child is not null && !ReferenceEquals(popup.Child, AutomationOverlayCanvas))
+                    {
+                        roots.Add(popup.Child);
+                    }
+                }
+            }
+
+            return roots;
+        }
+
+        private DependencyObject FindFirstElementAcrossRoots(Func<DependencyObject, bool> predicate)
+        {
+            foreach (DependencyObject root in GetAutomationRoots())
+            {
+                DependencyObject match = FindFirstElement(root, predicate);
+                if (match is not null)
+                {
+                    return match;
+                }
             }
 
             return null;
@@ -1318,9 +1471,9 @@ namespace SelfContainedDeployment
             return null;
         }
 
-        private DependencyObject FindElementByPath(DependencyObject root, string path)
+        private DependencyObject FindElementByPath(string path)
         {
-            if (root is null || string.IsNullOrWhiteSpace(path))
+            if (string.IsNullOrWhiteSpace(path))
             {
                 return null;
             }
@@ -1331,8 +1484,19 @@ namespace SelfContainedDeployment
                 return null;
             }
 
-            DependencyObject current = root;
-            for (int i = 1; i < parts.Length; i++)
+            List<DependencyObject> roots = GetAutomationRoots();
+            if (parts.Length == 1)
+            {
+                return ShellRoot;
+            }
+
+            if (!int.TryParse(parts[1], out int rootIndex) || rootIndex < 0 || rootIndex >= roots.Count)
+            {
+                return null;
+            }
+
+            DependencyObject current = roots[rootIndex];
+            for (int i = 2; i < parts.Length; i++)
             {
                 if (!int.TryParse(parts[i], out int childIndex))
                 {
@@ -1464,6 +1628,9 @@ namespace SelfContainedDeployment
                 case TextBox textBox:
                     textBox.Text = value ?? string.Empty;
                     break;
+                case ComboBox comboBox:
+                    SelectComboBoxValue(comboBox, value);
+                    break;
                 default:
                     if (node is FrameworkElement element)
                     {
@@ -1477,6 +1644,31 @@ namespace SelfContainedDeployment
 
                     throw new InvalidOperationException($"Element '{node.GetType().Name}' does not support text input.");
             }
+        }
+
+        private static void SelectComboBoxValue(ComboBox comboBox, string value)
+        {
+            string desired = value?.Trim() ?? string.Empty;
+            IEnumerable items = comboBox.ItemsSource as IEnumerable ?? comboBox.Items.Cast<object>();
+
+            foreach (object item in items)
+            {
+                if (item is null)
+                {
+                    continue;
+                }
+
+                string selectedValue = TryExtractPropertyText(item, comboBox.SelectedValuePath);
+                string displayValue = TryExtractPropertyText(item, comboBox.DisplayMemberPath) ?? ExtractContentText(item);
+                if (string.Equals(selectedValue, desired, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(displayValue, desired, StringComparison.OrdinalIgnoreCase))
+                {
+                    comboBox.SelectedItem = item;
+                    return;
+                }
+            }
+
+            throw new InvalidOperationException($"ComboBox does not contain '{value}'.");
         }
 
         private void SelectUiElement(DependencyObject node)
@@ -1656,6 +1848,7 @@ namespace SelfContainedDeployment
                 Text = _activeProject?.RootPath ?? Environment.CurrentDirectory,
                 Style = (Style)Application.Current.Resources["ShellInlineTextBoxStyle"],
             };
+            AutomationProperties.SetAutomationId(pathBox, "dialog-project-path");
 
             Button browseButton = new()
             {
@@ -1663,6 +1856,7 @@ namespace SelfContainedDeployment
                 HorizontalAlignment = HorizontalAlignment.Left,
                 MinWidth = 96,
             };
+            AutomationProperties.SetAutomationId(browseButton, "dialog-project-browse");
             browseButton.Click += async (_, _) =>
             {
                 string selectedPath = await BrowseForFolderAsync(pathBox.Text);
@@ -1680,11 +1874,13 @@ namespace SelfContainedDeployment
                 ItemsSource = ShellProfiles.All,
                 SelectedValue = _activeProject?.ShellProfileId ?? SampleConfig.DefaultShellProfileId,
             };
+            AutomationProperties.SetAutomationId(profileBox, "dialog-project-shell-profile");
 
             StackPanel body = new()
             {
                 Spacing = 12,
             };
+            AutomationProperties.SetAutomationId(body, "dialog-project-body");
             body.Children.Add(pathBox);
             body.Children.Add(browseButton);
             body.Children.Add(profileBox);
@@ -1717,6 +1913,7 @@ namespace SelfContainedDeployment
                 Text = initialValue,
                 Style = (Style)Application.Current.Resources["ShellInlineTextBoxStyle"],
             };
+            AutomationProperties.SetAutomationId(nameBox, "dialog-thread-name");
 
             ContentDialog dialog = new()
             {

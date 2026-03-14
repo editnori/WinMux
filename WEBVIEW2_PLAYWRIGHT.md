@@ -52,6 +52,7 @@ bun run native:state
 bun run native:ui-tree
 bun run native:ui-refs
 bun run native:terminal-state
+bun run native:smoke
 bun run webview2:targets
 ```
 

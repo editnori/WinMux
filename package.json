@@ -16,7 +16,8 @@
     "native:ui-action": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-automation.ps1\")\" ui-action",
     "native:terminal-state": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-automation.ps1\")\" terminal-state",
     "native:screenshot": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-automation.ps1\")\" screenshot",
-    "native:screenshot:annotated": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-automation.ps1\")\" screenshot \"\" true"
+    "native:screenshot:annotated": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-automation.ps1\")\" screenshot \"\" true",
+    "native:smoke": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-automation-smoke.ps1\")\""
   },
   "devDependencies": {
     "playwright": "^1.58.2"

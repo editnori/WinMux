@@ -11,8 +11,13 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $projectPath = Join-Path $repoRoot "SelfContainedDeployment.csproj"
 $dotnetPath = "C:\Program Files\dotnet\dotnet.exe"
-$exePath = Join-Path $repoRoot "bin\$Platform\$Configuration\net6.0-windows10.0.19041.0\win10-$Platform\SelfContainedDeployment.exe"
 $webRoot = Join-Path $repoRoot "Web"
+$projectXml = [xml](Get-Content $projectPath)
+$targetFramework = $projectXml.Project.PropertyGroup.TargetFramework | Select-Object -First 1
+
+if ([string]::IsNullOrWhiteSpace($targetFramework)) {
+    throw "Could not resolve TargetFramework from $projectPath"
+}
 
 Get-Process SelfContainedDeployment -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep -Milliseconds 750
@@ -21,6 +26,25 @@ if (-not $SkipBuild) {
     & $dotnetPath build $projectPath -p:Platform=$Platform | Out-Host
 }
 
+function Resolve-AppExecutablePath {
+    param(
+        [string]$Root,
+        [string]$TargetFrameworkValue,
+        [string]$PlatformValue,
+        [string]$ConfigurationValue
+    )
+
+    $candidateRoot = Join-Path $Root "bin\$PlatformValue\$ConfigurationValue\$TargetFrameworkValue"
+    if (-not (Test-Path $candidateRoot)) {
+        return $null
+    }
+
+    return Get-ChildItem -Path $candidateRoot -Filter "SelfContainedDeployment.exe" -Recurse -File |
+        Sort-Object LastWriteTimeUtc -Descending |
+        Select-Object -First 1 -ExpandProperty FullName
+}
+
+$exePath = Resolve-AppExecutablePath -Root $repoRoot -TargetFrameworkValue $targetFramework -PlatformValue $Platform -ConfigurationValue $Configuration
 if (-not (Test-Path $exePath)) {
     throw "Could not find built app at $exePath"
 }

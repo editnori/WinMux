@@ -6,6 +6,8 @@ This repo is a native Windows terminal shell built with WinUI 3.
 
 The current shape of the app is:
 
+- `net8.0-windows10.0.19041.0`
+- Windows App SDK `1.8`
 - native WinUI chrome
 - ConPTY-backed shell process host
 - `WebView2` terminal renderer using local HTML/CSS/JS
@@ -156,6 +158,7 @@ bun run native:terminal-state
 bun run native:action -- '{"action":"newThread"}'
 bun run native:screenshot
 bun run native:screenshot:annotated
+bun run native:smoke
 bun run webview2:targets
 bun run webview2:screenshot
 bun run webview2:eval -- "document.title"
