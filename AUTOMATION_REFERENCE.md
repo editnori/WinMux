@@ -9,10 +9,13 @@ Native automation server:
 - `GET /health`
 - `GET /state`
 - `GET /ui-tree`
+- `GET /desktop-windows`
 - `GET /events`
 - `POST /action`
 - `POST /ui-action`
+- `POST /desktop-action`
 - `POST /terminal-state`
+- `POST /render-trace`
 - `POST /screenshot`
 - `POST /events/clear`
 
@@ -23,11 +26,14 @@ bun run native:health
 bun run native:state
 bun run native:ui-tree
 bun run native:ui-refs
+bun run native:desktop-windows
 bun run native:events
 bun run native:events:clear
 bun run native:action -- '{"action":"newThread"}'
 bun run native:ui-action -- '{"action":"click","automationId":"shell-nav-settings"}'
+bun run native:desktop-action -- '{"action":"focusWindow","titleContains":"WinMux"}'
 bun run native:terminal-state
+bun run native:render-trace
 bun run native:screenshot
 bun run native:screenshot:annotated
 bun run native:smoke
@@ -109,6 +115,46 @@ Notes:
 - `invokeMenuItem` works on controls that expose a `ContextFlyout`.
 - `hover`, `press`, and `normalState` drive WinUI visual states for inspection. They are useful for checking hover and pressed styling even though they are not full pointer simulation.
 - `doubleClick` is supported for app-owned cases such as thread rename.
+
+### Desktop window automation
+
+These routes expose top-level and child windows outside the WinUI visual tree.
+
+`GET /desktop-windows` returns:
+
+- top-level windows
+- child window handles
+- window titles
+- class names
+- bounds
+- visibility
+- focus state
+
+`POST /desktop-action` supports:
+
+- `focusWindow`
+- `clickPoint`
+- `doubleClickPoint`
+- `rightClickPoint`
+- `hoverPoint`
+- `dragPoint`
+- `sendKeys`
+- `typeText`
+
+Relevant targeting fields:
+
+- `handle`
+- `titleContains`
+- `className`
+
+Notes:
+
+- if `handle` is provided and no coordinates are given, click actions target the window center
+- if coordinates are provided alongside a `handle`, they are treated as offsets from that window’s top-left corner
+- `sendKeys` supports common chords such as `Ctrl+A`, `Shift+Tab`, `F2`, `Delete`, and `Esc`
+- `typeText` types through Win32 keyboard injection, so it works against external picker/edit controls if they have focus
+
+This is the path for OS-owned UI such as the external Windows folder picker.
 
 ### Native UI discovery
 
@@ -211,6 +257,27 @@ This is the primary way to inspect transient shell behavior such as:
 - screenshot captures
 - automation action execution
 
+### Render trace
+
+`POST /render-trace` captures a bounded sequence of native render frames.
+
+Request fields:
+
+- `frames`
+- `captureScreenshots`
+- `annotated`
+- optional nested `action`
+- optional nested `uiAction`
+
+Each returned frame can include:
+
+- timestamp
+- shell state
+- interactive nodes
+- optional screenshot path
+
+This is the main tool for transient native behaviors like tab insertion, rerender churn, and quick shell-state transitions.
+
 ### Screenshots
 
 `POST /screenshot` supports:
@@ -239,6 +306,8 @@ The current smoke run validates:
 - delete the only thread in a project and confirm the empty state
 - recover from the empty project state by creating a new thread
 - annotated screenshot capture
+- desktop window enumeration
+- render trace capture
 - event logging
 
 This is the current regression baseline for native automation coverage.
@@ -256,19 +325,18 @@ The app-owned new-project dialog is automatable. The external picker is not.
 
 ### Render-time and animation introspection
 
-I now have a native event stream and can inspect sequencing around render-time behavior, but I still do not have true frame-by-frame tracing for:
+I now have:
 
-- tab insert/remove animation phases
-- subtle layout shifts during tab creation
-- transient loading badges or flashes that appear between frames
-- frame-by-frame sidebar or header transitions
+- event sequencing
+- multi-frame render trace capture
+- optional per-frame screenshots
 
-Today I can catch those by combining:
+That is enough to inspect many transient behaviors around tab creation, layout refreshes, and quick native rerenders.
 
-- the event log
-- repeated screenshot capture
-- inspecting the final UI tree
-- comparing terminal-state or shell-state before and after
+I still do not have:
+
+- a high-FPS video recorder for native frames
+- automatic diff summaries between successive native frames
 
 ### Style and spacing introspection
 
@@ -298,24 +366,30 @@ I still have to infer that from XAML/resources and screenshots rather than ask t
 
 ### Pointer nuance
 
-I now have app-owned visual-state controls for hover/pressed inspection and an app-owned double-click path for thread rename.
+I now have:
+
+- app-owned hover/pressed visual-state control
+- app-owned double-click rename
+- real coordinate pointer injection
+- drag support through desktop actions
 
 I still do not have:
 
-- drag
-- click at arbitrary coordinates
-- resize drag handles
-- true physical pointer move/click paths
+- element-aware drag handles inside the native shell without using coordinates
+- higher-level drag semantics like “drag this tab after that tab”
 
 ### Keyboard nuance outside the terminal
 
-I can send terminal text via the semantic `input` action, but I do not yet have generic native shell key simulation for:
+I now have generic Win32 key injection through desktop actions, which covers:
 
 - `Tab`
 - `Shift+Tab`
 - `F2`
 - `Delete`
-- accelerators against arbitrary focused WinUI controls
+- `Esc`
+- common modifier chords
+
+The remaining limitation is that this is focus-driven keyboard injection, not semantic intent. I still have to make sure the right native or desktop control has focus first.
 
 ### Some product behaviors do not exist yet
 
@@ -356,20 +430,7 @@ Add an opt-in trace around UI actions that captures:
 
 This is the missing piece for “I clicked new tab and something flashed weird for 150ms.”
 
-### 3. Native pointer and keyboard primitives
-
-Add UI actions for:
-
-- `doubleClick`
-- `hover`
-- `pressKey`
-- `pressChord`
-- `clickPoint`
-- `drag`
-
-That would cover rename-on-double-click, hover states, drag reorder, and coordinate-sensitive polish work.
-
-### 4. Explicit style/debug tagging
+### 3. Explicit style/debug tagging
 
 Add optional automation IDs or debug names for:
 
@@ -393,6 +454,8 @@ For app-owned shell behavior, I now have strong control over:
 - terminal inspection
 - event logging
 - hover/pressed visual-state inspection
+- desktop window enumeration and external window actions
+- render trace capture
 - annotated screenshots
 
-The biggest remaining observability gap is frame-by-frame render tracing and true native pointer/keyboard simulation.
+The biggest remaining observability gap is higher-level semantic tracing for complex animations and richer drag semantics, not basic access.

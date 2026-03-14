@@ -124,6 +124,11 @@ namespace SelfContainedDeployment.Automation
                         await WriteJsonAsync(stream, 200, uiTree).ConfigureAwait(false);
                         break;
 
+                    case ("GET", "/desktop-windows"):
+                        var desktopWindows = _window.GetDesktopWindows();
+                        await WriteJsonAsync(stream, 200, desktopWindows).ConfigureAwait(false);
+                        break;
+
                     case ("GET", "/events"):
                         await WriteJsonAsync(stream, 200, NativeAutomationEventLog.Snapshot()).ConfigureAwait(false);
                         break;
@@ -144,6 +149,18 @@ namespace SelfContainedDeployment.Automation
                         var terminalStateRequest = ReadJson<NativeAutomationTerminalStateRequest>(request.Body);
                         var terminalState = await InvokeOnUiThreadAsync(() => _window.GetTerminalStateAsync(terminalStateRequest)).ConfigureAwait(false);
                         await WriteJsonAsync(stream, 200, terminalState).ConfigureAwait(false);
+                        break;
+
+                    case ("POST", "/desktop-action"):
+                        var desktopActionRequest = ReadJson<NativeAutomationDesktopActionRequest>(request.Body);
+                        var desktopAction = _window.PerformDesktopAction(desktopActionRequest);
+                        await WriteJsonAsync(stream, 200, desktopAction).ConfigureAwait(false);
+                        break;
+
+                    case ("POST", "/render-trace"):
+                        var renderTraceRequest = ReadJson<NativeAutomationRenderTraceRequest>(request.Body);
+                        var renderTrace = await InvokeOnUiThreadAsync(() => _window.CaptureRenderTraceAsync(renderTraceRequest)).ConfigureAwait(false);
+                        await WriteJsonAsync(stream, 200, renderTrace).ConfigureAwait(false);
                         break;
 
                     case ("POST", "/screenshot"):

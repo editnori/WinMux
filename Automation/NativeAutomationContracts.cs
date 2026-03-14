@@ -270,4 +270,103 @@ namespace SelfContainedDeployment.Automation
 
         public Dictionary<string, string> Data { get; set; } = new();
     }
+
+    public sealed class NativeAutomationDesktopWindowsResponse
+    {
+        public List<NativeAutomationDesktopWindowNode> Windows { get; set; } = new();
+    }
+
+    public sealed class NativeAutomationDesktopWindowNode
+    {
+        public string Handle { get; set; }
+
+        public string Title { get; set; }
+
+        public string ClassName { get; set; }
+
+        public bool Visible { get; set; }
+
+        public bool Enabled { get; set; }
+
+        public bool Focused { get; set; }
+
+        public double X { get; set; }
+
+        public double Y { get; set; }
+
+        public double Width { get; set; }
+
+        public double Height { get; set; }
+
+        public List<NativeAutomationDesktopWindowNode> Children { get; set; } = new();
+    }
+
+    public sealed class NativeAutomationDesktopActionRequest
+    {
+        public string Action { get; set; }
+
+        public string Handle { get; set; }
+
+        public string TitleContains { get; set; }
+
+        public string ClassName { get; set; }
+
+        public double? X { get; set; }
+
+        public double? Y { get; set; }
+
+        public double? EndX { get; set; }
+
+        public double? EndY { get; set; }
+
+        public int DurationMs { get; set; }
+
+        public string Value { get; set; }
+    }
+
+    public sealed class NativeAutomationDesktopActionResponse
+    {
+        public bool Ok { get; set; }
+
+        public string Message { get; set; }
+
+        public NativeAutomationDesktopWindowNode Target { get; set; }
+    }
+
+    public sealed class NativeAutomationRenderTraceRequest
+    {
+        public int Frames { get; set; }
+
+        public bool CaptureScreenshots { get; set; }
+
+        public bool Annotated { get; set; }
+
+        public NativeAutomationActionRequest Action { get; set; }
+
+        public NativeAutomationUiActionRequest UiAction { get; set; }
+    }
+
+    public sealed class NativeAutomationRenderTraceResponse
+    {
+        public bool Ok { get; set; }
+
+        public string Message { get; set; }
+
+        public NativeAutomationState State { get; set; }
+
+        public List<NativeAutomationRenderFrame> Frames { get; set; } = new();
+    }
+
+    public sealed class NativeAutomationRenderFrame
+    {
+        public int Index { get; set; }
+
+        public string Timestamp { get; set; }
+
+        public string ScreenshotPath { get; set; }
+
+        public NativeAutomationState State { get; set; }
+
+        public List<NativeAutomationUiNode> InteractiveNodes { get; set; } = new();
+    }
 }

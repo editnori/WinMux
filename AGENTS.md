@@ -12,7 +12,7 @@ The current shape of the app is:
 - ConPTY-backed shell process host
 - `WebView2` terminal renderer using local HTML/CSS/JS
 - Bun-managed debug helpers for attaching Playwright to the embedded renderer
-- native automation endpoints for shell state, UI-tree inspection, style metadata, generic UI actions, event logging, terminal inspection, and screenshots
+- native automation endpoints for shell state, UI-tree inspection, style metadata, generic UI actions, desktop window automation, render tracing, event logging, terminal inspection, and screenshots
 
 This file is the handoff document for future agents.
 
@@ -28,7 +28,7 @@ What exists now:
 - ConPTY process bridge in C#
 - shared renderer under `Web/` hosted inside `WebView2`
 - WebView2 CDP debug workflow for Playwright-style inspection
-- native automation loop for shell state, UI-tree snapshots, style metadata, generic UI actions, terminal snapshots, event logs, and native window screenshots
+- native automation loop for shell state, UI-tree snapshots, style metadata, generic UI actions, desktop window automation, render traces, terminal snapshots, event logs, and native window screenshots
 
 What does not exist yet:
 
@@ -154,10 +154,13 @@ bun run native:health
 bun run native:state
 bun run native:ui-tree
 bun run native:ui-refs
+bun run native:desktop-windows
 bun run native:events
 bun run native:events:clear
 bun run native:ui-action -- '{"action":"click","refLabel":"e2"}'
+bun run native:desktop-action -- '{"action":"focusWindow","titleContains":"WinMux"}'
 bun run native:terminal-state
+bun run native:render-trace
 bun run native:action -- '{"action":"newThread"}'
 bun run native:screenshot
 bun run native:screenshot:annotated
@@ -217,6 +220,8 @@ What this is good for:
 - dumping the WinUI visual tree and interactive controls
 - reading resolved colors, padding, margins, and sizing from the same tree
 - targeting native controls by `automationId`, `elementId`, `name`, or annotated `refLabel`
+- controlling external OS windows through desktop window enumeration and Win32 input injection
+- tracing multiple native render frames after an action
 - reading event logs for tab/thread/render sequencing
 - creating threads and tabs from the outside
 - switching theme and capturing native window screenshots

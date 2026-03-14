@@ -9,6 +9,8 @@ What this gives you:
 - inspect resolved layout/style metadata for native controls
 - trigger thread, tab, and theme actions without manual clicking
 - target native controls by `automationId`, `elementId`, `name`, or annotated `refLabel`
+- inspect external desktop windows and drive them with Win32 input injection
+- capture multi-frame native render traces after actions
 - inspect native event logs for tab/thread/render sequencing
 - capture native window screenshots from the running WinUI app
 - capture annotated native screenshots with overlay labels
@@ -53,8 +55,11 @@ bun run native:health
 bun run native:state
 bun run native:ui-tree
 bun run native:ui-refs
+bun run native:desktop-windows
 bun run native:events
+bun run native:desktop-action -- '{"action":"focusWindow","titleContains":"WinMux"}'
 bun run native:terminal-state
+bun run native:render-trace
 bun run native:smoke
 bun run webview2:targets
 ```
@@ -133,6 +138,8 @@ The native automation loop covers the shell-level gaps that CDP cannot:
 
 - shell state inspection
 - native control discovery and generic UI actions
+- desktop window enumeration and Win32 pointer/keyboard control
+- render trace capture
 - native event logs
 - thread and tab actions
 - theme changes

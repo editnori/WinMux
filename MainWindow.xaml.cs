@@ -5,6 +5,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Media;
 using SelfContainedDeployment.Automation;
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
@@ -72,6 +73,109 @@ namespace SelfContainedDeployment
         public Task<NativeAutomationTerminalStateResponse> GetTerminalStateAsync(NativeAutomationTerminalStateRequest request)
         {
             return MainPage?.GetTerminalStateAsync(request) ?? Task.FromResult(new NativeAutomationTerminalStateResponse());
+        }
+
+        public NativeAutomationDesktopWindowsResponse GetDesktopWindows()
+        {
+            return NativeDesktopAutomation.GetWindows();
+        }
+
+        public NativeAutomationDesktopActionResponse PerformDesktopAction(NativeAutomationDesktopActionRequest request)
+        {
+            return NativeDesktopAutomation.PerformAction(request);
+        }
+
+        public async Task<NativeAutomationRenderTraceResponse> CaptureRenderTraceAsync(NativeAutomationRenderTraceRequest request)
+        {
+            request ??= new NativeAutomationRenderTraceRequest();
+            int frameCount = Math.Clamp(request.Frames <= 0 ? 8 : request.Frames, 1, 30);
+            List<NativeAutomationRenderFrame> frames = new();
+
+            try
+            {
+                if (request.Action is not null)
+                {
+                    PerformAutomationAction(request.Action);
+                }
+
+                if (request.UiAction is not null)
+                {
+                    PerformAutomationUiAction(request.UiAction);
+                }
+
+                string traceDirectory = request.CaptureScreenshots
+                    ? Path.Combine(Path.GetTempPath(), $"native-render-trace-{Environment.ProcessId}-{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}")
+                    : null;
+
+                if (!string.IsNullOrWhiteSpace(traceDirectory))
+                {
+                    Directory.CreateDirectory(traceDirectory);
+                }
+
+                for (int index = 0; index < frameCount; index++)
+                {
+                    await WaitForNextRenderAsync();
+
+                    string screenshotPath = null;
+                    if (request.CaptureScreenshots)
+                    {
+                        bool annotated = request.Annotated;
+                        if (annotated)
+                        {
+                            MainPage?.ShowAutomationOverlay();
+                            await WaitForNextRenderAsync();
+                        }
+
+                        try
+                        {
+                            screenshotPath = Path.Combine(traceDirectory, $"frame-{index:00}.png");
+                            CaptureAutomationScreenshotInternal(screenshotPath);
+                        }
+                        finally
+                        {
+                            if (annotated)
+                            {
+                                MainPage?.HideAutomationOverlay();
+                                await WaitForNextRenderAsync();
+                            }
+                        }
+                    }
+
+                    NativeAutomationUiTreeResponse tree = GetAutomationUiTree();
+                    frames.Add(new NativeAutomationRenderFrame
+                    {
+                        Index = index,
+                        Timestamp = DateTimeOffset.UtcNow.ToString("O"),
+                        ScreenshotPath = screenshotPath,
+                        State = GetAutomationState(),
+                        InteractiveNodes = tree?.InteractiveNodes ?? new System.Collections.Generic.List<NativeAutomationUiNode>(),
+                    });
+                }
+
+                NativeAutomationEventLog.Record("render", "trace.captured", $"Captured {frameCount} render frame(s)", new System.Collections.Generic.Dictionary<string, string>
+                {
+                    ["frameCount"] = frameCount.ToString(),
+                    ["screenshots"] = request.CaptureScreenshots.ToString(),
+                    ["annotated"] = request.Annotated.ToString(),
+                });
+
+                return new NativeAutomationRenderTraceResponse
+                {
+                    Ok = true,
+                    State = GetAutomationState(),
+                    Frames = frames,
+                };
+            }
+            catch (Exception ex)
+            {
+                return new NativeAutomationRenderTraceResponse
+                {
+                    Ok = false,
+                    Message = ex.Message,
+                    State = GetAutomationState(),
+                    Frames = frames,
+                };
+            }
         }
 
         public async Task<NativeAutomationScreenshotResponse> CaptureAutomationScreenshotAsync(NativeAutomationScreenshotRequest request)

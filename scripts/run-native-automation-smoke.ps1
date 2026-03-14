@@ -92,6 +92,10 @@ try {
 
     $null = Invoke-AutomationPost "/events/clear" $null
 
+    $desktopWindows = Invoke-AutomationGet "/desktop-windows"
+    Assert-True (@($desktopWindows.windows | Where-Object { $_.title -eq "WinMux" }).Count -gt 0) "Desktop window enumeration did not find WinMux."
+    Add-Check "desktop-windows" "desktop window enumeration is available"
+
     $state = Invoke-AutomationGet "/state"
     Assert-True (@($state.projects).Count -ge 1) "Expected at least one project."
     Assert-True (@($state.threads).Count -ge 1) "Expected at least one thread."
@@ -345,6 +349,18 @@ try {
     $annotatedShot = Invoke-AutomationPost "/screenshot" @{ path = ""; annotated = $true }
     Assert-True ($annotatedShot.ok -eq $true) "Annotated screenshot failed."
     Add-Check "annotated-screenshot" $annotatedShot.path
+
+    $renderTrace = Invoke-AutomationPost "/render-trace" @{
+        frames = 3
+        captureScreenshots = $false
+        annotated = $false
+        action = @{
+            action = "newTab"
+        }
+    }
+    Assert-True ($renderTrace.ok -eq $true) "Render trace failed."
+    Assert-True (@($renderTrace.frames).Count -eq 3) "Render trace did not capture the expected number of frames."
+    Add-Check "render-trace" "$(@($renderTrace.frames).Count) frame(s) captured"
 
     $events = Invoke-AutomationGet "/events"
     $eventNames = @($events.events | ForEach-Object { $_.name })
