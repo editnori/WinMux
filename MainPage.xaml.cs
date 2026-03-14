@@ -3,31 +3,33 @@
 
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Navigation;
 using System;
-using System.Collections.Generic;
-using System.Linq;
+using System.Collections.ObjectModel;
 
 namespace SelfContainedDeployment
 {
     public partial class MainPage : Page
     {
         public static MainPage Current;
-        public List<Scenario> Scenarios => this.scenarios;
+        private readonly ObservableCollection<WorkspaceRecord> workspaces;
 
         public MainPage()
         {
             InitializeComponent();
 
-            // This is a static public property that allows downstream pages to get a handle to the MainPage instance
-            // in order to call methods that are in this class.
             Current = this;
+
+            workspaces = WorkspaceSeedBuilder.Create();
+            WorkspaceList.ItemsSource = workspaces;
+
+            if (workspaces.Count > 0)
+            {
+                WorkspaceList.SelectedIndex = 0;
+            }
         }
 
         public void NotifyUser(string strMessage, InfoBarSeverity severity, bool isOpen = true)
         {
-            // If called from the UI thread, then update immediately.
-            // Otherwise, schedule a task on the UI thread to perform the update.
             if (DispatcherQueue.HasThreadAccess)
             {
                 UpdateStatus(strMessage, severity, isOpen);
@@ -48,103 +50,205 @@ namespace SelfContainedDeployment
             infoBar.Severity = severity;
         }
 
-        private void NavView_Loaded(object sender, RoutedEventArgs e)
+        private void WorkspaceList_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            foreach (Scenario item in scenarios)
+            var workspace = WorkspaceList.SelectedItem as WorkspaceRecord;
+            if (workspace is null)
             {
-                NavView.MenuItems.Add(new NavigationViewItem
+                return;
+            }
+
+            WorkspaceNameBox.Text = workspace.Title;
+            SessionList.ItemsSource = workspace.Sessions;
+            SessionList.SelectedIndex = workspace.Sessions.Count > 0 ? 0 : -1;
+            UpdateWorkspaceDetails(workspace);
+            NotifyUser("Workspace loaded: " + workspace.Title, InfoBarSeverity.Informational);
+        }
+
+        private void SessionList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            var session = SessionList.SelectedItem as SessionRecord;
+            if (session is null)
+            {
+                SessionNameBox.Text = string.Empty;
+                SessionKindText.Text = "No session selected";
+                SessionMetaText.Text = "Pick a surface to inspect its WSL profile, assistant thread name, or browser attachment details.";
+                LaunchCommandBox.Text = string.Empty;
+                BehaviorNotesBox.Text = string.Empty;
+                BrowserModeText.Text = string.Empty;
+                return;
+            }
+
+            SessionNameBox.Text = session.DisplayName;
+            UpdateSessionDetails(session);
+        }
+
+        private void RenameWorkspace_Click(object sender, RoutedEventArgs e)
+        {
+            var workspace = WorkspaceList.SelectedItem as WorkspaceRecord;
+            var nextName = WorkspaceNameBox.Text?.Trim();
+            if (workspace is null || string.IsNullOrWhiteSpace(nextName))
+            {
+                NotifyUser("Pick a workspace and enter a name first.", InfoBarSeverity.Warning);
+                return;
+            }
+
+            workspace.Title = nextName;
+            UpdateWorkspaceDetails(workspace);
+            NotifyUser("Workspace renamed to " + workspace.Title, InfoBarSeverity.Success);
+        }
+
+        private void RenameSession_Click(object sender, RoutedEventArgs e)
+        {
+            var session = SessionList.SelectedItem as SessionRecord;
+            var nextName = SessionNameBox.Text?.Trim();
+            if (session is null || string.IsNullOrWhiteSpace(nextName))
+            {
+                NotifyUser("Pick a session and enter a name first.", InfoBarSeverity.Warning);
+                return;
+            }
+
+            session.DisplayName = nextName;
+            UpdateSessionDetails(session);
+            NotifyUser("Session renamed to " + session.DisplayName, InfoBarSeverity.Success);
+        }
+
+        private void AddWslSession_Click(object sender, RoutedEventArgs e)
+        {
+            var workspace = RequireWorkspace();
+            if (workspace is null)
+            {
+                return;
+            }
+
+            var session = new SessionRecord(
+                "WSL / " + workspace.FolderName + " / shell-" + (workspace.Sessions.Count + 1),
+                "WSL terminal surface",
+                workspace.Distribution,
+                "wsl.exe -d \"" + workspace.Distribution + "\" --cd \"" + workspace.RepoPath + "\"",
+                "Primary terminal lane",
+                "Launch directly into the selected repo so the terminal feels anchored to the project rather than to a generic tab.");
+
+            AddSession(workspace, session, "WSL surface created for " + workspace.Title);
+        }
+
+        private void AddCodexSession_Click(object sender, RoutedEventArgs e)
+        {
+            var workspace = RequireWorkspace();
+            if (workspace is null)
+            {
+                return;
+            }
+
+            var session = new SessionRecord(
+                "Codex / " + workspace.FolderName + " / thread-" + (CountSessionsByKind(workspace, "Codex thread") + 1),
+                "Codex thread",
+                "codex",
+                "codex --cwd \"" + workspace.RepoPath + "\"",
+                "Assistant surface grouped with the project",
+                "This is where project-folder style naming starts to matter. The thread name is meant to persist with the workspace instead of disappearing into a pile of terminals.");
+
+            AddSession(workspace, session, "Codex thread added to " + workspace.Title);
+        }
+
+        private void AddClaudeSession_Click(object sender, RoutedEventArgs e)
+        {
+            var workspace = RequireWorkspace();
+            if (workspace is null)
+            {
+                return;
+            }
+
+            var session = new SessionRecord(
+                "Claude Code / " + workspace.FolderName + " / thread-" + (CountSessionsByKind(workspace, "Claude Code thread") + 1),
+                "Claude Code thread",
+                "claude-code",
+                "claude-code --project \"" + workspace.RepoPath + "\"",
+                "Assistant surface grouped with the project",
+                "Claude Code threads should rename cleanly and live beside terminal sessions without pretending they are the same thing.");
+
+            AddSession(workspace, session, "Claude Code thread added to " + workspace.Title);
+        }
+
+        private void AttachBrowserSession_Click(object sender, RoutedEventArgs e)
+        {
+            var workspace = RequireWorkspace();
+            if (workspace is null)
+            {
+                return;
+            }
+
+            var session = new SessionRecord(
+                "Browser / " + workspace.FolderName,
+                "Browser attachment",
+                "Chromium profile",
+                "msedge.exe --profile-directory=Default",
+                "Slide-over companion surface",
+                "The browser belongs beside the workspace, not inside the terminal. Later this should slide in over the shell instead of constantly shrinking every terminal column.");
+
+            AddSession(workspace, session, "Browser surface attached to " + workspace.Title);
+        }
+
+        private WorkspaceRecord RequireWorkspace()
+        {
+            var workspace = WorkspaceList.SelectedItem as WorkspaceRecord;
+            if (workspace is null)
+            {
+                NotifyUser("Select a workspace first.", InfoBarSeverity.Warning);
+            }
+
+            return workspace;
+        }
+
+        private void AddSession(WorkspaceRecord workspace, SessionRecord session, string message)
+        {
+            workspace.Sessions.Add(session);
+            workspace.RefreshSummary();
+            WorkspaceList.UpdateLayout();
+            SessionList.ItemsSource = workspace.Sessions;
+            SessionList.SelectedItem = session;
+            NotifyUser(message, InfoBarSeverity.Success);
+        }
+
+        private static int CountSessionsByKind(WorkspaceRecord workspace, string kindLabel)
+        {
+            var count = 0;
+            foreach (var session in workspace.Sessions)
+            {
+                if (session.KindLabel == kindLabel)
                 {
-                    Content = item.Title,
-                    Tag = item.ClassName,
-                    Icon = new FontIcon() { FontFamily = new("Segoe MDL2 Assets"), Glyph = "\uE82D" }
-                });
-            }
-
-            // NavView doesn't load any page by default, so load home page.
-            NavView.SelectedItem = NavView.MenuItems[0];
-
-            // If navigation occurs on SelectionChanged, this isn't needed.
-            // Because we use ItemInvoked to navigate, we need to call Navigate
-            // here to load the home page.
-            if (scenarios is not null && scenarios.Count > 0)
-            {
-                NavView_Navigate(scenarios.First().ClassName, new Microsoft.UI.Xaml.Media.Animation.EntranceNavigationTransitionInfo());
-            }
-        }
-
-        private void NavView_Navigate(string navItemTag, Microsoft.UI.Xaml.Media.Animation.NavigationTransitionInfo transitionInfo)
-        {
-            Type page;
-
-            if (navItemTag == nameof(SettingsPage))
-            {
-                page = typeof(SettingsPage);
-            }
-            else
-            {
-                Scenario item = scenarios.First(p => p.ClassName.Equals(navItemTag));
-                page = Type.GetType(item.ClassName);
-            }
-
-            // Get the page type before navigation so you can prevent duplicate
-            // entries in the backstack.
-            var preNavPageType = ContentFrame.CurrentSourcePageType;
-
-            // Only navigate if the selected page isn't currently loaded.
-            if ((page is not null) && !Type.Equals(preNavPageType, page))
-            {
-                ContentFrame.Navigate(page, null, transitionInfo);
-            }
-        }
-
-        private void NavView_BackRequested(NavigationView sender, NavigationViewBackRequestedEventArgs args)
-        {
-            if (ContentFrame.CanGoBack)
-            {
-                ContentFrame.GoBack();
-            }
-        }
-
-        private void NavView_ItemInvoked(NavigationView sender, NavigationViewItemInvokedEventArgs args)
-        {
-            var naViewItemInvoked = (NavigationViewItem)args.InvokedItemContainer;
-
-            if (args.IsSettingsInvoked)
-            {
-                NavView_Navigate(nameof(SettingsPage), args.RecommendedNavigationTransitionInfo);
-            }
-            else if (args.InvokedItemContainer is not null)
-            {
-                var navItemTag = args.InvokedItemContainer.Tag?.ToString();
-                if (!string.IsNullOrEmpty(navItemTag))
-                {
-                    NavView_Navigate(navItemTag, new Microsoft.UI.Xaml.Media.Animation.EntranceNavigationTransitionInfo());
+                    count++;
                 }
             }
+
+            return count;
         }
 
-        private void ContentFrame_Navigated(object sender, NavigationEventArgs e)
+        private void UpdateWorkspaceDetails(WorkspaceRecord workspace)
         {
-            NavView.IsBackEnabled = ContentFrame.CanGoBack;
+            DetailTitleText.Text = workspace.Title;
+            WorkspaceMetaText.Text =
+                "Folder: " + workspace.FolderName + Environment.NewLine +
+                "Repo: " + workspace.RepoPath + Environment.NewLine +
+                "Branch: " + workspace.Branch + Environment.NewLine +
+                "WSL target: " + workspace.Distribution + Environment.NewLine +
+                "Layout intent: " + workspace.LayoutIntent;
 
-            if (ContentFrame.SourcePageType == typeof(SettingsPage))
-            {
-                // SettingsItem is not part of NavView.MenuItems, and doesn't have a Tag.
-                NavView.SelectedItem = (NavigationViewItem)NavView.SettingsItem;
-                NavView.Header = "Settings";
-            }
-            else if (ContentFrame.SourcePageType != null)
-            {
-                var item = scenarios.First(p => p.ClassName == e.SourcePageType.FullName);
-                var menuItems = NavView.MenuItems;
+            DirectionText.Text =
+                "Assistant threads stay attached to the active project workspace. " +
+                "That gives Codex and Claude Code durable names and a place in the shell before we add true terminal multiplexing.";
+        }
 
-                NavView.SelectedItem = NavView.MenuItems
-                    .OfType<NavigationViewItem>()
-                    .First(n => n.Tag.Equals(item.ClassName));
-
-                NavView.Header =
-                    ((NavigationViewItem)NavView.SelectedItem)?.Content?.ToString();
-            }
+        private void UpdateSessionDetails(SessionRecord session)
+        {
+            SessionKindText.Text = session.DisplayName;
+            SessionMetaText.Text =
+                "Kind: " + session.KindLabel + Environment.NewLine +
+                "Host: " + session.HostLabel + Environment.NewLine +
+                "Attachment: " + session.AttachmentMode;
+            LaunchCommandBox.Text = session.LaunchCommand;
+            BehaviorNotesBox.Text = session.Notes;
+            BrowserModeText.Text = "Browser strategy: " + session.AttachmentMode;
         }
     }
 }
