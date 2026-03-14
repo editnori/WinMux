@@ -10,7 +10,7 @@ The current shape of the app is:
 - ConPTY-backed shell process host
 - `WebView2` terminal renderer using local HTML/CSS/JS
 - Bun-managed debug helpers for attaching Playwright to the embedded renderer
-- native automation endpoints for shell state, semantic actions, and screenshots
+- native automation endpoints for shell state, UI-tree inspection, generic UI actions, terminal inspection, and screenshots
 
 This file is the handoff document for future agents.
 
@@ -26,13 +26,12 @@ What exists now:
 - ConPTY process bridge in C#
 - shared renderer under `Web/` hosted inside `WebView2`
 - WebView2 CDP debug workflow for Playwright-style inspection
-- native automation loop for shell state, actions, and native window screenshots
+- native automation loop for shell state, UI-tree snapshots, generic UI actions, terminal snapshots, and native window screenshots
 
 What does not exist yet:
 
 - split panes inside a tab
 - custom tab strip visuals
-- generic control-level native UI automation beyond the semantic actions
 - durable workspace/session persistence
 
 ## Important files
@@ -150,8 +149,13 @@ bun install
 bun run webview2:start
 bun run native:health
 bun run native:state
+bun run native:ui-tree
+bun run native:ui-refs
+bun run native:ui-action -- '{"action":"click","refLabel":"e2"}'
+bun run native:terminal-state
 bun run native:action -- '{"action":"newThread"}'
 bun run native:screenshot
+bun run native:screenshot:annotated
 bun run webview2:targets
 bun run webview2:screenshot
 bun run webview2:eval -- "document.title"
@@ -204,8 +208,12 @@ bun run webview2:eval -- "document.title"
 What this is good for:
 
 - inspecting shell state without clicking through it manually
+- dumping the WinUI visual tree and interactive controls
+- targeting native controls by `automationId`, `elementId`, `name`, or annotated `refLabel`
 - creating threads and tabs from the outside
 - switching theme and capturing native window screenshots
+- taking annotated native screenshots with overlay refs
+- inspecting terminal scrollback, visible rows, selection, cursor, and shell metadata
 - inspecting the real renderer inside the native app
 - CSS and JS debugging
 - capturing screenshots
@@ -213,10 +221,9 @@ What this is good for:
 
 What it is not good for:
 
-- arbitrary control discovery/clicking across all WinUI controls
 - debugging layout of non-WebView controls
 
-For full native automation, use Windows-native UI automation tools later.
+If the built-in control layer ever stops being enough, add Windows-native UI automation as a fallback instead of replacing the internal hooks.
 
 ## UI direction
 
@@ -251,3 +258,4 @@ The biggest remaining visual gap is the stock `TabView`. It is the heaviest rema
 - Keep native shell work in `MainPage.*`, `SettingsPage.*`, and `Styles.xaml`.
 - Prefer space efficiency over decorative chrome.
 - If you need browser-style renderer debugging, use the existing WebView2 flow before inventing a new one.
+- Prefer the built-in native automation routes before reaching for external UI automation.

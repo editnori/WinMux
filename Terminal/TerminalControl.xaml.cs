@@ -1,8 +1,12 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using SelfContainedDeployment.Automation;
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Text;
 using System.Text.Json;
+using System.Threading.Tasks;
 using Windows.ApplicationModel.DataTransfer;
 
 namespace SelfContainedDeployment.Terminal
@@ -23,6 +27,8 @@ namespace SelfContainedDeployment.Terminal
         private int _rows = 32;
         private string _sessionTitle = "Terminal";
         private ElementTheme _themePreference = ElementTheme.Default;
+        private readonly StringBuilder _outputBuffer = new();
+        private readonly Dictionary<string, TaskCompletionSource<NativeAutomationTerminalSnapshot>> _inspectionRequests = new();
 
         public event EventHandler<string> SessionTitleChanged;
         public event EventHandler SessionExited;
@@ -130,6 +136,9 @@ namespace SelfContainedDeployment.Terminal
                 case "title":
                     UpdateSessionTitle(string.IsNullOrWhiteSpace(message.Title) ? _sessionTitle : message.Title.Trim());
                     break;
+                case "state":
+                    CompleteInspection(message);
+                    break;
                 case "focus":
                     FocusTerminal();
                     break;
@@ -174,6 +183,7 @@ namespace SelfContainedDeployment.Terminal
                     return;
                 }
 
+                AppendOutput(text);
                 PostMessage(new HostMessage { Type = "output", Data = text });
                 HideStatus();
             });
@@ -238,6 +248,42 @@ namespace SelfContainedDeployment.Terminal
         public void RequestFit()
         {
             PostMessage(new HostMessage { Type = "fit" });
+        }
+
+        public async Task<NativeAutomationTerminalSnapshot> GetTerminalSnapshotAsync()
+        {
+            NativeAutomationTerminalSnapshot fallback = BuildFallbackTerminalSnapshot();
+            if (_disposed || !_rendererReady || !_webViewInitialized || TerminalView.CoreWebView2 is null)
+            {
+                return fallback;
+            }
+
+            string requestId = Guid.NewGuid().ToString("N");
+            var tcs = new TaskCompletionSource<NativeAutomationTerminalSnapshot>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _inspectionRequests[requestId] = tcs;
+
+            PostMessage(new HostMessage
+            {
+                Type = "inspect",
+                RequestId = requestId,
+            });
+
+            try
+            {
+                NativeAutomationTerminalSnapshot snapshot = await tcs.Task.WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(true);
+                snapshot.Title ??= _sessionTitle;
+                snapshot.DisplayWorkingDirectory ??= DisplayWorkingDirectory;
+                snapshot.ShellCommand ??= ShellCommand;
+                snapshot.RendererReady = _rendererReady;
+                snapshot.Started = _started;
+                snapshot.BufferTail ??= BuildFallbackTerminalSnapshot().BufferTail;
+                return snapshot;
+            }
+            catch
+            {
+                _inspectionRequests.Remove(requestId);
+                return fallback;
+            }
         }
 
         public void DisposeTerminal()
@@ -327,6 +373,71 @@ namespace SelfContainedDeployment.Terminal
             return Environment.CurrentDirectory;
         }
 
+        private void AppendOutput(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return;
+            }
+
+            _outputBuffer.Append(text);
+            const int maxChars = 120000;
+            if (_outputBuffer.Length > maxChars)
+            {
+                _outputBuffer.Remove(0, _outputBuffer.Length - maxChars);
+            }
+        }
+
+        private NativeAutomationTerminalSnapshot BuildFallbackTerminalSnapshot()
+        {
+            string buffer = _outputBuffer.ToString();
+            if (buffer.Length > 4000)
+            {
+                buffer = buffer[^4000..];
+            }
+
+            return new NativeAutomationTerminalSnapshot
+            {
+                Title = _sessionTitle,
+                DisplayWorkingDirectory = DisplayWorkingDirectory,
+                ShellCommand = ShellCommand,
+                RendererReady = _rendererReady,
+                Started = _started,
+                Cols = _cols,
+                Rows = _rows,
+                BufferTail = buffer,
+            };
+        }
+
+        private void CompleteInspection(RendererMessage message)
+        {
+            if (message is null || string.IsNullOrWhiteSpace(message.RequestId))
+            {
+                return;
+            }
+
+            if (!_inspectionRequests.Remove(message.RequestId, out TaskCompletionSource<NativeAutomationTerminalSnapshot> tcs))
+            {
+                return;
+            }
+
+            tcs.TrySetResult(new NativeAutomationTerminalSnapshot
+            {
+                Title = string.IsNullOrWhiteSpace(message.Title) ? _sessionTitle : message.Title,
+                DisplayWorkingDirectory = DisplayWorkingDirectory,
+                ShellCommand = ShellCommand,
+                RendererReady = _rendererReady,
+                Started = _started,
+                Cols = Math.Max(1, message.Cols),
+                Rows = Math.Max(1, message.Rows),
+                CursorX = message.CursorX,
+                CursorY = message.CursorY,
+                Selection = message.Selection,
+                VisibleText = message.VisibleText,
+                BufferTail = string.IsNullOrWhiteSpace(message.BufferTail) ? BuildFallbackTerminalSnapshot().BufferTail : message.BufferTail,
+            });
+        }
+
         private void OnActualThemeChanged(FrameworkElement sender, object args)
         {
             if (_themePreference == ElementTheme.Default)
@@ -404,6 +515,12 @@ namespace SelfContainedDeployment.Terminal
             public int Cols { get; set; }
             public int Rows { get; set; }
             public string Title { get; set; }
+            public string RequestId { get; set; }
+            public int CursorX { get; set; }
+            public int CursorY { get; set; }
+            public string Selection { get; set; }
+            public string VisibleText { get; set; }
+            public string BufferTail { get; set; }
         }
 
         private sealed class HostMessage
@@ -413,6 +530,7 @@ namespace SelfContainedDeployment.Terminal
             public string Text { get; set; }
             public string Title { get; set; }
             public string Theme { get; set; }
+            public string RequestId { get; set; }
         }
     }
 }

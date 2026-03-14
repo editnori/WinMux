@@ -1,6 +1,9 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
+using Microsoft.UI.Xaml.Automation.Peers;
+using Microsoft.UI.Xaml.Automation.Provider;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media;
 using SelfContainedDeployment.Automation;
 using SelfContainedDeployment.Shell;
@@ -9,6 +12,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Windows.Storage.Pickers;
+using Windows.Foundation;
 using WinRT.Interop;
 
 namespace SelfContainedDeployment
@@ -55,6 +59,152 @@ namespace SelfContainedDeployment
                 RefreshProjectTree();
                 UpdateHeader();
             }
+        }
+
+        public NativeAutomationUiTreeResponse GetAutomationUiTree()
+        {
+            int interactiveIndex = 0;
+            NativeAutomationUiNode root = BuildUiNodeTree(ShellRoot, "root", ref interactiveIndex);
+            List<NativeAutomationUiNode> interactiveNodes = FlattenUiNodes(root)
+                .Where(node => node.Interactive && node.Visible)
+                .ToList();
+
+            return new NativeAutomationUiTreeResponse
+            {
+                WindowTitle = ((App)Application.Current).MainWindowInstance?.Title,
+                ActiveView = _showingSettings ? "settings" : "terminal",
+                Root = root,
+                InteractiveNodes = interactiveNodes,
+            };
+        }
+
+        public NativeAutomationUiActionResponse PerformAutomationUiAction(NativeAutomationUiActionRequest request)
+        {
+            request ??= new NativeAutomationUiActionRequest();
+
+            DependencyObject target = FindUiElement(request);
+            if (target is null)
+            {
+                return new NativeAutomationUiActionResponse
+                {
+                    Ok = false,
+                    Message = "No matching UI element was found.",
+                };
+            }
+
+            string action = request.Action?.Trim().ToLowerInvariant();
+
+            switch (action)
+            {
+                case "focus":
+                    if (target is FrameworkElement focusable)
+                    {
+                        focusable.Focus(FocusState.Programmatic);
+                    }
+                    break;
+
+                case "click":
+                case "invoke":
+                    InvokeUiElement(target);
+                    break;
+
+                case "rightclick":
+                    ShowContextFlyout(target);
+                    break;
+
+                case "settext":
+                    SetUiElementText(target, request.Value);
+                    break;
+
+                case "select":
+                    SelectUiElement(target);
+                    break;
+
+                case "toggle":
+                    ToggleUiElement(target);
+                    break;
+
+                case "invokemenuitem":
+                    InvokeContextMenuItem(target, request.MenuItemText ?? request.Value);
+                    break;
+
+                default:
+                    return new NativeAutomationUiActionResponse
+                    {
+                        Ok = false,
+                        Message = $"Unknown ui action '{request.Action}'.",
+                    };
+            }
+
+            int interactiveIndex = 0;
+            NativeAutomationUiNode snapshot = BuildUiNodeTree(target, "target", ref interactiveIndex);
+
+            return new NativeAutomationUiActionResponse
+            {
+                Ok = true,
+                Target = snapshot,
+            };
+        }
+
+        public async System.Threading.Tasks.Task<NativeAutomationTerminalStateResponse> GetTerminalStateAsync(NativeAutomationTerminalStateRequest request)
+        {
+            request ??= new NativeAutomationTerminalStateRequest();
+
+            List<NativeAutomationTerminalSnapshot> snapshots = new();
+            foreach ((WorkspaceProject project, WorkspaceThread thread, TerminalTabRecord tab) in EnumerateTerminalRecords())
+            {
+                if (!string.IsNullOrWhiteSpace(request.TabId) && !string.Equals(tab.Id, request.TabId, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                NativeAutomationTerminalSnapshot snapshot = await tab.Terminal.GetTerminalSnapshotAsync().ConfigureAwait(true);
+                snapshot.TabId = tab.Id;
+                snapshot.ThreadId = thread.Id;
+                snapshot.ProjectId = project.Id;
+                snapshots.Add(snapshot);
+            }
+
+            return new NativeAutomationTerminalStateResponse
+            {
+                SelectedTabId = _activeThread?.SelectedTabId,
+                Tabs = snapshots,
+            };
+        }
+
+        public void ShowAutomationOverlay()
+        {
+            NativeAutomationUiTreeResponse snapshot = GetAutomationUiTree();
+            AutomationOverlayCanvas.Children.Clear();
+            AutomationOverlayCanvas.Visibility = Visibility.Visible;
+
+            foreach (NativeAutomationUiNode node in snapshot.InteractiveNodes)
+            {
+                Border label = new()
+                {
+                    Background = new SolidColorBrush(Microsoft.UI.Colors.Black) { Opacity = 0.88 },
+                    BorderBrush = new SolidColorBrush(Microsoft.UI.Colors.Yellow),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(3),
+                    Padding = new Thickness(4, 1, 4, 1),
+                    Child = new TextBlock
+                    {
+                        Text = node.RefLabel,
+                        FontSize = 11,
+                        Foreground = new SolidColorBrush(Microsoft.UI.Colors.Yellow),
+                    },
+                };
+
+                Canvas.SetLeft(label, Math.Max(0, node.X));
+                Canvas.SetTop(label, Math.Max(0, node.Y));
+                AutomationOverlayCanvas.Children.Add(label);
+            }
+        }
+
+        public void HideAutomationOverlay()
+        {
+            AutomationOverlayCanvas.Children.Clear();
+            AutomationOverlayCanvas.Visibility = Visibility.Collapsed;
         }
 
         public NativeAutomationState GetAutomationState()
@@ -856,7 +1006,12 @@ namespace SelfContainedDeployment
 
         private IEnumerable<TerminalControl> EnumerateTerminals()
         {
-            return _projects.SelectMany(project => project.Threads).SelectMany(thread => thread.Tabs).Select(tab => tab.Terminal);
+            return EnumerateTerminalRecords().Select(record => record.Tab.Terminal);
+        }
+
+        private IEnumerable<(WorkspaceProject Project, WorkspaceThread Thread, TerminalTabRecord Tab)> EnumerateTerminalRecords()
+        {
+            return _projects.SelectMany(project => project.Threads.SelectMany(thread => thread.Tabs.Select(tab => (project, thread, tab))));
         }
 
         private WorkspaceProject ResolveActionProject(NativeAutomationActionRequest request)
@@ -895,6 +1050,498 @@ namespace SelfContainedDeployment
         {
             return _projects.FirstOrDefault(project => ReferenceEquals(project, thread.Project) || project.Threads.Contains(thread))
                 ?? throw new InvalidOperationException($"Unknown project for thread '{thread.Id}'.");
+        }
+
+        private NativeAutomationUiNode BuildUiNodeTree(DependencyObject node, string path, ref int interactiveIndex)
+        {
+            if (node is null || ReferenceEquals(node, AutomationOverlayCanvas))
+            {
+                return null;
+            }
+
+            List<NativeAutomationUiNode> children = new();
+            if (node is not Microsoft.UI.Xaml.Controls.WebView2)
+            {
+                int childCount = VisualTreeHelper.GetChildrenCount(node);
+                for (int index = 0; index < childCount; index++)
+                {
+                    NativeAutomationUiNode childNode = BuildUiNodeTree(VisualTreeHelper.GetChild(node, index), $"{path}/{index}", ref interactiveIndex);
+                    if (childNode is not null)
+                    {
+                        children.Add(childNode);
+                    }
+                }
+            }
+
+            if (!ShouldTrackUiNode(node) && children.Count == 0)
+            {
+                return null;
+            }
+
+            FrameworkElement element = node as FrameworkElement;
+            string automationId = element is not null ? AutomationProperties.GetAutomationId(element) : null;
+            string name = element is not null ? AutomationProperties.GetName(element) : null;
+            string text = ExtractNodeText(node);
+            bool interactive = IsInteractiveUiNode(node, automationId);
+            bool visible = element?.Visibility != Visibility.Collapsed && (element?.ActualWidth > 0 || element?.ActualHeight > 0 || node is Page);
+            bool enabled = node is Control control ? control.IsEnabled : true;
+            bool focused = element is Control controlForFocus
+                ? controlForFocus.FocusState != FocusState.Unfocused
+                : false;
+            bool selected = IsNodeSelected(node, automationId);
+            bool isChecked = IsNodeChecked(node);
+            Rect bounds = GetNodeBounds(node);
+
+            NativeAutomationUiNode result = new()
+            {
+                ElementId = path,
+                AutomationId = automationId,
+                Name = name,
+                ControlType = node.GetType().Name,
+                Text = text,
+                Visible = visible,
+                Enabled = enabled,
+                Focused = focused,
+                Selected = selected,
+                Checked = isChecked,
+                Interactive = interactive,
+                X = bounds.X,
+                Y = bounds.Y,
+                Width = bounds.Width,
+                Height = bounds.Height,
+                Children = children,
+            };
+
+            if (result.Interactive && result.Visible)
+            {
+                interactiveIndex++;
+                result.RefLabel = $"e{interactiveIndex}";
+            }
+
+            return result;
+        }
+
+        private static IEnumerable<NativeAutomationUiNode> FlattenUiNodes(NativeAutomationUiNode root)
+        {
+            if (root is null)
+            {
+                yield break;
+            }
+
+            yield return root;
+            foreach (NativeAutomationUiNode child in root.Children)
+            {
+                foreach (NativeAutomationUiNode descendant in FlattenUiNodes(child))
+                {
+                    yield return descendant;
+                }
+            }
+        }
+
+        private bool ShouldTrackUiNode(DependencyObject node)
+        {
+            return node is FrameworkElement or TextBlock or FontIcon or TabViewItem;
+        }
+
+        private static bool IsInteractiveUiNode(DependencyObject node, string automationId)
+        {
+            if (!string.IsNullOrWhiteSpace(automationId))
+            {
+                return true;
+            }
+
+            return node is Button
+                or ToggleButton
+                or RadioButton
+                or CheckBox
+                or ComboBox
+                or TextBox
+                or TabView
+                or TabViewItem
+                or TerminalControl
+                or Microsoft.UI.Xaml.Controls.WebView2
+                or MenuFlyoutItem;
+        }
+
+        private string ExtractNodeText(DependencyObject node)
+        {
+            if (node is TabViewItem tabViewItem)
+            {
+                return ExtractContentText(tabViewItem.Header);
+            }
+
+            switch (node)
+            {
+                case TextBlock textBlock:
+                    return textBlock.Text;
+                case TextBox textBox:
+                    return textBox.Text;
+                case MenuFlyoutItem menuItem:
+                    return menuItem.Text;
+                case ContentControl contentControl:
+                    return ExtractContentText(contentControl.Content);
+                default:
+                    return TryExtractPropertyText(node, "Header") ?? TryExtractPropertyText(node, "Text");
+            }
+        }
+
+        private static string ExtractContentText(object content)
+        {
+            return content switch
+            {
+                null => null,
+                string text => text,
+                TextBlock textBlock => textBlock.Text,
+                FontIcon fontIcon => fontIcon.Glyph,
+                _ => content.ToString(),
+            };
+        }
+
+        private static string TryExtractPropertyText(object instance, string propertyName)
+        {
+            var property = instance?.GetType().GetProperty(propertyName);
+            return property is null ? null : ExtractContentText(property.GetValue(instance));
+        }
+
+        private bool IsNodeSelected(DependencyObject node, string automationId)
+        {
+            if (node is TabViewItem item)
+            {
+                return ReferenceEquals(TerminalTabs.SelectedItem, item);
+            }
+
+            if (!string.IsNullOrWhiteSpace(automationId))
+            {
+                if (automationId.StartsWith("shell-thread-", StringComparison.Ordinal) && _activeThread is not null)
+                {
+                    return automationId.EndsWith(_activeThread.Id, StringComparison.Ordinal);
+                }
+
+                if (automationId.StartsWith("shell-project-", StringComparison.Ordinal) && _activeProject is not null && !automationId.Contains("-add-thread-", StringComparison.Ordinal))
+                {
+                    return automationId.EndsWith(_activeProject.Id, StringComparison.Ordinal);
+                }
+            }
+
+            return false;
+        }
+
+        private static bool IsNodeChecked(DependencyObject node)
+        {
+            return node switch
+            {
+                ToggleButton toggle => toggle.IsChecked == true,
+                _ => false,
+            };
+        }
+
+        private Rect GetNodeBounds(DependencyObject node)
+        {
+            if (node is not FrameworkElement element || ShellRoot is null)
+            {
+                return default;
+            }
+
+            try
+            {
+                GeneralTransform transform = element.TransformToVisual(ShellRoot);
+                Point origin = transform.TransformPoint(new Point(0, 0));
+                return new Rect(origin.X, origin.Y, element.ActualWidth, element.ActualHeight);
+            }
+            catch
+            {
+                return default;
+            }
+        }
+
+        private DependencyObject FindUiElement(NativeAutomationUiActionRequest request)
+        {
+            if (!string.IsNullOrWhiteSpace(request.AutomationId))
+            {
+                return FindFirstElement(ShellRoot, candidate =>
+                    candidate is FrameworkElement element &&
+                    string.Equals(AutomationProperties.GetAutomationId(element), request.AutomationId, StringComparison.OrdinalIgnoreCase));
+            }
+
+            if (!string.IsNullOrWhiteSpace(request.RefLabel))
+            {
+                NativeAutomationUiNode match = GetAutomationUiTree().InteractiveNodes
+                    .FirstOrDefault(node => string.Equals(node.RefLabel, request.RefLabel, StringComparison.OrdinalIgnoreCase));
+                if (match is not null)
+                {
+                    return FindElementByPath(ShellRoot, match.ElementId);
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(request.ElementId))
+            {
+                return FindElementByPath(ShellRoot, request.ElementId);
+            }
+
+            if (!string.IsNullOrWhiteSpace(request.Name))
+            {
+                return FindFirstElement(ShellRoot, candidate =>
+                    candidate is FrameworkElement element &&
+                    string.Equals(AutomationProperties.GetName(element), request.Name, StringComparison.OrdinalIgnoreCase));
+            }
+
+            return null;
+        }
+
+        private DependencyObject FindFirstElement(DependencyObject root, Func<DependencyObject, bool> predicate)
+        {
+            if (root is null)
+            {
+                return null;
+            }
+
+            if (predicate(root))
+            {
+                return root;
+            }
+
+            if (root is Microsoft.UI.Xaml.Controls.WebView2)
+            {
+                return null;
+            }
+
+            int childCount = VisualTreeHelper.GetChildrenCount(root);
+            for (int index = 0; index < childCount; index++)
+            {
+                DependencyObject match = FindFirstElement(VisualTreeHelper.GetChild(root, index), predicate);
+                if (match is not null)
+                {
+                    return match;
+                }
+            }
+
+            return null;
+        }
+
+        private DependencyObject FindElementByPath(DependencyObject root, string path)
+        {
+            if (root is null || string.IsNullOrWhiteSpace(path))
+            {
+                return null;
+            }
+
+            string[] parts = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length == 0 || !string.Equals(parts[0], "root", StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            DependencyObject current = root;
+            for (int i = 1; i < parts.Length; i++)
+            {
+                if (!int.TryParse(parts[i], out int childIndex))
+                {
+                    return null;
+                }
+
+                if (childIndex < 0 || childIndex >= VisualTreeHelper.GetChildrenCount(current))
+                {
+                    return null;
+                }
+
+                current = VisualTreeHelper.GetChild(current, childIndex);
+            }
+
+            return current;
+        }
+
+        private void InvokeUiElement(DependencyObject node)
+        {
+            if (node is ButtonBase buttonBase &&
+                buttonBase is Button &&
+                TryInvokeKnownShellAction(buttonBase))
+            {
+                return;
+            }
+
+            if (node is TabViewItem tabViewItem)
+            {
+                TerminalTabs.SelectedItem = tabViewItem;
+                return;
+            }
+
+            if (node is FrameworkElement element && TryInvokeViaAutomationPeer(element))
+            {
+                return;
+            }
+
+            throw new InvalidOperationException($"Element '{node.GetType().Name}' could not be invoked.");
+        }
+
+        private bool TryInvokeKnownShellAction(DependencyObject node)
+        {
+            if (node is not FrameworkElement element)
+            {
+                return false;
+            }
+
+            string automationId = AutomationProperties.GetAutomationId(element);
+            if (string.IsNullOrWhiteSpace(automationId))
+            {
+                return false;
+            }
+
+            if (string.Equals(automationId, "shell-pane-toggle", StringComparison.Ordinal))
+            {
+                ShellSplitView.IsPaneOpen = !ShellSplitView.IsPaneOpen;
+                UpdatePaneLayout();
+                return true;
+            }
+
+            if (string.Equals(automationId, "shell-nav-settings", StringComparison.Ordinal))
+            {
+                ShowSettings();
+                return true;
+            }
+
+            if (string.Equals(automationId, "shell-new-project", StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            if (automationId.StartsWith("shell-project-add-thread-", StringComparison.Ordinal))
+            {
+                ActivateThread(CreateThread(FindProject(automationId["shell-project-add-thread-".Length..])));
+                ShowTerminalShell();
+                return true;
+            }
+
+            if (automationId.StartsWith("shell-project-", StringComparison.Ordinal) && !automationId.Contains("-add-thread-", StringComparison.Ordinal))
+            {
+                ActivateProject(FindProject(automationId["shell-project-".Length..]));
+                ShowTerminalShell();
+                return true;
+            }
+
+            if (automationId.StartsWith("shell-thread-", StringComparison.Ordinal))
+            {
+                ActivateThread(FindThread(automationId["shell-thread-".Length..]));
+                ShowTerminalShell();
+                return true;
+            }
+
+            return false;
+        }
+
+        private static bool TryInvokeViaAutomationPeer(FrameworkElement element)
+        {
+            AutomationPeer peer = FrameworkElementAutomationPeer.FromElement(element) ?? FrameworkElementAutomationPeer.CreatePeerForElement(element);
+            if (peer is null)
+            {
+                return false;
+            }
+
+            if (peer.GetPattern(PatternInterface.Invoke) is IInvokeProvider invokeProvider)
+            {
+                invokeProvider.Invoke();
+                return true;
+            }
+
+            if (peer.GetPattern(PatternInterface.SelectionItem) is ISelectionItemProvider selectionItemProvider)
+            {
+                selectionItemProvider.Select();
+                return true;
+            }
+
+            if (peer.GetPattern(PatternInterface.Toggle) is IToggleProvider toggleProvider)
+            {
+                toggleProvider.Toggle();
+                return true;
+            }
+
+            return false;
+        }
+
+        private static void SetUiElementText(DependencyObject node, string value)
+        {
+            switch (node)
+            {
+                case TextBox textBox:
+                    textBox.Text = value ?? string.Empty;
+                    break;
+                default:
+                    if (node is FrameworkElement element)
+                    {
+                        AutomationPeer peer = FrameworkElementAutomationPeer.FromElement(element) ?? FrameworkElementAutomationPeer.CreatePeerForElement(element);
+                        if (peer?.GetPattern(PatternInterface.Value) is IValueProvider valueProvider)
+                        {
+                            valueProvider.SetValue(value ?? string.Empty);
+                            return;
+                        }
+                    }
+
+                    throw new InvalidOperationException($"Element '{node.GetType().Name}' does not support text input.");
+            }
+        }
+
+        private void SelectUiElement(DependencyObject node)
+        {
+            switch (node)
+            {
+                case TabViewItem item:
+                    TerminalTabs.SelectedItem = item;
+                    break;
+                case FrameworkElement element when TryInvokeViaAutomationPeer(element):
+                    break;
+                default:
+                    throw new InvalidOperationException($"Element '{node.GetType().Name}' does not support selection.");
+            }
+        }
+
+        private static void ToggleUiElement(DependencyObject node)
+        {
+            switch (node)
+            {
+                case ToggleButton toggle:
+                    toggle.IsChecked = !(toggle.IsChecked ?? false);
+                    break;
+                case FrameworkElement element:
+                    AutomationPeer peer = FrameworkElementAutomationPeer.FromElement(element) ?? FrameworkElementAutomationPeer.CreatePeerForElement(element);
+                    if (peer?.GetPattern(PatternInterface.Toggle) is IToggleProvider toggleProvider)
+                    {
+                        toggleProvider.Toggle();
+                        return;
+                    }
+
+                    throw new InvalidOperationException($"Element '{node.GetType().Name}' does not support toggle.");
+                default:
+                    throw new InvalidOperationException($"Element '{node.GetType().Name}' does not support toggle.");
+            }
+        }
+
+        private static void ShowContextFlyout(DependencyObject node)
+        {
+            if (node is FrameworkElement element && element.ContextFlyout is not null)
+            {
+                element.ContextFlyout.ShowAt(element);
+                return;
+            }
+
+            throw new InvalidOperationException("Element does not expose a context flyout.");
+        }
+
+        private void InvokeContextMenuItem(DependencyObject node, string menuItemText)
+        {
+            if (node is not FrameworkElement element || element.ContextFlyout is not MenuFlyout menu)
+            {
+                throw new InvalidOperationException("Element does not expose a context menu.");
+            }
+
+            MenuFlyoutItemBase item = menu.Items
+                .OfType<MenuFlyoutItemBase>()
+                .FirstOrDefault(candidate => string.Equals((candidate as MenuFlyoutItem)?.Text, menuItemText, StringComparison.OrdinalIgnoreCase));
+
+            if (item is MenuFlyoutItem menuItem && TryInvokeViaAutomationPeer(menuItem))
+            {
+                return;
+            }
+
+            throw new InvalidOperationException($"Context menu item '{menuItemText}' could not be invoked.");
         }
 
         private static NativeAutomationThreadState BuildThreadState(WorkspaceThread thread)

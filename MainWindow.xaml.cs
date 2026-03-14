@@ -2,12 +2,14 @@
 // Licensed under the MIT License.
 
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Media;
 using SelfContainedDeployment.Automation;
 using System;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Threading.Tasks;
 using Windows.Win32.Foundation;
 using Windows.Win32.Graphics.Gdi;
 using Windows.Win32.UI.WindowsAndMessaging;
@@ -49,7 +51,53 @@ namespace SelfContainedDeployment
             };
         }
 
-        public NativeAutomationScreenshotResponse CaptureAutomationScreenshot(string outputPath)
+        public NativeAutomationUiTreeResponse GetAutomationUiTree()
+        {
+            return MainPage?.GetAutomationUiTree() ?? new NativeAutomationUiTreeResponse
+            {
+                WindowTitle = Title,
+                ActiveView = "unavailable",
+            };
+        }
+
+        public NativeAutomationUiActionResponse PerformAutomationUiAction(NativeAutomationUiActionRequest request)
+        {
+            return MainPage?.PerformAutomationUiAction(request) ?? new NativeAutomationUiActionResponse
+            {
+                Ok = false,
+                Message = "Main page is not available.",
+            };
+        }
+
+        public Task<NativeAutomationTerminalStateResponse> GetTerminalStateAsync(NativeAutomationTerminalStateRequest request)
+        {
+            return MainPage?.GetTerminalStateAsync(request) ?? Task.FromResult(new NativeAutomationTerminalStateResponse());
+        }
+
+        public async Task<NativeAutomationScreenshotResponse> CaptureAutomationScreenshotAsync(NativeAutomationScreenshotRequest request)
+        {
+            bool annotated = request?.Annotated == true;
+            if (annotated)
+            {
+                MainPage?.ShowAutomationOverlay();
+                await WaitForNextRenderAsync();
+            }
+
+            try
+            {
+                return CaptureAutomationScreenshotInternal(request?.Path);
+            }
+            finally
+            {
+                if (annotated)
+                {
+                    MainPage?.HideAutomationOverlay();
+                    await WaitForNextRenderAsync();
+                }
+            }
+        }
+
+        private NativeAutomationScreenshotResponse CaptureAutomationScreenshotInternal(string outputPath)
         {
             HWND hwnd = (HWND)WinRT.Interop.WindowNative.GetWindowHandle(this);
             GetWindowRect(hwnd, out RECT rect);
@@ -79,6 +127,21 @@ namespace SelfContainedDeployment
                 Width = width,
                 Height = height,
             };
+        }
+
+        private static Task WaitForNextRenderAsync()
+        {
+            var tcs = new TaskCompletionSource<object>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            object handler = null;
+            handler = new EventHandler<object>((_, _) =>
+            {
+                CompositionTarget.Rendering -= (EventHandler<object>)handler;
+                tcs.TrySetResult(null);
+            });
+
+            CompositionTarget.Rendering += (EventHandler<object>)handler;
+            return tcs.Task;
         }
 
         private unsafe void LoadIcon(HWND hwnd, string iconName)

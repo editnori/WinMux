@@ -8,7 +8,8 @@ This pass is about making the app operable and debuggable before more UI work la
 - [x] Expose shell state for threads, tabs, theme, and active view.
 - [x] Expose semantic actions for pane toggle, theme changes, thread switching, tab switching, and screenshot capture.
 - [x] Add Bun entrypoints for `health`, `state`, `action`, and `screenshot`.
-- [ ] Add richer control-level automation if semantic actions stop being enough.
+- [x] Add richer control-level automation with UI-tree snapshots, generic UI actions, terminal inspection, and annotated screenshots.
+- [ ] Add a few higher-level scripted flows on top of the generic automation layer.
 
 ## 2. Light mode
 

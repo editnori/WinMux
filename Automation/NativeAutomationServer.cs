@@ -119,15 +119,32 @@ namespace SelfContainedDeployment.Automation
                         await WriteJsonAsync(stream, 200, state).ConfigureAwait(false);
                         break;
 
+                    case ("GET", "/ui-tree"):
+                        var uiTree = await InvokeOnUiThreadAsync(() => _window.GetAutomationUiTree()).ConfigureAwait(false);
+                        await WriteJsonAsync(stream, 200, uiTree).ConfigureAwait(false);
+                        break;
+
                     case ("POST", "/action"):
                         var actionRequest = ReadJson<NativeAutomationActionRequest>(request.Body);
                         var actionResult = await InvokeOnUiThreadAsync(() => _window.PerformAutomationAction(actionRequest)).ConfigureAwait(false);
                         await WriteJsonAsync(stream, 200, actionResult).ConfigureAwait(false);
                         break;
 
+                    case ("POST", "/ui-action"):
+                        var uiActionRequest = ReadJson<NativeAutomationUiActionRequest>(request.Body);
+                        var uiActionResult = await InvokeOnUiThreadAsync(() => _window.PerformAutomationUiAction(uiActionRequest)).ConfigureAwait(false);
+                        await WriteJsonAsync(stream, 200, uiActionResult).ConfigureAwait(false);
+                        break;
+
+                    case ("POST", "/terminal-state"):
+                        var terminalStateRequest = ReadJson<NativeAutomationTerminalStateRequest>(request.Body);
+                        var terminalState = await InvokeOnUiThreadAsync(() => _window.GetTerminalStateAsync(terminalStateRequest)).ConfigureAwait(false);
+                        await WriteJsonAsync(stream, 200, terminalState).ConfigureAwait(false);
+                        break;
+
                     case ("POST", "/screenshot"):
                         var screenshotRequest = ReadJson<NativeAutomationScreenshotRequest>(request.Body);
-                        var screenshotResult = await InvokeOnUiThreadAsync(() => _window.CaptureAutomationScreenshot(screenshotRequest?.Path)).ConfigureAwait(false);
+                        var screenshotResult = await InvokeOnUiThreadAsync(() => _window.CaptureAutomationScreenshotAsync(screenshotRequest)).ConfigureAwait(false);
                         await WriteJsonAsync(stream, 200, screenshotResult).ConfigureAwait(false);
                         break;
 
@@ -192,6 +209,28 @@ namespace SelfContainedDeployment.Automation
                 try
                 {
                     tcs.SetResult(action());
+                }
+                catch (Exception ex)
+                {
+                    tcs.SetException(ex);
+                }
+            }))
+            {
+                tcs.SetException(new InvalidOperationException("Could not enqueue automation work on the UI thread."));
+            }
+
+            return tcs.Task;
+        }
+
+        private Task<T> InvokeOnUiThreadAsync<T>(Func<Task<T>> action)
+        {
+            var tcs = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            if (!_window.DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Normal, async () =>
+            {
+                try
+                {
+                    tcs.SetResult(await action().ConfigureAwait(true));
                 }
                 catch (Exception ex)
                 {

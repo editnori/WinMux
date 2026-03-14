@@ -145,5 +145,10 @@
                 </Grid>
             </Grid>
         </SplitView>
+
+        <Canvas x:Name="AutomationOverlayCanvas"
+                Background="Transparent"
+                IsHitTestVisible="False"
+                Visibility="Collapsed" />
     </Grid>
 </Page>

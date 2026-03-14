@@ -258,6 +258,20 @@
             case "fit":
                 scheduleFit();
                 break;
+            case "inspect":
+                post({
+                    type: "state",
+                    requestId: message.requestId,
+                    cols: term.cols,
+                    rows: term.rows,
+                    cursorX: term.buffer.active.cursorX,
+                    cursorY: term.buffer.active.cursorY,
+                    selection: term.getSelection(),
+                    visibleText: getVisibleText(),
+                    bufferTail: getBufferTail(),
+                    title: document.title,
+                });
+                break;
             case "setTitle":
                 setTitle(message.title);
                 break;
@@ -278,6 +292,36 @@
         post({ type: "copy", data: selection });
         setStatus("Copied selection", true);
         window.setTimeout(() => setStatus("", false), 900);
+    }
+
+    function getVisibleText() {
+        const active = term.buffer.active;
+        const start = Math.max(0, active.length - term.rows);
+        const lines = [];
+
+        for (let i = start; i < active.length; i++) {
+            const line = active.getLine(i);
+            if (line) {
+                lines.push(line.translateToString(true));
+            }
+        }
+
+        return lines.join("\n");
+    }
+
+    function getBufferTail() {
+        const active = term.buffer.active;
+        const start = Math.max(0, active.length - 200);
+        const lines = [];
+
+        for (let i = start; i < active.length; i++) {
+            const line = active.getLine(i);
+            if (line) {
+                lines.push(line.translateToString(true));
+            }
+        }
+
+        return lines.join("\n");
     }
 
     document.addEventListener("pointerdown", () => term.focus());

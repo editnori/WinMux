@@ -20,6 +20,17 @@ switch ($Tool) {
         Invoke-RestMethod -Uri "$baseUrl/state" | ConvertTo-Json -Depth 10
         break
     }
+    "ui-tree" {
+        Invoke-RestMethod -Uri "$baseUrl/ui-tree" | ConvertTo-Json -Depth 30
+        break
+    }
+    "ui-refs" {
+        $response = Invoke-RestMethod -Uri "$baseUrl/ui-tree"
+        $response.interactiveNodes |
+            Select-Object refLabel, automationId, controlType, name, text, x, y, width, height, elementId |
+            ConvertTo-Json -Depth 10
+        break
+    }
     "action" {
         if (-not $ForwardArgs -or $ForwardArgs.Count -eq 0) {
             throw "Provide a JSON payload, for example: bun run native:action -- '{`"action`":`"togglePane`"}'"
@@ -29,13 +40,32 @@ switch ($Tool) {
         Invoke-RestMethod -Method Post -Uri "$baseUrl/action" -ContentType "application/json" -Body $body | ConvertTo-Json -Depth 10
         break
     }
+    "ui-action" {
+        if (-not $ForwardArgs -or $ForwardArgs.Count -eq 0) {
+            throw "Provide a JSON payload, for example: bun run native:ui-action -- '{`"action`":`"click`",`"automationId`":`"shell-pane-toggle`"}'"
+        }
+
+        $body = $ForwardArgs -join " "
+        Invoke-RestMethod -Method Post -Uri "$baseUrl/ui-action" -ContentType "application/json" -Body $body | ConvertTo-Json -Depth 20
+        break
+    }
+    "terminal-state" {
+        $tabId = if ($ForwardArgs.Count -gt 0) { $ForwardArgs[0] } else { "" }
+        $body = @{ tabId = $tabId } | ConvertTo-Json
+        Invoke-RestMethod -Method Post -Uri "$baseUrl/terminal-state" -ContentType "application/json" -Body $body | ConvertTo-Json -Depth 20
+        break
+    }
     "screenshot" {
         $path = if ($ForwardArgs.Count -gt 0) { $ForwardArgs[0] } else { "" }
-        $body = @{ path = $path } | ConvertTo-Json
+        $annotated = $false
+        if ($ForwardArgs.Count -gt 1) {
+            $annotated = [System.Convert]::ToBoolean($ForwardArgs[1])
+        }
+        $body = @{ path = $path; annotated = $annotated } | ConvertTo-Json
         Invoke-RestMethod -Method Post -Uri "$baseUrl/screenshot" -ContentType "application/json" -Body $body | ConvertTo-Json -Depth 10
         break
     }
     default {
-        throw "Unknown automation tool '$Tool'. Expected one of: health, state, action, screenshot"
+        throw "Unknown automation tool '$Tool'. Expected one of: health, state, ui-tree, ui-refs, action, ui-action, terminal-state, screenshot"
     }
 }

@@ -93,6 +93,8 @@ namespace SelfContainedDeployment.Automation
     public sealed class NativeAutomationScreenshotRequest
     {
         public string Path { get; set; }
+
+        public bool Annotated { get; set; }
     }
 
     public sealed class NativeAutomationScreenshotResponse
@@ -104,5 +106,124 @@ namespace SelfContainedDeployment.Automation
         public int Width { get; set; }
 
         public int Height { get; set; }
+    }
+
+    public sealed class NativeAutomationUiTreeResponse
+    {
+        public string WindowTitle { get; set; }
+
+        public string ActiveView { get; set; }
+
+        public NativeAutomationUiNode Root { get; set; }
+
+        public List<NativeAutomationUiNode> InteractiveNodes { get; set; } = new();
+    }
+
+    public sealed class NativeAutomationUiNode
+    {
+        public string ElementId { get; set; }
+
+        public string RefLabel { get; set; }
+
+        public string AutomationId { get; set; }
+
+        public string Name { get; set; }
+
+        public string ControlType { get; set; }
+
+        public string Text { get; set; }
+
+        public bool Visible { get; set; }
+
+        public bool Enabled { get; set; }
+
+        public bool Focused { get; set; }
+
+        public bool Selected { get; set; }
+
+        public bool Checked { get; set; }
+
+        public bool Interactive { get; set; }
+
+        public double X { get; set; }
+
+        public double Y { get; set; }
+
+        public double Width { get; set; }
+
+        public double Height { get; set; }
+
+        public List<NativeAutomationUiNode> Children { get; set; } = new();
+    }
+
+    public sealed class NativeAutomationUiActionRequest
+    {
+        public string Action { get; set; }
+
+        public string ElementId { get; set; }
+
+        public string RefLabel { get; set; }
+
+        public string AutomationId { get; set; }
+
+        public string Name { get; set; }
+
+        public string Value { get; set; }
+
+        public string MenuItemText { get; set; }
+    }
+
+    public sealed class NativeAutomationUiActionResponse
+    {
+        public bool Ok { get; set; }
+
+        public string Message { get; set; }
+
+        public NativeAutomationUiNode Target { get; set; }
+    }
+
+    public sealed class NativeAutomationTerminalStateRequest
+    {
+        public string TabId { get; set; }
+    }
+
+    public sealed class NativeAutomationTerminalStateResponse
+    {
+        public string SelectedTabId { get; set; }
+
+        public List<NativeAutomationTerminalSnapshot> Tabs { get; set; } = new();
+    }
+
+    public sealed class NativeAutomationTerminalSnapshot
+    {
+        public string TabId { get; set; }
+
+        public string ThreadId { get; set; }
+
+        public string ProjectId { get; set; }
+
+        public string Title { get; set; }
+
+        public string DisplayWorkingDirectory { get; set; }
+
+        public string ShellCommand { get; set; }
+
+        public bool RendererReady { get; set; }
+
+        public bool Started { get; set; }
+
+        public int Cols { get; set; }
+
+        public int Rows { get; set; }
+
+        public int CursorX { get; set; }
+
+        public int CursorY { get; set; }
+
+        public string Selection { get; set; }
+
+        public string VisibleText { get; set; }
+
+        public string BufferTail { get; set; }
     }
 }

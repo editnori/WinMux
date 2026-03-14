@@ -5,15 +5,18 @@ This repo can expose the embedded terminal renderer inside the native WinUI app 
 What this gives you:
 
 - inspect native shell state through the paired automation endpoint
+- inspect the WinUI visual tree and interactive native controls
 - trigger thread, tab, and theme actions without manual clicking
+- target native controls by `automationId`, `elementId`, `name`, or annotated `refLabel`
 - capture native window screenshots from the running WinUI app
+- capture annotated native screenshots with overlay labels
+- inspect terminal scrollback, visible rows, cursor, selection, and session metadata
 - inspect the real `WebView2` surface that the native app is using
 - attach Playwright to the running native app renderer
 - reload renderer HTML, CSS, and JS from the repo `Web/` folder without rebuilding native code
 
 What this does not give you:
 
-- arbitrary WinUI control discovery/clicking
 - direct inspection of non-WebView WinUI controls
 
 The repo uses Bun for package management and script entrypoints.
@@ -46,6 +49,9 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-webview2
 ```bash
 bun run native:health
 bun run native:state
+bun run native:ui-tree
+bun run native:ui-refs
+bun run native:terminal-state
 bun run webview2:targets
 ```
 
@@ -55,7 +61,10 @@ bun run webview2:targets
 bun run native:action -- '{"action":"newThread"}'
 bun run native:action -- '{"action":"newTab"}'
 bun run native:action -- '{"action":"setTheme","value":"light"}'
+bun run native:ui-action -- '{"action":"click","refLabel":"e2"}'
+bun run native:ui-action -- '{"action":"click","automationId":"shell-nav-settings"}'
 bun run native:screenshot
+bun run native:screenshot:annotated
 ```
 
 ## Capture the current renderer
@@ -119,8 +128,10 @@ Native shell or startup changes still require relaunching the app.
 The native automation loop covers the shell-level gaps that CDP cannot:
 
 - shell state inspection
+- native control discovery and generic UI actions
 - thread and tab actions
 - theme changes
+- terminal inspection
 - native window screenshots
 
 ## Setup
