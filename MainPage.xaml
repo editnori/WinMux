@@ -11,74 +11,88 @@
                    CompactPaneLength="48"
                    DisplayMode="CompactInline"
                    IsPaneOpen="True"
-                   OpenPaneLength="244"
+                   OpenPaneLength="228"
                    PaneBackground="{ThemeResource ShellPaneBackgroundBrush}">
             <SplitView.Pane>
-                <Grid Background="{ThemeResource ShellPaneBackgroundBrush}">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="*" />
-                        <RowDefinition Height="Auto" />
-                    </Grid.RowDefinitions>
+                <Border Background="{ThemeResource ShellPaneBackgroundBrush}"
+                        BorderBrush="{ThemeResource ShellBorderBrush}"
+                        BorderThickness="0,0,1,0">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
 
-                    <Grid Margin="10,10,10,12"
-                          ColumnDefinitions="28,*"
-                          ColumnSpacing="10">
-                        <Button x:Name="PaneToggleButton"
-                                AutomationProperties.AutomationId="shell-pane-toggle"
-                                Style="{StaticResource ShellChromeButtonStyle}"
-                                Click="OnPaneToggleClicked"
-                                ToolTipService.ToolTip="Collapse sidebar">
-                            <FontIcon FontSize="12" Glyph="&#xE700;" />
-                        </Button>
+                        <Border Padding="12,12,12,14"
+                                BorderBrush="{ThemeResource ShellBorderBrush}"
+                                BorderThickness="0,0,0,1">
+                            <Grid ColumnDefinitions="28,*"
+                                  ColumnSpacing="10">
+                                <Button x:Name="PaneToggleButton"
+                                        AutomationProperties.AutomationId="shell-pane-toggle"
+                                        Style="{StaticResource ShellChromeButtonStyle}"
+                                        Click="OnPaneToggleClicked"
+                                        ToolTipService.ToolTip="Collapse sidebar">
+                                    <FontIcon FontSize="12" Glyph="&#xE700;" />
+                                </Button>
 
-                        <TextBlock x:Name="PaneBrandText"
-                                   Grid.Column="1"
-                                   AutomationProperties.AutomationId="shell-brand-text"
-                                   VerticalAlignment="Center"
-                                   Style="{StaticResource ShellTitleTextStyle}"
-                                   Text="WinMux" />
+                                <TextBlock x:Name="PaneBrandText"
+                                           Grid.Column="1"
+                                           AutomationProperties.AutomationId="shell-brand-text"
+                                           VerticalAlignment="Center"
+                                           Style="{StaticResource ShellTitleTextStyle}"
+                                           Text="WinMux" />
+                            </Grid>
+                        </Border>
+
+                        <ScrollViewer Grid.Row="1"
+                                      VerticalScrollBarVisibility="Auto"
+                                      VerticalScrollMode="Auto">
+                            <StackPanel Margin="0,10,0,12">
+                                <TextBlock x:Name="ProjectSectionText"
+                                           Margin="14,0,14,8"
+                                           Style="{StaticResource ShellHintTextStyle}"
+                                           Text="PROJECTS" />
+
+                                <StackPanel x:Name="ProjectListPanel"
+                                            AutomationProperties.AutomationId="shell-project-list"
+                                            Margin="8,0,8,0"
+                                            Spacing="10" />
+                            </StackPanel>
+                        </ScrollViewer>
+
+                        <StackPanel Grid.Row="2" Margin="8,10,8,8" Spacing="2">
+                            <Button x:Name="NewProjectButton"
+                                    AutomationProperties.AutomationId="shell-new-project"
+                                    Style="{StaticResource ShellNavButtonStyle}"
+                                    Click="OnNewProjectClicked"
+                                    ToolTipService.ToolTip="Add a new project">
+                                <Grid ColumnDefinitions="16,*" ColumnSpacing="10">
+                                    <FontIcon FontSize="12" Glyph="&#xE8FA;" />
+                                    <TextBlock x:Name="NewProjectText"
+                                               Grid.Column="1"
+                                               FontSize="12"
+                                               Text="New project" />
+                                </Grid>
+                            </Button>
+
+                            <Button x:Name="SettingsNavButton"
+                                    AutomationProperties.AutomationId="shell-nav-settings"
+                                    Style="{StaticResource ShellNavButtonStyle}"
+                                    Click="OnSettingsNavClicked"
+                                    ToolTipService.ToolTip="Open preferences">
+                                <Grid ColumnDefinitions="16,*" ColumnSpacing="10">
+                                    <FontIcon FontSize="12" Glyph="&#xE713;" />
+                                    <TextBlock x:Name="SettingsNavText"
+                                               Grid.Column="1"
+                                               FontSize="12"
+                                               Text="Preferences" />
+                                </Grid>
+                            </Button>
+                        </StackPanel>
                     </Grid>
-
-                    <ScrollViewer Grid.Row="1"
-                                  Margin="6,0,6,0"
-                                  VerticalScrollBarVisibility="Auto"
-                                  VerticalScrollMode="Auto">
-                        <StackPanel x:Name="ProjectListPanel"
-                                    AutomationProperties.AutomationId="shell-project-list"
-                                    Spacing="10" />
-                    </ScrollViewer>
-
-                    <StackPanel Grid.Row="2" Margin="6,8,6,8" Spacing="2">
-                        <Button x:Name="NewThreadButton"
-                                AutomationProperties.AutomationId="shell-new-thread"
-                                Style="{StaticResource ShellNavButtonStyle}"
-                                Click="OnNewThreadClicked"
-                                ToolTipService.ToolTip="Open a new thread or project">
-                            <Grid ColumnDefinitions="16,*" ColumnSpacing="10">
-                                <FontIcon FontSize="12" Glyph="&#xE8FA;" />
-                                <TextBlock x:Name="NewThreadText"
-                                           Grid.Column="1"
-                                           FontSize="12"
-                                           Text="New thread" />
-                            </Grid>
-                        </Button>
-
-                        <Button x:Name="SettingsNavButton"
-                                AutomationProperties.AutomationId="shell-nav-settings"
-                                Style="{StaticResource ShellNavButtonStyle}"
-                                Click="OnSettingsNavClicked"
-                                ToolTipService.ToolTip="Open preferences">
-                            <Grid ColumnDefinitions="16,*" ColumnSpacing="10">
-                                <FontIcon FontSize="12" Glyph="&#xE713;" />
-                                <TextBlock x:Name="SettingsNavText"
-                                           Grid.Column="1"
-                                           FontSize="12"
-                                           Text="Preferences" />
-                            </Grid>
-                        </Button>
-                    </StackPanel>
-                </Grid>
+                </Border>
             </SplitView.Pane>
 
             <Grid Background="{ThemeResource ShellPageBackgroundBrush}">

@@ -8,6 +8,8 @@ using SelfContainedDeployment.Terminal;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Windows.Storage.Pickers;
+using WinRT.Interop;
 
 namespace SelfContainedDeployment
 {
@@ -105,7 +107,7 @@ namespace SelfContainedDeployment
                         ShowSettings();
                         break;
                     case "newproject":
-                        ActivateThread(CreateThread(GetOrCreateProject(ResolveRequestedPath(request.Value), null, SampleConfig.DefaultShellProfileId)));
+                        OpenProject(GetOrCreateProject(ResolveRequestedPath(request.Value), null, SampleConfig.DefaultShellProfileId));
                         ShowTerminalShell();
                         break;
                     case "newthread":
@@ -139,6 +141,9 @@ namespace SelfContainedDeployment
                         break;
                     case "renamethread":
                         RenameThread(request.ThreadId, request.Value);
+                        break;
+                    case "duplicatethread":
+                        DuplicateThread(request.ThreadId);
                         break;
                     case "input":
                         SendInputToSelectedTerminal(request.Value);
@@ -201,17 +206,26 @@ namespace SelfContainedDeployment
             ShowSettings();
         }
 
-        private async void OnNewThreadClicked(object sender, RoutedEventArgs e)
+        private async void OnNewProjectClicked(object sender, RoutedEventArgs e)
         {
-            ThreadDraft draft = await PromptForThreadAsync();
+            ProjectDraft draft = await PromptForProjectAsync();
             if (draft is null)
             {
                 return;
             }
 
             WorkspaceProject project = GetOrCreateProject(draft.ProjectPath, null, draft.ShellProfileId);
-            ActivateThread(CreateThread(project, draft.ThreadName));
+            OpenProject(project);
             ShowTerminalShell();
+        }
+
+        private void OnProjectAddThreadClicked(object sender, RoutedEventArgs e)
+        {
+            if (sender is Button button && button.Tag is string projectId)
+            {
+                ActivateThread(CreateThread(FindProject(projectId)));
+                ShowTerminalShell();
+            }
         }
 
         private void OnProjectButtonClicked(object sender, RoutedEventArgs e)
@@ -229,6 +243,27 @@ namespace SelfContainedDeployment
             {
                 ActivateThread(FindThread(threadId));
                 ShowTerminalShell();
+            }
+        }
+
+        private async void OnRenameThreadMenuClicked(object sender, RoutedEventArgs e)
+        {
+            if (sender is MenuFlyoutItem item && item.Tag is string threadId)
+            {
+                WorkspaceThread thread = FindThread(threadId);
+                string nextName = await PromptForThreadNameAsync("Rename thread", thread.Name);
+                if (!string.IsNullOrWhiteSpace(nextName))
+                {
+                    RenameThread(threadId, nextName);
+                }
+            }
+        }
+
+        private void OnDuplicateThreadMenuClicked(object sender, RoutedEventArgs e)
+        {
+            if (sender is MenuFlyoutItem item && item.Tag is string threadId)
+            {
+                DuplicateThread(threadId);
             }
         }
 
@@ -457,6 +492,17 @@ namespace SelfContainedDeployment
             ActivateThread(thread);
         }
 
+        private void OpenProject(WorkspaceProject project)
+        {
+            if (project.Threads.Count == 0)
+            {
+                ActivateThread(CreateThread(project));
+                return;
+            }
+
+            ActivateProject(project);
+        }
+
         private void ActivateThread(WorkspaceThread thread)
         {
             _activeThread = thread ?? throw new ArgumentNullException(nameof(thread));
@@ -482,6 +528,21 @@ namespace SelfContainedDeployment
             UpdateHeader();
         }
 
+        private void DuplicateThread(string threadId)
+        {
+            WorkspaceThread source = FindThread(threadId);
+            WorkspaceProject project = FindProjectForThread(source);
+            WorkspaceThread duplicate = CreateThread(project, $"Copy of {source.Name}");
+
+            for (int i = 1; i < source.Tabs.Count; i++)
+            {
+                AddTerminalTab(project, duplicate);
+            }
+
+            ActivateThread(duplicate);
+            ShowTerminalShell();
+        }
+
         private void RefreshProjectTree()
         {
             ProjectListPanel.Children.Clear();
@@ -491,7 +552,7 @@ namespace SelfContainedDeployment
             {
                 StackPanel group = new()
                 {
-                    Spacing = 2,
+                    Spacing = 4,
                 };
 
                 Button projectButton = new()
@@ -505,7 +566,7 @@ namespace SelfContainedDeployment
 
                 Grid projectLayout = new()
                 {
-                    ColumnSpacing = 10,
+                    ColumnSpacing = 8,
                 };
                 projectLayout.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
                 projectLayout.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -539,66 +600,113 @@ namespace SelfContainedDeployment
 
                 projectButton.Content = projectLayout;
                 ApplyProjectButtonState(projectButton, project == _activeProject && !_showingSettings);
-                group.Children.Add(projectButton);
-
-                if (isOpen)
+                if (!isOpen)
                 {
-                    StackPanel threadStack = new()
-                    {
-                        Spacing = 2,
-                        Margin = new Thickness(20, 0, 0, 0),
-                    };
-
-                    foreach (WorkspaceThread thread in project.Threads)
-                    {
-                        Button threadButton = new()
-                        {
-                            Style = (Style)Application.Current.Resources["ShellSidebarThreadButtonStyle"],
-                            Tag = thread.Id,
-                            HorizontalContentAlignment = HorizontalAlignment.Stretch,
-                        };
-                        AutomationProperties.SetAutomationId(threadButton, $"shell-thread-{thread.Id}");
-                        threadButton.Click += OnThreadButtonClicked;
-
-                        Grid threadLayout = new()
-                        {
-                            ColumnSpacing = 8,
-                        };
-                        threadLayout.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-                        threadLayout.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-
-                        threadLayout.Children.Add(new FontIcon
-                        {
-                            FontSize = 10,
-                            Glyph = "\uE8BD",
-                            VerticalAlignment = VerticalAlignment.Center,
-                        });
-
-                        StackPanel threadText = new()
-                        {
-                            Spacing = 0,
-                        };
-                        Grid.SetColumn(threadText, 1);
-                        threadText.Children.Add(new TextBlock
-                        {
-                            Text = thread.Name,
-                            FontSize = 12,
-                        });
-                        threadText.Children.Add(new TextBlock
-                        {
-                            Text = thread.TabSummary,
-                            Style = (Style)Application.Current.Resources["ShellHintTextStyle"],
-                        });
-
-                        threadLayout.Children.Add(threadText);
-                        threadButton.Content = threadLayout;
-                        ApplyThreadButtonState(threadButton, thread == _activeThread && !_showingSettings);
-                        threadStack.Children.Add(threadButton);
-                    }
-
-                    group.Children.Add(threadStack);
+                    group.Children.Add(projectButton);
+                    ProjectListPanel.Children.Add(group);
+                    continue;
                 }
 
+                Button addThreadButton = new()
+                {
+                    Style = (Style)Application.Current.Resources["ShellChromeButtonStyle"],
+                    Tag = project.Id,
+                    HorizontalAlignment = HorizontalAlignment.Right,
+                };
+                AutomationProperties.SetAutomationId(addThreadButton, $"shell-project-add-thread-{project.Id}");
+                addThreadButton.Click += OnProjectAddThreadClicked;
+                ToolTipService.SetToolTip(addThreadButton, "Add thread");
+                addThreadButton.Content = new FontIcon
+                {
+                    FontSize = 11,
+                    Glyph = "\uE710",
+                };
+
+                Grid projectHeader = new()
+                {
+                    ColumnDefinitions =
+                    {
+                        new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) },
+                        new ColumnDefinition { Width = GridLength.Auto },
+                    },
+                    ColumnSpacing = 6,
+                };
+                projectHeader.Children.Add(projectButton);
+                Grid.SetColumn(addThreadButton, 1);
+                projectHeader.Children.Add(addThreadButton);
+                group.Children.Add(projectHeader);
+
+                StackPanel threadStack = new()
+                {
+                    Spacing = 2,
+                    Margin = new Thickness(18, 0, 0, 0),
+                };
+
+                foreach (WorkspaceThread thread in project.Threads)
+                {
+                    Button threadButton = new()
+                    {
+                        Style = (Style)Application.Current.Resources["ShellSidebarThreadButtonStyle"],
+                        Tag = thread.Id,
+                        HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                    };
+                    AutomationProperties.SetAutomationId(threadButton, $"shell-thread-{thread.Id}");
+                    threadButton.Click += OnThreadButtonClicked;
+
+                    MenuFlyout threadMenu = new();
+                    MenuFlyoutItem renameItem = new()
+                    {
+                        Text = "Rename",
+                        Tag = thread.Id,
+                    };
+                    renameItem.Click += OnRenameThreadMenuClicked;
+                    MenuFlyoutItem duplicateItem = new()
+                    {
+                        Text = "Duplicate",
+                        Tag = thread.Id,
+                    };
+                    duplicateItem.Click += OnDuplicateThreadMenuClicked;
+                    threadMenu.Items.Add(renameItem);
+                    threadMenu.Items.Add(duplicateItem);
+                    threadButton.ContextFlyout = threadMenu;
+
+                    Grid threadLayout = new()
+                    {
+                        ColumnSpacing = 8,
+                    };
+                    threadLayout.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                    threadLayout.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+                    threadLayout.Children.Add(new FontIcon
+                    {
+                        FontSize = 10,
+                        Glyph = "\uE8BD",
+                        VerticalAlignment = VerticalAlignment.Center,
+                    });
+
+                    StackPanel threadText = new()
+                    {
+                        Spacing = 0,
+                    };
+                    Grid.SetColumn(threadText, 1);
+                    threadText.Children.Add(new TextBlock
+                    {
+                        Text = thread.Name,
+                        FontSize = 12,
+                    });
+                    threadText.Children.Add(new TextBlock
+                    {
+                        Text = thread.TabSummary,
+                        Style = (Style)Application.Current.Resources["ShellHintTextStyle"],
+                    });
+
+                    threadLayout.Children.Add(threadText);
+                    threadButton.Content = threadLayout;
+                    ApplyThreadButtonState(threadButton, thread == _activeThread && !_showingSettings);
+                    threadStack.Children.Add(threadButton);
+                }
+
+                group.Children.Add(threadStack);
                 ProjectListPanel.Children.Add(group);
             }
         }
@@ -692,7 +800,7 @@ namespace SelfContainedDeployment
         private void UpdateSidebarActions()
         {
             ApplyActionButtonState(SettingsNavButton, SettingsNavText, _showingSettings);
-            ApplyActionButtonState(NewThreadButton, NewThreadText, false);
+            ApplyActionButtonState(NewProjectButton, NewProjectText, false);
         }
 
         private void UpdatePaneLayout()
@@ -700,7 +808,8 @@ namespace SelfContainedDeployment
             bool isOpen = ShellSplitView.IsPaneOpen;
 
             PaneBrandText.Visibility = isOpen ? Visibility.Visible : Visibility.Collapsed;
-            NewThreadText.Visibility = isOpen ? Visibility.Visible : Visibility.Collapsed;
+            ProjectSectionText.Visibility = isOpen ? Visibility.Visible : Visibility.Collapsed;
+            NewProjectText.Visibility = isOpen ? Visibility.Visible : Visibility.Collapsed;
             SettingsNavText.Visibility = isOpen ? Visibility.Visible : Visibility.Collapsed;
 
             ToolTipService.SetToolTip(PaneToggleButton, isOpen ? "Collapse sidebar" : "Expand sidebar");
@@ -888,18 +997,28 @@ namespace SelfContainedDeployment
             return exited ? $"{nextTitle} (ended)" : nextTitle;
         }
 
-        private async System.Threading.Tasks.Task<ThreadDraft> PromptForThreadAsync()
+        private async System.Threading.Tasks.Task<ProjectDraft> PromptForProjectAsync()
         {
             TextBox pathBox = new()
             {
                 Header = "Project directory",
                 Text = _activeProject?.RootPath ?? Environment.CurrentDirectory,
+                Style = (Style)Application.Current.Resources["ShellInlineTextBoxStyle"],
             };
 
-            TextBox threadBox = new()
+            Button browseButton = new()
             {
-                Header = "Thread name",
-                Text = $"Thread {_threadSequence}",
+                Content = "Browse…",
+                HorizontalAlignment = HorizontalAlignment.Left,
+                MinWidth = 96,
+            };
+            browseButton.Click += async (_, _) =>
+            {
+                string selectedPath = await BrowseForFolderAsync(pathBox.Text);
+                if (!string.IsNullOrWhiteSpace(selectedPath))
+                {
+                    pathBox.Text = selectedPath;
+                }
             };
 
             ComboBox profileBox = new()
@@ -916,14 +1035,14 @@ namespace SelfContainedDeployment
                 Spacing = 12,
             };
             body.Children.Add(pathBox);
-            body.Children.Add(threadBox);
+            body.Children.Add(browseButton);
             body.Children.Add(profileBox);
 
             ContentDialog dialog = new()
             {
                 XamlRoot = XamlRoot,
-                Title = "New thread",
-                PrimaryButtonText = "Create",
+                Title = "New project",
+                PrimaryButtonText = "Add project",
                 CloseButtonText = "Cancel",
                 DefaultButton = ContentDialogButton.Primary,
                 Content = body,
@@ -935,13 +1054,56 @@ namespace SelfContainedDeployment
                 return null;
             }
 
-            string projectPath = string.IsNullOrWhiteSpace(pathBox.Text) ? Environment.CurrentDirectory : pathBox.Text.Trim();
-            string threadName = string.IsNullOrWhiteSpace(threadBox.Text) ? $"Thread {_threadSequence}" : threadBox.Text.Trim();
-            string profileId = profileBox.SelectedValue as string ?? SampleConfig.DefaultShellProfileId;
-
-            return new ThreadDraft(projectPath, threadName, profileId);
+            return new ProjectDraft(
+                string.IsNullOrWhiteSpace(pathBox.Text) ? Environment.CurrentDirectory : pathBox.Text.Trim(),
+                profileBox.SelectedValue as string ?? SampleConfig.DefaultShellProfileId);
         }
 
-        private sealed record ThreadDraft(string ProjectPath, string ThreadName, string ShellProfileId);
+        private async System.Threading.Tasks.Task<string> PromptForThreadNameAsync(string title, string initialValue)
+        {
+            TextBox nameBox = new()
+            {
+                Text = initialValue,
+                Style = (Style)Application.Current.Resources["ShellInlineTextBoxStyle"],
+            };
+
+            ContentDialog dialog = new()
+            {
+                XamlRoot = XamlRoot,
+                Title = title,
+                PrimaryButtonText = "Save",
+                CloseButtonText = "Cancel",
+                DefaultButton = ContentDialogButton.Primary,
+                Content = nameBox,
+            };
+
+            ContentDialogResult result = await dialog.ShowAsync();
+            return result == ContentDialogResult.Primary ? nameBox.Text?.Trim() : null;
+        }
+
+        private async System.Threading.Tasks.Task<string> BrowseForFolderAsync(string initialPath)
+        {
+            FolderPicker picker = new();
+            picker.FileTypeFilter.Add("*");
+
+            IntPtr hwnd = WindowNative.GetWindowHandle(((App)Application.Current).MainWindowInstance);
+            InitializeWithWindow.Initialize(picker, hwnd);
+
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(initialPath) && !initialPath.StartsWith("/", StringComparison.Ordinal))
+                {
+                    picker.SuggestedStartLocation = PickerLocationId.Desktop;
+                }
+            }
+            catch
+            {
+            }
+
+            var folder = await picker.PickSingleFolderAsync();
+            return folder?.Path;
+        }
+
+        private sealed record ProjectDraft(string ProjectPath, string ShellProfileId);
     }
 }
