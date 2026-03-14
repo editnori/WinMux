@@ -106,6 +106,45 @@ function Get-WinMuxWindow {
     return @($desktopWindows.windows) | Where-Object { $_.title -like "*WinMux*" } | Select-Object -First 1
 }
 
+function Focus-WinMuxWindow {
+    function Test-Focused {
+        for ($poll = 0; $poll -lt 6; $poll++) {
+            $window = Get-WinMuxWindow
+            if ($null -ne $window -and $window.focused -eq $true) {
+                return $window
+            }
+
+            Start-Sleep -Milliseconds 140
+        }
+
+        return $null
+    }
+
+    for ($attempt = 0; $attempt -lt 3; $attempt++) {
+        $null = Invoke-AutomationPost "/desktop-action" @{
+            action = "focusWindow"
+            titleContains = "WinMux"
+        }
+
+        $focusedWindow = Test-Focused
+        if ($focusedWindow) {
+            return $focusedWindow
+        }
+
+        $null = Invoke-AutomationPost "/desktop-action" @{
+            action = "clickPoint"
+            titleContains = "WinMux"
+        }
+
+        $focusedWindow = Test-Focused
+        if ($focusedWindow) {
+            return $focusedWindow
+        }
+    }
+
+    throw "WinMux did not become the focused window."
+}
+
 function Resize-WinMuxWindow {
     param(
         [int]$Width,
@@ -184,13 +223,11 @@ try {
     }
 
     $originalWindow = Get-WinMuxWindow
-    $null = Invoke-AutomationPost "/desktop-action" @{
-        action = "focusWindow"
-        titleContains = "WinMux"
-    }
+    Focus-WinMuxWindow | Out-Null
 
     Resize-WinMuxWindow -Width $targetWindowWidth -Height $targetWindowHeight
     Pause-Step 1200
+    Focus-WinMuxWindow | Out-Null
 
     $null = Invoke-AutomationPost "/action" @{ action = "showTerminal" }
     $null = Invoke-AutomationPost "/action" @{ action = "setTheme"; value = "dark" }
@@ -210,6 +247,7 @@ try {
     $recordingStarted = $true
 
     Pause-Step 1100
+    Focus-WinMuxWindow | Out-Null
     Show-Hover -AutomationId "shell-pane-toggle" -PauseMs 500
     $null = Invoke-AutomationPost "/ui-action" @{ action = "click"; automationId = "shell-pane-toggle" }
     Pause-Step 1100
@@ -217,6 +255,7 @@ try {
     Pause-Step 1000
 
     if ($initialState.activeTabId) {
+        Focus-WinMuxWindow | Out-Null
         Wait-ForTerminalReady -TabId $initialState.activeTabId | Out-Null
         $null = Invoke-AutomationPost "/action" @{ action = "input"; value = "pwd`r" }
         Pause-Step 1200
@@ -226,6 +265,7 @@ try {
 
     Show-Hover -AutomationId "shell-project-$originalProjectId" -PauseMs 550
     Show-Hover -AutomationId "shell-project-add-thread-$originalProjectId" -PauseMs 550
+    Focus-WinMuxWindow | Out-Null
     $null = Invoke-AutomationPost "/ui-action" @{
         action = "click"
         automationId = "shell-project-add-thread-$originalProjectId"
@@ -242,6 +282,7 @@ try {
     Pause-Step 950
 
     Show-Hover -AutomationId "shell-thread-$demoThreadId" -PauseMs 650
+    Focus-WinMuxWindow | Out-Null
     $null = Invoke-AutomationPost "/ui-action" @{
         action = "doubleClick"
         automationId = "shell-thread-$demoThreadId"
@@ -289,6 +330,7 @@ try {
     $secondTabId = $demoThread.tabs[1].id
     $thirdTabId = $demoThread.tabs[2].id
 
+    Focus-WinMuxWindow | Out-Null
     Wait-ForTerminalReady -TabId $state.activeTabId | Out-Null
     $null = Invoke-AutomationPost "/action" @{ action = "input"; value = "echo demo walkthrough`r" }
     Pause-Step 1200
@@ -304,6 +346,7 @@ try {
     Pause-Step 950
 
     Show-Hover -AutomationId "shell-nav-settings" -PauseMs 650
+    Focus-WinMuxWindow | Out-Null
     $null = Invoke-AutomationPost "/ui-action" @{ action = "click"; automationId = "shell-nav-settings" }
     Wait-Until -FailureMessage "Settings view did not open." -Condition {
         $tree = Invoke-AutomationGet "/ui-tree"
@@ -326,6 +369,7 @@ try {
     $null = Invoke-AutomationPost "/action" @{ action = "showTerminal" }
     Pause-Step 1000
 
+    Focus-WinMuxWindow | Out-Null
     Show-ContextMenu -AutomationId "shell-thread-$demoThreadId" -PauseMs 850
     $null = Invoke-AutomationPost "/ui-action" @{
         action = "invokeMenuItem"
@@ -376,6 +420,7 @@ try {
     }
     Pause-Step 1000
 
+    Focus-WinMuxWindow | Out-Null
     Show-Hover -AutomationId "shell-new-project" -PauseMs 700
     $null = Invoke-AutomationPost "/ui-action" @{ action = "click"; automationId = "shell-new-project" }
     Wait-Until -FailureMessage "New project dialog did not appear." -Condition {
@@ -461,6 +506,7 @@ finally {
     if ($originalWindow) {
         try {
             Resize-WinMuxWindow -Width ([int]$originalWindow.width) -Height ([int]$originalWindow.height)
+            Focus-WinMuxWindow | Out-Null
         }
         catch {
         }
