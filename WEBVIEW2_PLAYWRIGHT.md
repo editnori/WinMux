@@ -4,13 +4,16 @@ This repo can expose the embedded terminal renderer inside the native WinUI app 
 
 What this gives you:
 
+- inspect native shell state through the paired automation endpoint
+- trigger thread, tab, and theme actions without manual clicking
+- capture native window screenshots from the running WinUI app
 - inspect the real `WebView2` surface that the native app is using
 - attach Playwright to the running native app renderer
 - reload renderer HTML, CSS, and JS from the repo `Web/` folder without rebuilding native code
 
 What this does not give you:
 
-- full automation of the native XAML shell
+- arbitrary WinUI control discovery/clicking
 - direct inspection of non-WebView WinUI controls
 
 The repo uses Bun for package management and script entrypoints.
@@ -23,11 +26,12 @@ The repo-local Bun scripts intentionally run the Playwright helpers through Wind
 bun run webview2:start
 ```
 
-This does three things:
+This does four things:
 
 1. Builds the WinUI app.
 2. Launches it with `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222 --remote-debugging-address=0.0.0.0`.
 3. Points the embedded renderer at the repo `Web/` folder through `NATIVE_TERMINAL_WEB_ROOT`.
+4. Starts the native automation endpoint on port `9331`.
 
 The launcher also exposes the debug port on an address that WSL can reach, so the local Playwright install inside this repo can attach from `js_repl` or from the Node helpers.
 
@@ -40,7 +44,18 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-webview2
 ## Inspect available targets
 
 ```bash
+bun run native:health
+bun run native:state
 bun run webview2:targets
+```
+
+## Drive the native shell
+
+```bash
+bun run native:action -- '{"action":"newThread"}'
+bun run native:action -- '{"action":"newTab"}'
+bun run native:action -- '{"action":"setTheme","value":"light"}'
+bun run native:screenshot
 ```
 
 ## Capture the current renderer
@@ -100,6 +115,13 @@ await page.reload({ waitUntil: "domcontentloaded" });
 ```
 
 Native shell or startup changes still require relaunching the app.
+
+The native automation loop covers the shell-level gaps that CDP cannot:
+
+- shell state inspection
+- thread and tab actions
+- theme changes
+- native window screenshots
 
 ## Setup
 

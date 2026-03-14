@@ -21,12 +21,7 @@ namespace SelfContainedDeployment
         private void OnThemeRadioButtonChecked(object sender, RoutedEventArgs e)
         {
             ElementTheme selectedTheme = (ElementTheme)((RadioButton)sender).Tag;
-            SampleConfig.CurrentTheme = selectedTheme;
-
-            if (MainPage.Current?.Content is Grid content)
-            {
-                content.RequestedTheme = selectedTheme;
-            }
+            MainPage.Current?.ApplyTheme(selectedTheme);
         }
     }
 }

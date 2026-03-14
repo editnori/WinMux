@@ -2,6 +2,52 @@
     const bridge = window.chrome && window.chrome.webview ? window.chrome.webview : null;
     const termRoot = document.getElementById("terminal-root");
     const statusLine = document.getElementById("status-line");
+    const darkTheme = {
+        background: "#0f1217",
+        foreground: "#e6edf3",
+        cursor: "#e6edf3",
+        cursorAccent: "#0f1217",
+        selectionBackground: "rgba(122, 162, 247, 0.22)",
+        black: "#151922",
+        red: "#f7768e",
+        green: "#9ece6a",
+        yellow: "#e0af68",
+        blue: "#7aa2f7",
+        magenta: "#bb9af7",
+        cyan: "#7dcfff",
+        white: "#c0caf5",
+        brightBlack: "#5b6370",
+        brightRed: "#ff899d",
+        brightGreen: "#b7e27d",
+        brightYellow: "#f3c980",
+        brightBlue: "#8db3ff",
+        brightMagenta: "#ceb7ff",
+        brightCyan: "#97e6ff",
+        brightWhite: "#ffffff",
+    };
+    const lightTheme = {
+        background: "#fbf9f4",
+        foreground: "#211e1a",
+        cursor: "#211e1a",
+        cursorAccent: "#fbf9f4",
+        selectionBackground: "rgba(122, 162, 247, 0.18)",
+        black: "#1f1c18",
+        red: "#b4455b",
+        green: "#2f6a3b",
+        yellow: "#8f6420",
+        blue: "#2f5b9c",
+        magenta: "#7d4ea6",
+        cyan: "#2f6f80",
+        white: "#d8d1c3",
+        brightBlack: "#70695f",
+        brightRed: "#d45a74",
+        brightGreen: "#41854d",
+        brightYellow: "#aa7a2b",
+        brightBlue: "#4674b7",
+        brightMagenta: "#9668bc",
+        brightCyan: "#43889b",
+        brightWhite: "#f2ede4",
+    };
 
     const term = new Terminal({
         allowTransparency: false,
@@ -13,29 +59,7 @@
         letterSpacing: 0,
         lineHeight: 1.08,
         scrollback: 6000,
-        theme: {
-            background: "#0f1217",
-            foreground: "#e6edf3",
-            cursor: "#e6edf3",
-            cursorAccent: "#0f1217",
-            selectionBackground: "rgba(122, 162, 247, 0.22)",
-            black: "#151922",
-            red: "#f7768e",
-            green: "#9ece6a",
-            yellow: "#e0af68",
-            blue: "#7aa2f7",
-            magenta: "#bb9af7",
-            cyan: "#7dcfff",
-            white: "#c0caf5",
-            brightBlack: "#5b6370",
-            brightRed: "#ff899d",
-            brightGreen: "#b7e27d",
-            brightYellow: "#f3c980",
-            brightBlue: "#8db3ff",
-            brightMagenta: "#ceb7ff",
-            brightCyan: "#97e6ff",
-            brightWhite: "#ffffff",
-        },
+        theme: darkTheme,
     });
 
     const fitAddon = new FitAddon.FitAddon();
@@ -47,6 +71,12 @@
         input: "",
         ended: false,
     };
+
+    function setTheme(themeName) {
+        const resolvedTheme = themeName === "light" ? "light" : "dark";
+        document.body.dataset.theme = resolvedTheme;
+        term.options.theme = resolvedTheme === "light" ? lightTheme : darkTheme;
+    }
 
     function setTitle(title) {
         const nextTitle = title && title.trim() ? title.trim() : "Native Terminal";
@@ -212,6 +242,9 @@
             case "setTitle":
                 setTitle(message.title);
                 break;
+            case "setTheme":
+                setTheme(message.theme);
+                break;
             default:
                 break;
         }
@@ -236,6 +269,7 @@
     window.addEventListener("resize", fitTerminal);
 
     requestAnimationFrame(() => {
+        setTheme("dark");
         fitTerminal();
         term.focus();
 

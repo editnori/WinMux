@@ -1,9 +1,24 @@
 :root {
+    --app-bg: #0f1217;
+    --border: rgba(255, 255, 255, 0.08);
+    --overlay-bg: rgba(16, 20, 26, 0.92);
+    --text-muted: #8e99a7;
+}
+
+body[data-theme="dark"] {
     color-scheme: dark;
     --app-bg: #0f1217;
     --border: rgba(255, 255, 255, 0.08);
     --overlay-bg: rgba(16, 20, 26, 0.92);
     --text-muted: #8e99a7;
+}
+
+body[data-theme="light"] {
+    color-scheme: light;
+    --app-bg: #fbf9f4;
+    --border: rgba(33, 30, 26, 0.14);
+    --overlay-bg: rgba(251, 249, 244, 0.95);
+    --text-muted: #6b655e;
 }
 
 html,
@@ -18,6 +33,7 @@ body {
 
 body {
     position: relative;
+    background: var(--app-bg);
 }
 
 #terminal-root {

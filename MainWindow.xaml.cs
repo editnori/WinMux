@@ -2,7 +2,11 @@
 // Licensed under the MIT License.
 
 using Microsoft.UI.Xaml;
+using SelfContainedDeployment.Automation;
 using System;
+using System.Drawing;
+using System.Drawing.Imaging;
+using System.IO;
 using System.Runtime.InteropServices;
 using Windows.Win32.Foundation;
 using Windows.Win32.Graphics.Gdi;
@@ -23,6 +27,58 @@ namespace SelfContainedDeployment
             LoadIcon(hwnd, "Assets/windows-sdk.ico");
             SetWindowSize(hwnd, 1240, 860);
             PlacementCenterWindowInMonitorWin32(hwnd);
+        }
+
+        internal MainPage MainPage => Content as MainPage;
+
+        public NativeAutomationState GetAutomationState()
+        {
+            return MainPage?.GetAutomationState() ?? new NativeAutomationState
+            {
+                WindowTitle = Title,
+                ActiveView = "unavailable",
+            };
+        }
+
+        public NativeAutomationActionResponse PerformAutomationAction(NativeAutomationActionRequest request)
+        {
+            return MainPage?.PerformAutomationAction(request) ?? new NativeAutomationActionResponse
+            {
+                Ok = false,
+                Message = "Main page is not available.",
+            };
+        }
+
+        public NativeAutomationScreenshotResponse CaptureAutomationScreenshot(string outputPath)
+        {
+            HWND hwnd = (HWND)WinRT.Interop.WindowNative.GetWindowHandle(this);
+            GetWindowRect(hwnd, out RECT rect);
+
+            int width = rect.right - rect.left;
+            int height = rect.bottom - rect.top;
+
+            string finalPath = string.IsNullOrWhiteSpace(outputPath)
+                ? Path.Combine(Path.GetTempPath(), $"native-terminal-{Environment.ProcessId}.png")
+                : outputPath;
+
+            string targetDirectory = Path.GetDirectoryName(finalPath);
+            if (!string.IsNullOrWhiteSpace(targetDirectory))
+            {
+                Directory.CreateDirectory(targetDirectory);
+            }
+
+            using var bitmap = new Bitmap(width, height);
+            using var graphics = Graphics.FromImage(bitmap);
+            graphics.CopyFromScreen(rect.left, rect.top, 0, 0, bitmap.Size);
+            bitmap.Save(finalPath, ImageFormat.Png);
+
+            return new NativeAutomationScreenshotResponse
+            {
+                Ok = true,
+                Path = finalPath,
+                Width = width,
+                Height = height,
+            };
         }
 
         private unsafe void LoadIcon(HWND hwnd, string iconName)

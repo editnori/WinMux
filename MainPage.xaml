@@ -6,40 +6,48 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d">
 
-    <Grid x:Name="ShellRoot" Background="{StaticResource ShellPageBackgroundBrush}">
+    <Grid x:Name="ShellRoot" Background="{ThemeResource ShellPageBackgroundBrush}">
         <SplitView x:Name="ShellSplitView"
                    CompactPaneLength="52"
                    DisplayMode="CompactInline"
                    IsPaneOpen="True"
-                   OpenPaneLength="172"
-                   PaneBackground="{StaticResource ShellPaneBackgroundBrush}">
+                   OpenPaneLength="208"
+                   PaneBackground="{ThemeResource ShellPaneBackgroundBrush}">
             <SplitView.Pane>
-                <Grid Background="{StaticResource ShellPaneBackgroundBrush}">
+                <Grid Background="{ThemeResource ShellPaneBackgroundBrush}">
                     <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
-                    <Grid Margin="8,8,8,6"
+                    <Grid Margin="8,8,8,4"
                           ColumnDefinitions="28,*"
                           ColumnSpacing="10">
                         <Button x:Name="PaneToggleButton"
+                                AutomationProperties.AutomationId="shell-pane-toggle"
                                 Style="{StaticResource ShellChromeButtonStyle}"
                                 Click="OnPaneToggleClicked"
                                 ToolTipService.ToolTip="Collapse sidebar">
                             <FontIcon FontSize="12" Glyph="&#xE700;" />
                         </Button>
 
-                        <TextBlock x:Name="PaneBrandText"
-                                   Grid.Column="1"
-                                   VerticalAlignment="Center"
-                                   Style="{StaticResource ShellTitleTextStyle}"
-                                   Text="native terminal" />
+                        <StackPanel Grid.Column="1"
+                                    VerticalAlignment="Center"
+                                    Spacing="1">
+                            <TextBlock x:Name="PaneBrandText"
+                                       AutomationProperties.AutomationId="shell-brand-text"
+                                       Style="{StaticResource ShellTitleTextStyle}"
+                                       Text="native terminal" />
+                            <TextBlock x:Name="ProjectNamePaneText"
+                                       Style="{StaticResource ShellHintTextStyle}" />
+                        </StackPanel>
                     </Grid>
 
-                    <StackPanel Grid.Row="1" Margin="6,4,6,0" Spacing="2">
+                    <StackPanel Grid.Row="1" Margin="6,2,6,0" Spacing="2">
                         <Button x:Name="TerminalNavButton"
+                                AutomationProperties.AutomationId="shell-nav-terminal"
                                 Style="{StaticResource ShellNavButtonStyle}"
                                 Click="OnTerminalNavClicked"
                                 ToolTipService.ToolTip="Show terminal sessions">
@@ -53,6 +61,7 @@
                         </Button>
 
                         <Button x:Name="SettingsNavButton"
+                                AutomationProperties.AutomationId="shell-nav-settings"
                                 Style="{StaticResource ShellNavButtonStyle}"
                                 Click="OnSettingsNavClicked"
                                 ToolTipService.ToolTip="Open preferences">
@@ -66,54 +75,103 @@
                         </Button>
                     </StackPanel>
 
-                    <Button x:Name="NewTabRailButton"
-                            Grid.Row="2"
-                            Margin="6,0,6,8"
-                            Style="{StaticResource ShellNavButtonStyle}"
-                            Click="OnNewTabClicked"
-                            ToolTipService.ToolTip="Open a new terminal tab">
-                        <Grid ColumnDefinitions="16,*" ColumnSpacing="10">
-                            <FontIcon FontSize="12" Glyph="&#xE710;" />
-                            <TextBlock x:Name="NewTabText"
-                                       Grid.Column="1"
-                                       FontSize="12"
-                                       Text="New tab" />
-                        </Grid>
-                    </Button>
+                    <Grid Grid.Row="2" Margin="6,10,6,0">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+
+                        <TextBlock x:Name="ThreadSectionText"
+                                   Margin="6,0,6,6"
+                                   Style="{StaticResource ShellHintTextStyle}"
+                                   Text="Threads" />
+
+                        <ScrollViewer Grid.Row="1"
+                                      VerticalScrollBarVisibility="Auto"
+                                      VerticalScrollMode="Auto">
+                            <StackPanel x:Name="ThreadListPanel"
+                                        AutomationProperties.AutomationId="shell-thread-list"
+                                        Spacing="2" />
+                        </ScrollViewer>
+                    </Grid>
+
+                    <StackPanel Grid.Row="3" Margin="6,0,6,8" Spacing="2">
+                        <Button x:Name="NewThreadButton"
+                                AutomationProperties.AutomationId="shell-new-thread"
+                                Style="{StaticResource ShellNavButtonStyle}"
+                                Click="OnNewThreadClicked"
+                                ToolTipService.ToolTip="Open a new thread">
+                            <Grid ColumnDefinitions="16,*" ColumnSpacing="10">
+                                <FontIcon FontSize="12" Glyph="&#xE8FA;" />
+                                <TextBlock x:Name="NewThreadText"
+                                           Grid.Column="1"
+                                           FontSize="12"
+                                           Text="New thread" />
+                            </Grid>
+                        </Button>
+
+                        <Button x:Name="NewTabRailButton"
+                                AutomationProperties.AutomationId="shell-new-tab"
+                                Style="{StaticResource ShellNavButtonStyle}"
+                                Click="OnNewTabClicked"
+                                ToolTipService.ToolTip="Open a new terminal tab">
+                            <Grid ColumnDefinitions="16,*" ColumnSpacing="10">
+                                <FontIcon FontSize="12" Glyph="&#xE710;" />
+                                <TextBlock x:Name="NewTabText"
+                                           Grid.Column="1"
+                                           FontSize="12"
+                                           Text="New tab" />
+                            </Grid>
+                        </Button>
+                    </StackPanel>
                 </Grid>
             </SplitView.Pane>
 
-            <Grid Background="{StaticResource ShellPageBackgroundBrush}">
+            <Grid Background="{ThemeResource ShellPageBackgroundBrush}">
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="36" />
+                    <RowDefinition Height="40" />
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
 
                 <Grid Grid.Row="0"
                       Padding="12,0,14,0"
-                      Background="{StaticResource ShellSurfaceBackgroundBrush}"
-                      BorderBrush="{StaticResource ShellBorderBrush}"
+                      Background="{ThemeResource ShellSurfaceBackgroundBrush}"
+                      BorderBrush="{ThemeResource ShellBorderBrush}"
                       BorderThickness="0,0,0,1"
-                      ColumnDefinitions="*,Auto"
-                      ColumnSpacing="12">
-                    <TextBlock x:Name="WorkspacePathText"
+                      ColumnDefinitions="Auto,Auto,*,Auto"
+                      ColumnSpacing="8">
+                    <TextBlock x:Name="ProjectNameText"
+                               AutomationProperties.AutomationId="shell-project-name"
+                               VerticalAlignment="Center"
+                               Style="{StaticResource ShellMetaTextStyle}"
+                               FontWeight="SemiBold" />
+
+                    <TextBlock Grid.Column="1"
+                               VerticalAlignment="Center"
+                               Style="{StaticResource ShellHintTextStyle}"
+                               Text="·" />
+
+                    <TextBlock x:Name="ActiveThreadText"
+                               Grid.Column="2"
+                               AutomationProperties.AutomationId="shell-active-thread"
                                VerticalAlignment="Center"
                                Style="{StaticResource ShellMetaTextStyle}"
                                TextTrimming="CharacterEllipsis" />
 
-                    <StackPanel Grid.Column="1"
+                    <StackPanel Grid.Column="3"
                                 Orientation="Horizontal"
                                 Spacing="6"
                                 VerticalAlignment="Center">
                         <Ellipse Width="5"
                                  Height="5"
-                                 Fill="{StaticResource ShellSuccessBrush}" />
+                                 Fill="{ThemeResource ShellSuccessBrush}" />
                         <TextBlock Style="{StaticResource ShellHintTextStyle}" Text="ConPTY" />
                     </StackPanel>
                 </Grid>
 
                 <Grid Grid.Row="1">
                     <TabView x:Name="TerminalTabs"
+                             AutomationProperties.AutomationId="shell-tab-view"
                              AddTabButtonClick="TerminalTabs_AddTabButtonClick"
                              CanDragTabs="True"
                              HorizontalAlignment="Stretch"
@@ -124,8 +182,9 @@
                              VerticalAlignment="Stretch" />
 
                     <Frame x:Name="SettingsFrame"
+                           AutomationProperties.AutomationId="shell-settings-frame"
                            Visibility="Collapsed"
-                           Background="{StaticResource ShellPageBackgroundBrush}" />
+                           Background="{ThemeResource ShellPageBackgroundBrush}" />
                 </Grid>
             </Grid>
         </SplitView>

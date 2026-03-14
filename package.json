@@ -7,7 +7,11 @@
     "webview2:start": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/start-webview2-debug.ps1\")\"",
     "webview2:targets": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-webview2-tool.ps1\")\" targets",
     "webview2:screenshot": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-webview2-tool.ps1\")\" screenshot",
-    "webview2:eval": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-webview2-tool.ps1\")\" eval"
+    "webview2:eval": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-webview2-tool.ps1\")\" eval",
+    "native:health": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-automation.ps1\")\" health",
+    "native:state": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-automation.ps1\")\" state",
+    "native:action": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-automation.ps1\")\" action",
+    "native:screenshot": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-automation.ps1\")\" screenshot"
   },
   "devDependencies": {
     "playwright": "^1.58.2"

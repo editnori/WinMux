@@ -6,7 +6,7 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d">
 
-    <Grid Background="{StaticResource ShellPageBackgroundBrush}">
+    <Grid Background="{ThemeResource ShellPageBackgroundBrush}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
@@ -15,8 +15,8 @@
 
         <Border Grid.Row="0"
                 Padding="24,20,24,16"
-                Background="{StaticResource ShellSurfaceBackgroundBrush}"
-                BorderBrush="{StaticResource ShellBorderBrush}"
+                Background="{ThemeResource ShellSurfaceBackgroundBrush}"
+                BorderBrush="{ThemeResource ShellBorderBrush}"
                 BorderThickness="0,0,0,1">
             <StackPanel Spacing="4">
                 <TextBlock Style="{StaticResource ShellSectionTextStyle}" Text="Preferences" />
@@ -34,17 +34,23 @@
                 </StackPanel>
 
                 <StackPanel x:Name="themePanel" Spacing="8">
-                    <RadioButton Checked="OnThemeRadioButtonChecked" Content="Light">
+                    <RadioButton AutomationProperties.AutomationId="settings-theme-light"
+                                 Checked="OnThemeRadioButtonChecked"
+                                 Content="Light">
                         <RadioButton.Tag>
                             <ElementTheme>Light</ElementTheme>
                         </RadioButton.Tag>
                     </RadioButton>
-                    <RadioButton Checked="OnThemeRadioButtonChecked" Content="Dark">
+                    <RadioButton AutomationProperties.AutomationId="settings-theme-dark"
+                                 Checked="OnThemeRadioButtonChecked"
+                                 Content="Dark">
                         <RadioButton.Tag>
                             <ElementTheme>Dark</ElementTheme>
                         </RadioButton.Tag>
                     </RadioButton>
-                    <RadioButton Checked="OnThemeRadioButtonChecked" Content="System default">
+                    <RadioButton AutomationProperties.AutomationId="settings-theme-default"
+                                 Checked="OnThemeRadioButtonChecked"
+                                 Content="System default">
                         <RadioButton.Tag>
                             <ElementTheme>Default</ElementTheme>
                         </RadioButton.Tag>
@@ -55,7 +61,7 @@
 
         <Border Grid.Row="2"
                 Padding="24,12"
-                BorderBrush="{StaticResource ShellBorderBrush}"
+                BorderBrush="{ThemeResource ShellBorderBrush}"
                 BorderThickness="0,1,0,0">
             <TextBlock Style="{StaticResource ShellHintTextStyle}"
                        Text="Theme changes apply to the native shell and the embedded terminal surface." />

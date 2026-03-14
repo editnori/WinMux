@@ -5,7 +5,7 @@
     Loaded="OnLoaded"
     Unloaded="OnUnloaded">
 
-    <Grid Background="{StaticResource ShellPageBackgroundBrush}">
+    <Grid Background="{ThemeResource ShellPageBackgroundBrush}">
         <WebView2 x:Name="TerminalView" />
 
         <Border x:Name="StatusBadge"
@@ -13,8 +13,8 @@
                 Padding="10,6"
                 HorizontalAlignment="Right"
                 VerticalAlignment="Top"
-                Background="{StaticResource ShellMutedSurfaceBrush}"
-                BorderBrush="{StaticResource ShellBorderBrush}"
+                Background="{ThemeResource ShellMutedSurfaceBrush}"
+                BorderBrush="{ThemeResource ShellBorderBrush}"
                 BorderThickness="1"
                 CornerRadius="4">
             <TextBlock x:Name="StatusText"

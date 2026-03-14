@@ -10,6 +10,7 @@ The current shape of the app is:
 - ConPTY-backed shell process host
 - `WebView2` terminal renderer using local HTML/CSS/JS
 - Bun-managed debug helpers for attaching Playwright to the embedded renderer
+- native automation endpoints for shell state, semantic actions, and screenshots
 
 This file is the handoff document for future agents.
 
@@ -20,16 +21,18 @@ The app is no longer the original sample shell.
 What exists now:
 
 - fixed native shell layout with a dense inline sidebar and a top tab strip
+- one project containing independent threads, each with its own tab set
 - terminal tabs backed by `TerminalControl`
 - ConPTY process bridge in C#
 - shared renderer under `Web/` hosted inside `WebView2`
 - WebView2 CDP debug workflow for Playwright-style inspection
+- native automation loop for shell state, actions, and native window screenshots
 
 What does not exist yet:
 
 - split panes inside a tab
 - custom tab strip visuals
-- full native-shell UI automation
+- generic control-level native UI automation beyond the semantic actions
 - durable workspace/session persistence
 
 ## Important files
@@ -40,12 +43,19 @@ What does not exist yet:
 - [MainPage.xaml.cs](/mnt/c/Users/lqassem/native-terminal-starter/MainPage.xaml.cs)
 - [SettingsPage.xaml](/mnt/c/Users/lqassem/native-terminal-starter/SettingsPage.xaml)
 - [Styles.xaml](/mnt/c/Users/lqassem/native-terminal-starter/Styles.xaml)
+- [Shell/WorkspaceModels.cs](/mnt/c/Users/lqassem/native-terminal-starter/Shell/WorkspaceModels.cs)
 
 ### Terminal host
 
 - [Terminal/ConPtyConnection.cs](/mnt/c/Users/lqassem/native-terminal-starter/Terminal/ConPtyConnection.cs)
 - [Terminal/TerminalControl.xaml](/mnt/c/Users/lqassem/native-terminal-starter/Terminal/TerminalControl.xaml)
 - [Terminal/TerminalControl.xaml.cs](/mnt/c/Users/lqassem/native-terminal-starter/Terminal/TerminalControl.xaml.cs)
+
+### Native automation
+
+- [Automation/NativeAutomationContracts.cs](/mnt/c/Users/lqassem/native-terminal-starter/Automation/NativeAutomationContracts.cs)
+- [Automation/NativeAutomationServer.cs](/mnt/c/Users/lqassem/native-terminal-starter/Automation/NativeAutomationServer.cs)
+- [MainWindow.xaml.cs](/mnt/c/Users/lqassem/native-terminal-starter/MainWindow.xaml.cs)
 
 ### Shared renderer
 
@@ -61,11 +71,13 @@ What does not exist yet:
 - [package.json](/mnt/c/Users/lqassem/native-terminal-starter/package.json)
 - [bun.lock](/mnt/c/Users/lqassem/native-terminal-starter/bun.lock)
 - [scripts/start-webview2-debug.ps1](/mnt/c/Users/lqassem/native-terminal-starter/scripts/start-webview2-debug.ps1)
+- [scripts/run-native-automation.ps1](/mnt/c/Users/lqassem/native-terminal-starter/scripts/run-native-automation.ps1)
 - [tools/webview2-debug-utils.mjs](/mnt/c/Users/lqassem/native-terminal-starter/tools/webview2-debug-utils.mjs)
 - [tools/webview2-targets.mjs](/mnt/c/Users/lqassem/native-terminal-starter/tools/webview2-targets.mjs)
 - [tools/webview2-screenshot.mjs](/mnt/c/Users/lqassem/native-terminal-starter/tools/webview2-screenshot.mjs)
 - [tools/webview2-eval.mjs](/mnt/c/Users/lqassem/native-terminal-starter/tools/webview2-eval.mjs)
 - [WEBVIEW2_PLAYWRIGHT.md](/mnt/c/Users/lqassem/native-terminal-starter/WEBVIEW2_PLAYWRIGHT.md)
+- [FOUNDATION_TODO.md](/mnt/c/Users/lqassem/native-terminal-starter/FOUNDATION_TODO.md)
 
 ### Backlog / direction
 
@@ -82,6 +94,7 @@ What does not exist yet:
 Responsibilities:
 
 - collapsible inline sidebar via `SplitView`
+- project -> thread -> tab workspace model
 - top-level `TabView`
 - settings view switching
 - creating and closing terminal tabs
@@ -135,6 +148,10 @@ Commands:
 ```bash
 bun install
 bun run webview2:start
+bun run native:health
+bun run native:state
+bun run native:action -- '{"action":"newThread"}'
+bun run native:screenshot
 bun run webview2:targets
 bun run webview2:screenshot
 bun run webview2:eval -- "document.title"
@@ -177,6 +194,8 @@ bun run webview2:start
 3. Attach helpers:
 
 ```bash
+bun run native:health
+bun run native:state
 bun run webview2:targets
 bun run webview2:screenshot
 bun run webview2:eval -- "document.title"
@@ -184,6 +203,9 @@ bun run webview2:eval -- "document.title"
 
 What this is good for:
 
+- inspecting shell state without clicking through it manually
+- creating threads and tabs from the outside
+- switching theme and capturing native window screenshots
 - inspecting the real renderer inside the native app
 - CSS and JS debugging
 - capturing screenshots
@@ -191,7 +213,7 @@ What this is good for:
 
 What it is not good for:
 
-- native XAML automation
+- arbitrary control discovery/clicking across all WinUI controls
 - debugging layout of non-WebView controls
 
 For full native automation, use Windows-native UI automation tools later.

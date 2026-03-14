@@ -12,23 +12,53 @@
     </ResourceDictionary.MergedDictionaries>
     <!-- Other app resources here -->
 
-    <SolidColorBrush x:Key="ShellPageBackgroundBrush" Color="#0F1217" />
-    <SolidColorBrush x:Key="ShellPaneBackgroundBrush" Color="#13171E" />
-    <SolidColorBrush x:Key="ShellSurfaceBackgroundBrush" Color="#10141A" />
-    <SolidColorBrush x:Key="ShellMutedSurfaceBrush" Color="#151B23" />
-    <SolidColorBrush x:Key="ShellBorderBrush" Color="#212834" />
-    <SolidColorBrush x:Key="ShellNavHoverBrush" Color="#141A22" />
-    <SolidColorBrush x:Key="ShellNavActiveBrush" Color="#1A212B" />
-    <SolidColorBrush x:Key="ShellTextPrimaryBrush" Color="#E8EDF3" />
-    <SolidColorBrush x:Key="ShellTextSecondaryBrush" Color="#98A2AF" />
-    <SolidColorBrush x:Key="ShellTextTertiaryBrush" Color="#6E7784" />
-    <SolidColorBrush x:Key="ShellSuccessBrush" Color="#9ECE6A" />
+    <ResourceDictionary.ThemeDictionaries>
+        <ResourceDictionary x:Key="Default">
+            <SolidColorBrush x:Key="ShellPageBackgroundBrush" Color="#0F1217" />
+            <SolidColorBrush x:Key="ShellPaneBackgroundBrush" Color="#13171E" />
+            <SolidColorBrush x:Key="ShellSurfaceBackgroundBrush" Color="#10141A" />
+            <SolidColorBrush x:Key="ShellMutedSurfaceBrush" Color="#151B23" />
+            <SolidColorBrush x:Key="ShellBorderBrush" Color="#212834" />
+            <SolidColorBrush x:Key="ShellNavHoverBrush" Color="#141A22" />
+            <SolidColorBrush x:Key="ShellNavActiveBrush" Color="#1A212B" />
+            <SolidColorBrush x:Key="ShellTextPrimaryBrush" Color="#E8EDF3" />
+            <SolidColorBrush x:Key="ShellTextSecondaryBrush" Color="#98A2AF" />
+            <SolidColorBrush x:Key="ShellTextTertiaryBrush" Color="#6E7784" />
+            <SolidColorBrush x:Key="ShellSuccessBrush" Color="#9ECE6A" />
+        </ResourceDictionary>
+        <ResourceDictionary x:Key="Dark">
+            <SolidColorBrush x:Key="ShellPageBackgroundBrush" Color="#0F1217" />
+            <SolidColorBrush x:Key="ShellPaneBackgroundBrush" Color="#13171E" />
+            <SolidColorBrush x:Key="ShellSurfaceBackgroundBrush" Color="#10141A" />
+            <SolidColorBrush x:Key="ShellMutedSurfaceBrush" Color="#151B23" />
+            <SolidColorBrush x:Key="ShellBorderBrush" Color="#212834" />
+            <SolidColorBrush x:Key="ShellNavHoverBrush" Color="#141A22" />
+            <SolidColorBrush x:Key="ShellNavActiveBrush" Color="#1A212B" />
+            <SolidColorBrush x:Key="ShellTextPrimaryBrush" Color="#E8EDF3" />
+            <SolidColorBrush x:Key="ShellTextSecondaryBrush" Color="#98A2AF" />
+            <SolidColorBrush x:Key="ShellTextTertiaryBrush" Color="#6E7784" />
+            <SolidColorBrush x:Key="ShellSuccessBrush" Color="#9ECE6A" />
+        </ResourceDictionary>
+        <ResourceDictionary x:Key="Light">
+            <SolidColorBrush x:Key="ShellPageBackgroundBrush" Color="#F6F3EC" />
+            <SolidColorBrush x:Key="ShellPaneBackgroundBrush" Color="#ECE8DF" />
+            <SolidColorBrush x:Key="ShellSurfaceBackgroundBrush" Color="#FBF9F4" />
+            <SolidColorBrush x:Key="ShellMutedSurfaceBrush" Color="#F1EEE6" />
+            <SolidColorBrush x:Key="ShellBorderBrush" Color="#D8D1C3" />
+            <SolidColorBrush x:Key="ShellNavHoverBrush" Color="#EAE4D8" />
+            <SolidColorBrush x:Key="ShellNavActiveBrush" Color="#DFD8CB" />
+            <SolidColorBrush x:Key="ShellTextPrimaryBrush" Color="#211E1A" />
+            <SolidColorBrush x:Key="ShellTextSecondaryBrush" Color="#615A53" />
+            <SolidColorBrush x:Key="ShellTextTertiaryBrush" Color="#8A837A" />
+            <SolidColorBrush x:Key="ShellSuccessBrush" Color="#2F6A3B" />
+        </ResourceDictionary>
+    </ResourceDictionary.ThemeDictionaries>
 
     <Style x:Key="ShellButtonBaseStyle" TargetType="Button">
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="BorderBrush" Value="Transparent" />
         <Setter Property="BorderThickness" Value="1" />
-        <Setter Property="Foreground" Value="{StaticResource ShellTextSecondaryBrush}" />
+        <Setter Property="Foreground" Value="{ThemeResource ShellTextSecondaryBrush}" />
         <Setter Property="Padding" Value="8,5" />
         <Setter Property="CornerRadius" Value="3" />
         <Setter Property="HorizontalContentAlignment" Value="Left" />
@@ -55,26 +85,26 @@
                             <VisualState x:Name="PointerOver">
                                 <Storyboard>
                                     <ObjectAnimationUsingKeyFrames Storyboard.TargetName="RootBorder" Storyboard.TargetProperty="Background">
-                                        <DiscreteObjectKeyFrame KeyTime="0" Value="{StaticResource ShellNavHoverBrush}" />
+                                        <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource ShellNavHoverBrush}" />
                                     </ObjectAnimationUsingKeyFrames>
                                     <ObjectAnimationUsingKeyFrames Storyboard.TargetName="RootBorder" Storyboard.TargetProperty="BorderBrush">
-                                        <DiscreteObjectKeyFrame KeyTime="0" Value="{StaticResource ShellBorderBrush}" />
+                                        <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource ShellBorderBrush}" />
                                     </ObjectAnimationUsingKeyFrames>
                                     <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ContentPresenter" Storyboard.TargetProperty="Foreground">
-                                        <DiscreteObjectKeyFrame KeyTime="0" Value="{StaticResource ShellTextPrimaryBrush}" />
+                                        <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource ShellTextPrimaryBrush}" />
                                     </ObjectAnimationUsingKeyFrames>
                                 </Storyboard>
                             </VisualState>
                             <VisualState x:Name="Pressed">
                                 <Storyboard>
                                     <ObjectAnimationUsingKeyFrames Storyboard.TargetName="RootBorder" Storyboard.TargetProperty="Background">
-                                        <DiscreteObjectKeyFrame KeyTime="0" Value="{StaticResource ShellNavActiveBrush}" />
+                                        <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource ShellNavActiveBrush}" />
                                     </ObjectAnimationUsingKeyFrames>
                                     <ObjectAnimationUsingKeyFrames Storyboard.TargetName="RootBorder" Storyboard.TargetProperty="BorderBrush">
-                                        <DiscreteObjectKeyFrame KeyTime="0" Value="{StaticResource ShellBorderBrush}" />
+                                        <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource ShellBorderBrush}" />
                                     </ObjectAnimationUsingKeyFrames>
                                     <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ContentPresenter" Storyboard.TargetProperty="Foreground">
-                                        <DiscreteObjectKeyFrame KeyTime="0" Value="{StaticResource ShellTextPrimaryBrush}" />
+                                        <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource ShellTextPrimaryBrush}" />
                                     </ObjectAnimationUsingKeyFrames>
                                 </Storyboard>
                             </VisualState>
@@ -108,28 +138,28 @@
     <Style x:Key="ShellTitleTextStyle" TargetType="TextBlock" BasedOn="{StaticResource BaseTextBlockStyle}">
         <Setter Property="FontSize" Value="12" />
         <Setter Property="FontWeight" Value="SemiBold" />
-        <Setter Property="Foreground" Value="{StaticResource ShellTextPrimaryBrush}" />
+        <Setter Property="Foreground" Value="{ThemeResource ShellTextPrimaryBrush}" />
     </Style>
 
     <Style x:Key="ShellBodyTextStyle" TargetType="TextBlock" BasedOn="{StaticResource BaseTextBlockStyle}">
         <Setter Property="FontSize" Value="12" />
-        <Setter Property="Foreground" Value="{StaticResource ShellTextPrimaryBrush}" />
+        <Setter Property="Foreground" Value="{ThemeResource ShellTextPrimaryBrush}" />
     </Style>
 
     <Style x:Key="ShellSectionTextStyle" TargetType="TextBlock" BasedOn="{StaticResource BaseTextBlockStyle}">
         <Setter Property="FontSize" Value="12" />
         <Setter Property="FontWeight" Value="SemiBold" />
-        <Setter Property="Foreground" Value="{StaticResource ShellTextPrimaryBrush}" />
+        <Setter Property="Foreground" Value="{ThemeResource ShellTextPrimaryBrush}" />
     </Style>
 
     <Style x:Key="ShellMetaTextStyle" TargetType="TextBlock" BasedOn="{StaticResource BaseTextBlockStyle}">
         <Setter Property="FontSize" Value="11" />
-        <Setter Property="Foreground" Value="{StaticResource ShellTextSecondaryBrush}" />
+        <Setter Property="Foreground" Value="{ThemeResource ShellTextSecondaryBrush}" />
     </Style>
 
     <Style x:Key="ShellHintTextStyle" TargetType="TextBlock" BasedOn="{StaticResource BaseTextBlockStyle}">
         <Setter Property="FontSize" Value="11" />
-        <Setter Property="Foreground" Value="{StaticResource ShellTextTertiaryBrush}" />
+        <Setter Property="Foreground" Value="{ThemeResource ShellTextTertiaryBrush}" />
     </Style>
 
     <Style x:Key="SymbolButton" TargetType="ToggleButton">

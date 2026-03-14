@@ -21,6 +21,7 @@ namespace SelfContainedDeployment.Terminal
         private int _cols = 120;
         private int _rows = 32;
         private string _sessionTitle = "Terminal";
+        private ElementTheme _themePreference = ElementTheme.Default;
 
         public event EventHandler<string> SessionTitleChanged;
         public event EventHandler SessionExited;
@@ -29,6 +30,7 @@ namespace SelfContainedDeployment.Terminal
         {
             InitializeComponent();
             InitialWorkingDirectory = Environment.CurrentDirectory;
+            ActualThemeChanged += OnActualThemeChanged;
         }
 
         public string ShellCommand { get; set; }
@@ -89,6 +91,7 @@ namespace SelfContainedDeployment.Terminal
             {
                 case "ready":
                     _rendererReady = true;
+                    PostCurrentTheme();
                     EnsureStarted();
                     break;
                 case "resize":
@@ -194,6 +197,12 @@ namespace SelfContainedDeployment.Terminal
             PostMessage(new HostMessage { Type = "focus" });
         }
 
+        public void ApplyTheme(ElementTheme theme)
+        {
+            _themePreference = theme;
+            PostCurrentTheme();
+        }
+
         public void DisposeTerminal()
         {
             if (_disposed)
@@ -256,6 +265,35 @@ namespace SelfContainedDeployment.Terminal
             return string.IsNullOrWhiteSpace(leaf) ? trimmed : leaf;
         }
 
+        private void OnActualThemeChanged(FrameworkElement sender, object args)
+        {
+            if (_themePreference == ElementTheme.Default)
+            {
+                PostCurrentTheme();
+            }
+        }
+
+        private void PostCurrentTheme()
+        {
+            PostMessage(new HostMessage
+            {
+                Type = "setTheme",
+                Theme = ResolveThemeName(),
+            });
+        }
+
+        private string ResolveThemeName()
+        {
+            ElementTheme resolved = _themePreference switch
+            {
+                ElementTheme.Light => ElementTheme.Light,
+                ElementTheme.Dark => ElementTheme.Dark,
+                _ => ActualTheme == ElementTheme.Light ? ElementTheme.Light : ElementTheme.Dark,
+            };
+
+            return resolved == ElementTheme.Light ? "light" : "dark";
+        }
+
         private static string ResolveRendererPath()
         {
             string overrideRoot = Environment.GetEnvironmentVariable("NATIVE_TERMINAL_WEB_ROOT");
@@ -312,6 +350,7 @@ namespace SelfContainedDeployment.Terminal
             public string Data { get; set; }
             public string Text { get; set; }
             public string Title { get; set; }
+            public string Theme { get; set; }
         }
     }
 }

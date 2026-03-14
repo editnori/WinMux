@@ -1,0 +1,41 @@
+param(
+    [Parameter(Mandatory = $true, Position = 0)]
+    [string]$Tool,
+
+    [Parameter(ValueFromRemainingArguments = $true)]
+    [string[]]$ForwardArgs
+)
+
+$ErrorActionPreference = "Stop"
+
+$port = if ($env:NATIVE_TERMINAL_AUTOMATION_PORT) { [int]$env:NATIVE_TERMINAL_AUTOMATION_PORT } else { 9331 }
+$baseUrl = "http://127.0.0.1:$port"
+
+switch ($Tool) {
+    "health" {
+        Invoke-RestMethod -Uri "$baseUrl/health" | ConvertTo-Json -Depth 10
+        break
+    }
+    "state" {
+        Invoke-RestMethod -Uri "$baseUrl/state" | ConvertTo-Json -Depth 10
+        break
+    }
+    "action" {
+        if (-not $ForwardArgs -or $ForwardArgs.Count -eq 0) {
+            throw "Provide a JSON payload, for example: bun run native:action -- '{`"action`":`"togglePane`"}'"
+        }
+
+        $body = $ForwardArgs -join " "
+        Invoke-RestMethod -Method Post -Uri "$baseUrl/action" -ContentType "application/json" -Body $body | ConvertTo-Json -Depth 10
+        break
+    }
+    "screenshot" {
+        $path = if ($ForwardArgs.Count -gt 0) { $ForwardArgs[0] } else { "" }
+        $body = @{ path = $path } | ConvertTo-Json
+        Invoke-RestMethod -Method Post -Uri "$baseUrl/screenshot" -ContentType "application/json" -Body $body | ConvertTo-Json -Depth 10
+        break
+    }
+    default {
+        throw "Unknown automation tool '$Tool'. Expected one of: health, state, action, screenshot"
+    }
+}
