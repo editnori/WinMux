@@ -57,6 +57,7 @@ What does not exist yet:
 - [Automation/NativeAutomationContracts.cs](/mnt/c/Users/lqassem/native-terminal-starter/Automation/NativeAutomationContracts.cs)
 - [Automation/NativeAutomationServer.cs](/mnt/c/Users/lqassem/native-terminal-starter/Automation/NativeAutomationServer.cs)
 - [MainWindow.xaml.cs](/mnt/c/Users/lqassem/native-terminal-starter/MainWindow.xaml.cs)
+- [AUTOMATION_REFERENCE.md](/mnt/c/Users/lqassem/native-terminal-starter/AUTOMATION_REFERENCE.md)
 
 ### Shared renderer
 
