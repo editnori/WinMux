@@ -403,17 +403,24 @@ namespace SelfContainedDeployment.Terminal
                 return;
             }
 
-            if (string.Equals(_sessionTitle, title, StringComparison.Ordinal))
+            string normalizedTitle = NormalizeSessionTitle(title);
+            if (string.IsNullOrWhiteSpace(normalizedTitle))
             {
                 return;
             }
 
-            _sessionTitle = title;
-            LogTerminalEvent("title.updated", $"Session title set to {title}", new Dictionary<string, string>
+            if (string.Equals(_sessionTitle, normalizedTitle, StringComparison.Ordinal))
             {
-                ["title"] = title,
+                return;
+            }
+
+            _sessionTitle = normalizedTitle;
+            PostMessage(new HostMessage { Type = "setTitle", Title = normalizedTitle });
+            LogTerminalEvent("title.updated", $"Session title set to {normalizedTitle}", new Dictionary<string, string>
+            {
+                ["title"] = normalizedTitle,
             });
-            SessionTitleChanged?.Invoke(this, title);
+            SessionTitleChanged?.Invoke(this, normalizedTitle);
         }
 
         private string GetInitialTitle()
@@ -431,6 +438,67 @@ namespace SelfContainedDeployment.Terminal
             string leaf = Path.GetFileName(trimmed);
 
             return string.IsNullOrWhiteSpace(leaf) ? trimmed : leaf;
+        }
+
+        private string NormalizeSessionTitle(string title)
+        {
+            string trimmed = title?.Trim();
+            if (string.IsNullOrWhiteSpace(trimmed))
+            {
+                return null;
+            }
+
+            string launcherName = ExtractCommandExecutableName(ShellCommand);
+            string titleLeaf = ExtractPathLeaf(trimmed);
+            if (!string.IsNullOrWhiteSpace(launcherName) &&
+                string.Equals(titleLeaf, launcherName, StringComparison.OrdinalIgnoreCase))
+            {
+                return GetInitialTitle();
+            }
+
+            return trimmed;
+        }
+
+        private static string ExtractCommandExecutableName(string command)
+        {
+            if (string.IsNullOrWhiteSpace(command))
+            {
+                return null;
+            }
+
+            string trimmed = command.Trim();
+            string token;
+            if (trimmed[0] == '"')
+            {
+                int closingQuote = trimmed.IndexOf('"', 1);
+                token = closingQuote > 1 ? trimmed[1..closingQuote] : trimmed.Trim('"');
+            }
+            else
+            {
+                int spaceIndex = trimmed.IndexOf(' ');
+                token = spaceIndex > 0 ? trimmed[..spaceIndex] : trimmed;
+            }
+
+            return ExtractPathLeaf(token);
+        }
+
+        private static string ExtractPathLeaf(string pathLike)
+        {
+            if (string.IsNullOrWhiteSpace(pathLike))
+            {
+                return null;
+            }
+
+            string trimmed = pathLike.Trim().TrimEnd('\\', '/');
+            if (trimmed.Length == 0)
+            {
+                return null;
+            }
+
+            int slashIndex = Math.Max(trimmed.LastIndexOf('\\'), trimmed.LastIndexOf('/'));
+            return slashIndex >= 0 && slashIndex < trimmed.Length - 1
+                ? trimmed[(slashIndex + 1)..]
+                : trimmed;
         }
 
         private void OnTerminalSizeChanged(object sender, SizeChangedEventArgs e)
@@ -504,7 +572,9 @@ namespace SelfContainedDeployment.Terminal
 
             tcs.TrySetResult(new NativeAutomationTerminalSnapshot
             {
-                Title = string.IsNullOrWhiteSpace(message.Title) ? _sessionTitle : message.Title,
+                Title = string.IsNullOrWhiteSpace(message.Title)
+                    ? _sessionTitle
+                    : NormalizeSessionTitle(message.Title) ?? _sessionTitle,
                 DisplayWorkingDirectory = DisplayWorkingDirectory,
                 ShellCommand = ShellCommand,
                 RendererReady = _rendererReady,

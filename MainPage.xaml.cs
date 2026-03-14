@@ -2431,18 +2431,22 @@ namespace SelfContainedDeployment
 
             Button browseButton = new()
             {
-                Content = new TextBlock
+                Content = new FontIcon
                 {
-                    Text = "Browse…",
-                    TextWrapping = TextWrapping.NoWrap,
+                    Glyph = "\uE8B7",
+                    FontSize = 12,
                 },
-                HorizontalAlignment = HorizontalAlignment.Left,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
                 HorizontalContentAlignment = HorizontalAlignment.Center,
-                MinWidth = 132,
-                Width = 132,
-                Style = (Style)Application.Current.Resources["ShellNavButtonStyle"],
+                Width = 28,
+                Height = 28,
+                Style = (Style)Application.Current.Resources["ShellChromeButtonStyle"],
+                Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["ShellMutedSurfaceBrush"],
+                BorderBrush = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["ShellBorderBrush"],
             };
             AutomationProperties.SetAutomationId(browseButton, "dialog-project-browse");
+            AutomationProperties.SetName(browseButton, "Browse for folder");
+            ToolTipService.SetToolTip(browseButton, "Browse for folder");
 
             ComboBox profileBox = new()
             {
@@ -2468,12 +2472,15 @@ namespace SelfContainedDeployment
             };
             AutomationProperties.SetAutomationId(helperText, "dialog-project-helper");
 
-            StackPanel pathSection = new()
+            Grid pathSection = new()
             {
-                Spacing = 8,
+                ColumnSpacing = 8,
                 HorizontalAlignment = HorizontalAlignment.Stretch,
             };
+            pathSection.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            pathSection.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });
             pathSection.Children.Add(pathBox);
+            Grid.SetColumn(browseButton, 1);
             pathSection.Children.Add(browseButton);
 
             StackPanel body = new()

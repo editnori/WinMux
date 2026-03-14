@@ -244,7 +244,7 @@ namespace SelfContainedDeployment.Shell
             string normalizedPath = NormalizeProjectPath(projectPath);
             if (TryParseWslSharePath(normalizedPath, out WslSharePath wslSharePath))
             {
-                return $"wsl.exe -d \"{wslSharePath.DistroName}\" --cd \"{wslSharePath.LinuxPath}\"";
+                return $"wsl.exe --distribution {wslSharePath.DistroName} --cd \"{wslSharePath.LinuxPath}\"";
             }
 
             return $"wsl.exe --cd \"{ResolveDisplayPath(normalizedPath, ShellProfileIds.Wsl)}\"";
