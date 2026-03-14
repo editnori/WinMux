@@ -24,10 +24,18 @@ switch ($Tool) {
         Invoke-RestMethod -Uri "$baseUrl/ui-tree" | ConvertTo-Json -Depth 30
         break
     }
+    "events" {
+        Invoke-RestMethod -Uri "$baseUrl/events" | ConvertTo-Json -Depth 20
+        break
+    }
+    "events-clear" {
+        Invoke-RestMethod -Method Post -Uri "$baseUrl/events/clear" | ConvertTo-Json -Depth 10
+        break
+    }
     "ui-refs" {
         $response = Invoke-RestMethod -Uri "$baseUrl/ui-tree"
         $response.interactiveNodes |
-            Select-Object refLabel, automationId, controlType, name, text, x, y, width, height, elementId |
+            Select-Object refLabel, automationId, controlType, name, text, x, y, width, height, background, foreground, margin, padding, elementId |
             ConvertTo-Json -Depth 10
         break
     }
@@ -66,6 +74,6 @@ switch ($Tool) {
         break
     }
     default {
-        throw "Unknown automation tool '$Tool'. Expected one of: health, state, ui-tree, ui-refs, action, ui-action, terminal-state, screenshot"
+        throw "Unknown automation tool '$Tool'. Expected one of: health, state, ui-tree, ui-refs, events, events-clear, action, ui-action, terminal-state, screenshot"
     }
 }

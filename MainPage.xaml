@@ -6,15 +6,19 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d">
 
-    <Grid x:Name="ShellRoot" Background="{ThemeResource ShellPageBackgroundBrush}">
+    <Grid x:Name="ShellRoot"
+          AutomationProperties.AutomationId="shell-root"
+          Background="{ThemeResource ShellPageBackgroundBrush}">
         <SplitView x:Name="ShellSplitView"
+                   AutomationProperties.AutomationId="shell-split-view"
                    CompactPaneLength="48"
                    DisplayMode="CompactInline"
                    IsPaneOpen="True"
                    OpenPaneLength="228"
                    PaneBackground="{ThemeResource ShellPaneBackgroundBrush}">
             <SplitView.Pane>
-                <Border Background="{ThemeResource ShellPaneBackgroundBrush}"
+                <Border AutomationProperties.AutomationId="shell-sidebar"
+                        Background="{ThemeResource ShellPaneBackgroundBrush}"
                         BorderBrush="{ThemeResource ShellBorderBrush}"
                         BorderThickness="0,0,1,0">
                     <Grid>
@@ -24,7 +28,8 @@
                             <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
-                        <Border Padding="12,12,12,14"
+                        <Border AutomationProperties.AutomationId="shell-sidebar-header"
+                                Padding="12,12,12,14"
                                 BorderBrush="{ThemeResource ShellBorderBrush}"
                                 BorderThickness="0,0,0,1">
                             <Grid ColumnDefinitions="28,*"
@@ -63,7 +68,10 @@
                             </StackPanel>
                         </ScrollViewer>
 
-                        <StackPanel Grid.Row="2" Margin="8,10,8,8" Spacing="2">
+                        <StackPanel Grid.Row="2"
+                                    AutomationProperties.AutomationId="shell-sidebar-footer"
+                                    Margin="8,10,8,8"
+                                    Spacing="2">
                             <Button x:Name="NewProjectButton"
                                     AutomationProperties.AutomationId="shell-new-project"
                                     Style="{StaticResource ShellNavButtonStyle}"
@@ -96,7 +104,8 @@
                 </Border>
             </SplitView.Pane>
 
-            <Grid Background="{ThemeResource ShellPageBackgroundBrush}"
+            <Grid AutomationProperties.AutomationId="shell-main-content"
+                  Background="{ThemeResource ShellPageBackgroundBrush}"
                   Margin="4,0,0,0">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="40" />
@@ -104,6 +113,7 @@
                 </Grid.RowDefinitions>
 
                 <Grid Grid.Row="0"
+                      AutomationProperties.AutomationId="shell-header-bar"
                       Padding="12,6,14,6"
                       Background="{ThemeResource ShellSurfaceBackgroundBrush}"
                       BorderBrush="{ThemeResource ShellBorderBrush}"
@@ -126,7 +136,8 @@
                                TextTrimming="CharacterEllipsis" />
                 </Grid>
 
-                <Grid Grid.Row="1">
+                <Grid Grid.Row="1"
+                      AutomationProperties.AutomationId="shell-workspace-host">
                     <TabView x:Name="TerminalTabs"
                              AutomationProperties.AutomationId="shell-tab-view"
                              AddTabButtonClick="TerminalTabs_AddTabButtonClick"
@@ -142,11 +153,38 @@
                            AutomationProperties.AutomationId="shell-settings-frame"
                            Visibility="Collapsed"
                            Background="{ThemeResource ShellPageBackgroundBrush}" />
+
+                    <StackPanel x:Name="EmptyThreadStatePanel"
+                                AutomationProperties.AutomationId="shell-empty-thread-state"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Visibility="Collapsed"
+                                Spacing="10">
+                        <TextBlock HorizontalAlignment="Center"
+                                   Style="{StaticResource ShellSectionTextStyle}"
+                                   Text="No threads yet" />
+                        <TextBlock HorizontalAlignment="Center"
+                                   Style="{StaticResource ShellHintTextStyle}"
+                                   Text="This project is still open. Add a new thread when you want to start working again." />
+                        <Button x:Name="EmptyStateNewThreadButton"
+                                AutomationProperties.AutomationId="shell-empty-new-thread"
+                                HorizontalAlignment="Center"
+                                Style="{StaticResource ShellNavButtonStyle}"
+                                Click="OnEmptyStateNewThreadClicked">
+                            <Grid ColumnDefinitions="16,*" ColumnSpacing="10">
+                                <FontIcon FontSize="12" Glyph="&#xE710;" />
+                                <TextBlock Grid.Column="1"
+                                           FontSize="12"
+                                           Text="New thread" />
+                            </Grid>
+                        </Button>
+                    </StackPanel>
                 </Grid>
             </Grid>
         </SplitView>
 
         <Canvas x:Name="AutomationOverlayCanvas"
+                AutomationProperties.AutomationId="shell-automation-overlay"
                 Background="Transparent"
                 IsHitTestVisible="False"
                 Visibility="Collapsed" />

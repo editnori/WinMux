@@ -6,8 +6,10 @@ What this gives you:
 
 - inspect native shell state through the paired automation endpoint
 - inspect the WinUI visual tree and interactive native controls
+- inspect resolved layout/style metadata for native controls
 - trigger thread, tab, and theme actions without manual clicking
 - target native controls by `automationId`, `elementId`, `name`, or annotated `refLabel`
+- inspect native event logs for tab/thread/render sequencing
 - capture native window screenshots from the running WinUI app
 - capture annotated native screenshots with overlay labels
 - inspect terminal scrollback, visible rows, cursor, selection, and session metadata
@@ -51,6 +53,7 @@ bun run native:health
 bun run native:state
 bun run native:ui-tree
 bun run native:ui-refs
+bun run native:events
 bun run native:terminal-state
 bun run native:smoke
 bun run webview2:targets
@@ -130,6 +133,7 @@ The native automation loop covers the shell-level gaps that CDP cannot:
 
 - shell state inspection
 - native control discovery and generic UI actions
+- native event logs
 - thread and tab actions
 - theme changes
 - terminal inspection

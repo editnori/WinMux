@@ -5,10 +5,13 @@
     Loaded="OnLoaded"
     Unloaded="OnUnloaded">
 
-    <Grid Background="{ThemeResource ShellPageBackgroundBrush}">
-        <WebView2 x:Name="TerminalView" />
+    <Grid AutomationProperties.AutomationId="terminal-root"
+          Background="{ThemeResource ShellPageBackgroundBrush}">
+        <WebView2 x:Name="TerminalView"
+                  AutomationProperties.AutomationId="terminal-webview" />
 
         <Border x:Name="StatusBadge"
+                AutomationProperties.AutomationId="terminal-status-badge"
                 Margin="16"
                 Padding="10,6"
                 HorizontalAlignment="Right"

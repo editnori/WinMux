@@ -12,6 +12,8 @@
     "native:state": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-automation.ps1\")\" state",
     "native:ui-tree": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-automation.ps1\")\" ui-tree",
     "native:ui-refs": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-automation.ps1\")\" ui-refs",
+    "native:events": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-automation.ps1\")\" events",
+    "native:events:clear": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-automation.ps1\")\" events-clear",
     "native:action": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-automation.ps1\")\" action",
     "native:ui-action": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-automation.ps1\")\" ui-action",
     "native:terminal-state": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-automation.ps1\")\" terminal-state",

@@ -120,6 +120,13 @@ namespace SelfContainedDeployment
             graphics.CopyFromScreen(rect.left, rect.top, 0, 0, bitmap.Size);
             bitmap.Save(finalPath, ImageFormat.Png);
 
+            NativeAutomationEventLog.Record("automation", "screenshot.captured", "Captured native window screenshot", new System.Collections.Generic.Dictionary<string, string>
+            {
+                ["path"] = finalPath,
+                ["width"] = width.ToString(),
+                ["height"] = height.ToString(),
+            });
+
             return new NativeAutomationScreenshotResponse
             {
                 Ok = true,

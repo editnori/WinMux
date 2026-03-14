@@ -153,6 +153,26 @@ namespace SelfContainedDeployment.Automation
 
         public double Height { get; set; }
 
+        public string Margin { get; set; }
+
+        public string Padding { get; set; }
+
+        public string BorderThickness { get; set; }
+
+        public string CornerRadius { get; set; }
+
+        public string Background { get; set; }
+
+        public string BorderBrush { get; set; }
+
+        public string Foreground { get; set; }
+
+        public double Opacity { get; set; }
+
+        public double FontSize { get; set; }
+
+        public string FontWeight { get; set; }
+
         public List<NativeAutomationUiNode> Children { get; set; } = new();
     }
 
@@ -227,5 +247,27 @@ namespace SelfContainedDeployment.Automation
         public string VisibleText { get; set; }
 
         public string BufferTail { get; set; }
+    }
+
+    public sealed class NativeAutomationEventsResponse
+    {
+        public long NextSequence { get; set; }
+
+        public List<NativeAutomationEventEntry> Events { get; set; } = new();
+    }
+
+    public sealed class NativeAutomationEventEntry
+    {
+        public long Sequence { get; set; }
+
+        public string Timestamp { get; set; }
+
+        public string Category { get; set; }
+
+        public string Name { get; set; }
+
+        public string Message { get; set; }
+
+        public Dictionary<string, string> Data { get; set; } = new();
     }
 }

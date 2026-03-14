@@ -4,6 +4,7 @@ using Microsoft.UI.Xaml.Automation.Peers;
 using Microsoft.UI.Xaml.Automation.Provider;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using SelfContainedDeployment.Automation;
 using SelfContainedDeployment.Shell;
@@ -38,6 +39,11 @@ namespace SelfContainedDeployment
             ActualThemeChanged += OnActualThemeChanged;
         }
 
+        private static void LogAutomationEvent(string category, string name, string message = null, IReadOnlyDictionary<string, string> data = null)
+        {
+            NativeAutomationEventLog.Record(category, name, message, data);
+        }
+
         public void ApplyTheme(ElementTheme theme)
         {
             SampleConfig.CurrentTheme = theme;
@@ -48,6 +54,10 @@ namespace SelfContainedDeployment
             UpdateSidebarActions();
             UpdateHeader();
             ApplyThemeToAllTerminals(ResolveTheme(theme));
+            LogAutomationEvent("shell", "theme.changed", $"Theme set to {ResolveTheme(theme).ToString().ToLowerInvariant()}", new Dictionary<string, string>
+            {
+                ["theme"] = ResolveTheme(theme).ToString().ToLowerInvariant(),
+            });
         }
 
         public void ApplyShellProfile(string profileId)
@@ -60,6 +70,12 @@ namespace SelfContainedDeployment
                 RefreshProjectTree();
                 UpdateHeader();
             }
+
+            LogAutomationEvent("shell", "profile.changed", $"Default shell profile set to {SampleConfig.DefaultShellProfileId}", new Dictionary<string, string>
+            {
+                ["profileId"] = SampleConfig.DefaultShellProfileId,
+                ["projectId"] = _activeProject?.Id ?? string.Empty,
+            });
         }
 
         public NativeAutomationUiTreeResponse GetAutomationUiTree()
@@ -128,6 +144,10 @@ namespace SelfContainedDeployment
                     InvokeUiElement(target);
                     break;
 
+                case "doubleclick":
+                    DoubleClickUiElement(target);
+                    break;
+
                 case "rightclick":
                     ShowContextFlyout(target);
                     break;
@@ -144,6 +164,18 @@ namespace SelfContainedDeployment
                     ToggleUiElement(target);
                     break;
 
+                case "hover":
+                    ApplyUiVisualState(target, "PointerOver");
+                    break;
+
+                case "press":
+                    ApplyUiVisualState(target, "Pressed");
+                    break;
+
+                case "normalstate":
+                    ApplyUiVisualState(target, "Normal");
+                    break;
+
                 case "invokemenuitem":
                     InvokeContextMenuItem(target, request.MenuItemText ?? request.Value);
                     break;
@@ -158,6 +190,14 @@ namespace SelfContainedDeployment
 
             int interactiveIndex = 0;
             NativeAutomationUiNode snapshot = BuildUiNodeTree(target, "target", ref interactiveIndex);
+            LogAutomationEvent("automation", "ui-action.executed", $"Executed ui action '{request.Action}'", new Dictionary<string, string>
+            {
+                ["action"] = request.Action ?? string.Empty,
+                ["automationId"] = request.AutomationId ?? string.Empty,
+                ["refLabel"] = request.RefLabel ?? string.Empty,
+                ["elementId"] = request.ElementId ?? string.Empty,
+                ["text"] = request.Text ?? string.Empty,
+            });
 
             return new NativeAutomationUiActionResponse
             {
@@ -315,6 +355,9 @@ namespace SelfContainedDeployment
                     case "duplicatethread":
                         DuplicateThread(request.ThreadId);
                         break;
+                    case "deletethread":
+                        DeleteThread(request.ThreadId);
+                        break;
                     case "input":
                         SendInputToSelectedTerminal(request.Value);
                         break;
@@ -326,6 +369,15 @@ namespace SelfContainedDeployment
                             State = GetAutomationState(),
                         };
                 }
+
+                LogAutomationEvent("automation", "action.executed", $"Executed action '{request.Action}'", new Dictionary<string, string>
+                {
+                    ["action"] = request.Action ?? string.Empty,
+                    ["projectId"] = request.ProjectId ?? string.Empty,
+                    ["threadId"] = request.ThreadId ?? string.Empty,
+                    ["tabId"] = request.TabId ?? string.Empty,
+                    ["value"] = request.Value ?? string.Empty,
+                });
 
                 return new NativeAutomationActionResponse
                 {
@@ -416,16 +468,20 @@ namespace SelfContainedDeployment
             }
         }
 
+        private async void OnThreadButtonDoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
+        {
+            if (sender is Button button && button.Tag is string threadId)
+            {
+                e.Handled = true;
+                await BeginRenameThreadAsync(threadId);
+            }
+        }
+
         private async void OnRenameThreadMenuClicked(object sender, RoutedEventArgs e)
         {
             if (sender is MenuFlyoutItem item && item.Tag is string threadId)
             {
-                WorkspaceThread thread = FindThread(threadId);
-                string nextName = await PromptForThreadNameAsync("Rename thread", thread.Name);
-                if (!string.IsNullOrWhiteSpace(nextName))
-                {
-                    RenameThread(threadId, nextName);
-                }
+                await BeginRenameThreadAsync(threadId);
             }
         }
 
@@ -437,6 +493,25 @@ namespace SelfContainedDeployment
             }
         }
 
+        private void OnDeleteThreadMenuClicked(object sender, RoutedEventArgs e)
+        {
+            if (sender is MenuFlyoutItem item && item.Tag is string threadId)
+            {
+                DeleteThread(threadId);
+            }
+        }
+
+        private void OnEmptyStateNewThreadClicked(object sender, RoutedEventArgs e)
+        {
+            if (_activeProject is null)
+            {
+                return;
+            }
+
+            ActivateThread(CreateThread(_activeProject));
+            ShowTerminalShell();
+        }
+
         private void OnThreadNameTextChanged(object sender, TextChangedEventArgs e)
         {
             if (_suppressThreadNameSync || _showingSettings || _activeThread is null)
@@ -446,10 +521,21 @@ namespace SelfContainedDeployment
 
             _activeThread.Name = string.IsNullOrWhiteSpace(ThreadNameBox.Text) ? "Untitled thread" : ThreadNameBox.Text.Trim();
             RefreshProjectTree();
+            LogAutomationEvent("shell", "thread.header_edited", $"Header edited for {_activeThread.Name}", new Dictionary<string, string>
+            {
+                ["threadId"] = _activeThread.Id,
+                ["projectId"] = _activeProject?.Id ?? string.Empty,
+                ["threadName"] = _activeThread.Name,
+            });
         }
 
         private void TerminalTabs_AddTabButtonClick(TabView sender, object args)
         {
+            if (_activeProject is not null && _activeThread is null)
+            {
+                ActivateThread(CreateThread(_activeProject));
+            }
+
             AddTerminalTab(_activeProject, _activeThread);
         }
 
@@ -471,6 +557,12 @@ namespace SelfContainedDeployment
             if (TerminalTabs.SelectedItem is TabViewItem item && item.Tag is TerminalTabRecord tab)
             {
                 _activeThread.SelectedTabId = tab.Id;
+                LogAutomationEvent("shell", "tab.selected", $"Selected tab {tab.Id}", new Dictionary<string, string>
+                {
+                    ["tabId"] = tab.Id,
+                    ["threadId"] = _activeThread.Id,
+                    ["projectId"] = _activeProject?.Id ?? string.Empty,
+                });
             }
 
             FocusSelectedTerminal();
@@ -488,6 +580,11 @@ namespace SelfContainedDeployment
             }
 
             ActivateProject(project);
+            LogAutomationEvent("shell", "workspace.initialized", "Initialized workspace model", new Dictionary<string, string>
+            {
+                ["projectId"] = project.Id,
+                ["projectPath"] = project.RootPath,
+            });
         }
 
         private WorkspaceProject GetOrCreateProject(string rootPath, string name = null, string shellProfileId = null)
@@ -507,6 +604,12 @@ namespace SelfContainedDeployment
             WorkspaceProject project = new(normalizedPath, ShellProfiles.Resolve(shellProfileId ?? SampleConfig.DefaultShellProfileId).Id, name);
             _projects.Add(project);
             RefreshProjectTree();
+            LogAutomationEvent("shell", "project.created", $"Created project {project.Name}", new Dictionary<string, string>
+            {
+                ["projectId"] = project.Id,
+                ["projectPath"] = project.RootPath,
+                ["shellProfileId"] = project.ShellProfileId,
+            });
             return project;
         }
 
@@ -520,6 +623,12 @@ namespace SelfContainedDeployment
             project.SelectedThreadId = thread.Id;
             EnsureThreadHasTab(project, thread);
             RefreshProjectTree();
+            LogAutomationEvent("shell", "thread.created", $"Created thread {thread.Name}", new Dictionary<string, string>
+            {
+                ["threadId"] = thread.Id,
+                ["projectId"] = project.Id,
+                ["threadName"] = thread.Name,
+            });
             return thread;
         }
 
@@ -550,6 +659,13 @@ namespace SelfContainedDeployment
             terminal.SessionTitleChanged += (_, title) =>
             {
                 tab.Header = title;
+                LogAutomationEvent("terminal", "title.changed", $"Terminal title changed to {title}", new Dictionary<string, string>
+                {
+                    ["tabId"] = tab.Id,
+                    ["threadId"] = thread.Id,
+                    ["projectId"] = project.Id,
+                    ["title"] = title ?? string.Empty,
+                });
                 if (thread == _activeThread)
                 {
                     RefreshTabView();
@@ -558,6 +674,12 @@ namespace SelfContainedDeployment
             terminal.SessionExited += (_, _) =>
             {
                 tab.IsExited = true;
+                LogAutomationEvent("terminal", "session.exited", $"Terminal exited for tab {tab.Id}", new Dictionary<string, string>
+                {
+                    ["tabId"] = tab.Id,
+                    ["threadId"] = thread.Id,
+                    ["projectId"] = project.Id,
+                });
                 if (thread == _activeThread)
                 {
                     RefreshTabView();
@@ -577,6 +699,13 @@ namespace SelfContainedDeployment
             }
 
             RefreshProjectTree();
+            LogAutomationEvent("shell", "tab.created", $"Created tab {tab.Id}", new Dictionary<string, string>
+            {
+                ["tabId"] = tab.Id,
+                ["threadId"] = thread.Id,
+                ["projectId"] = project.Id,
+                ["shellCommand"] = terminal.ShellCommand ?? string.Empty,
+            });
             return tab;
         }
 
@@ -616,6 +745,12 @@ namespace SelfContainedDeployment
 
                     RefreshProjectTree();
                     UpdateHeader();
+                    LogAutomationEvent("shell", "tab.closed", $"Closed tab {tab.Id}", new Dictionary<string, string>
+                    {
+                        ["tabId"] = tab.Id,
+                        ["threadId"] = thread.Id,
+                        ["projectId"] = project.Id,
+                    });
                     return;
                 }
             }
@@ -656,8 +791,22 @@ namespace SelfContainedDeployment
             _activeProject = project ?? throw new ArgumentNullException(nameof(project));
 
             WorkspaceThread thread = project.Threads.FirstOrDefault(candidate => candidate.Id == project.SelectedThreadId)
-                ?? project.Threads.FirstOrDefault()
-                ?? CreateThread(project);
+                ?? project.Threads.FirstOrDefault();
+
+            if (thread is null)
+            {
+                _activeThread = null;
+                RefreshProjectTree();
+                RefreshTabView();
+                UpdateWorkspaceVisibility();
+                UpdateHeader();
+                LogAutomationEvent("shell", "project.selected", $"Selected project {project.Name} with no active thread", new Dictionary<string, string>
+                {
+                    ["projectId"] = project.Id,
+                    ["projectPath"] = project.RootPath,
+                });
+                return;
+            }
 
             ActivateThread(thread);
         }
@@ -681,8 +830,31 @@ namespace SelfContainedDeployment
             EnsureThreadHasTab(_activeProject, thread);
             RefreshProjectTree();
             RefreshTabView();
+            UpdateWorkspaceVisibility();
             UpdateHeader();
             RequestFitForSelectedTerminal();
+            LogAutomationEvent("shell", "thread.selected", $"Selected thread {thread.Name}", new Dictionary<string, string>
+            {
+                ["threadId"] = thread.Id,
+                ["projectId"] = _activeProject.Id,
+                ["threadName"] = thread.Name,
+            });
+        }
+
+        private async System.Threading.Tasks.Task BeginRenameThreadAsync(string threadId)
+        {
+            WorkspaceThread thread = FindThread(threadId);
+            LogAutomationEvent("shell", "thread.rename_requested", $"Opening rename dialog for {thread.Name}", new Dictionary<string, string>
+            {
+                ["threadId"] = thread.Id,
+                ["projectId"] = thread.Project.Id,
+            });
+
+            string nextName = await PromptForThreadNameAsync("Rename thread", thread.Name);
+            if (!string.IsNullOrWhiteSpace(nextName))
+            {
+                RenameThread(threadId, nextName);
+            }
         }
 
         private void RenameThread(string threadId, string nextName)
@@ -696,6 +868,12 @@ namespace SelfContainedDeployment
             thread.Name = string.IsNullOrWhiteSpace(nextName) ? thread.Name : nextName.Trim();
             RefreshProjectTree();
             UpdateHeader();
+            LogAutomationEvent("shell", "thread.renamed", $"Renamed thread to {thread.Name}", new Dictionary<string, string>
+            {
+                ["threadId"] = thread.Id,
+                ["projectId"] = thread.Project.Id,
+                ["threadName"] = thread.Name,
+            });
         }
 
         private void DuplicateThread(string threadId)
@@ -711,6 +889,64 @@ namespace SelfContainedDeployment
 
             ActivateThread(duplicate);
             ShowTerminalShell();
+            LogAutomationEvent("shell", "thread.duplicated", $"Duplicated thread {source.Name}", new Dictionary<string, string>
+            {
+                ["sourceThreadId"] = source.Id,
+                ["threadId"] = duplicate.Id,
+                ["projectId"] = project.Id,
+            });
+        }
+
+        private void DeleteThread(string threadId)
+        {
+            WorkspaceThread thread = FindThread(threadId);
+            WorkspaceProject project = FindProjectForThread(thread);
+            bool wasActive = ReferenceEquals(thread, _activeThread);
+
+            foreach (TerminalTabRecord tab in thread.Tabs)
+            {
+                tab.Terminal.DisposeTerminal();
+            }
+
+            project.Threads.Remove(thread);
+            if (string.Equals(project.SelectedThreadId, thread.Id, StringComparison.Ordinal))
+            {
+                project.SelectedThreadId = project.Threads.FirstOrDefault()?.Id;
+            }
+
+            if (wasActive)
+            {
+                WorkspaceThread nextThread = project.Threads.FirstOrDefault(candidate => candidate.Id == project.SelectedThreadId)
+                    ?? project.Threads.FirstOrDefault();
+
+                if (nextThread is not null)
+                {
+                    ActivateThread(nextThread);
+                }
+                else
+                {
+                    _activeProject = project;
+                    _activeThread = null;
+                    RefreshProjectTree();
+                    RefreshTabView();
+                    UpdateWorkspaceVisibility();
+                    UpdateHeader();
+                }
+            }
+            else
+            {
+                RefreshProjectTree();
+                UpdateWorkspaceVisibility();
+                UpdateHeader();
+            }
+
+            ShowTerminalShell();
+            LogAutomationEvent("shell", "thread.deleted", $"Deleted thread {thread.Name}", new Dictionary<string, string>
+            {
+                ["threadId"] = thread.Id,
+                ["projectId"] = project.Id,
+                ["remainingThreadCount"] = project.Threads.Count.ToString(),
+            });
         }
 
         private void RefreshProjectTree()
@@ -826,6 +1062,7 @@ namespace SelfContainedDeployment
                     };
                     AutomationProperties.SetAutomationId(threadButton, $"shell-thread-{thread.Id}");
                     threadButton.Click += OnThreadButtonClicked;
+                    threadButton.DoubleTapped += OnThreadButtonDoubleTapped;
 
                     MenuFlyout threadMenu = new();
                     MenuFlyoutItem renameItem = new()
@@ -833,15 +1070,25 @@ namespace SelfContainedDeployment
                         Text = "Rename",
                         Tag = thread.Id,
                     };
+                    AutomationProperties.SetAutomationId(renameItem, $"shell-thread-rename-{thread.Id}");
                     renameItem.Click += OnRenameThreadMenuClicked;
                     MenuFlyoutItem duplicateItem = new()
                     {
                         Text = "Duplicate",
                         Tag = thread.Id,
                     };
+                    AutomationProperties.SetAutomationId(duplicateItem, $"shell-thread-duplicate-{thread.Id}");
                     duplicateItem.Click += OnDuplicateThreadMenuClicked;
+                    MenuFlyoutItem deleteItem = new()
+                    {
+                        Text = "Delete",
+                        Tag = thread.Id,
+                    };
+                    AutomationProperties.SetAutomationId(deleteItem, $"shell-thread-delete-{thread.Id}");
+                    deleteItem.Click += OnDeleteThreadMenuClicked;
                     threadMenu.Items.Add(renameItem);
                     threadMenu.Items.Add(duplicateItem);
+                    threadMenu.Items.Add(deleteItem);
                     threadButton.ContextFlyout = threadMenu;
 
                     Grid threadLayout = new()
@@ -880,6 +1127,15 @@ namespace SelfContainedDeployment
                     threadStack.Children.Add(threadButton);
                 }
 
+                if (project.Threads.Count == 0)
+                {
+                    threadStack.Children.Add(new TextBlock
+                    {
+                        Text = "No threads yet",
+                        Style = (Style)Application.Current.Resources["ShellHintTextStyle"],
+                    });
+                }
+
                 group.Children.Add(threadStack);
                 ProjectListPanel.Children.Add(group);
             }
@@ -896,6 +1152,7 @@ namespace SelfContainedDeployment
 
             if (_activeThread is null)
             {
+                UpdateWorkspaceVisibility();
                 return;
             }
 
@@ -924,27 +1181,39 @@ namespace SelfContainedDeployment
             {
                 _activeThread.SelectedTabId = selectedTab.Id;
             }
+
+            UpdateWorkspaceVisibility();
+            LogAutomationEvent("render", "tabview.refreshed", $"TabView refreshed for thread {_activeThread.Name}", new Dictionary<string, string>
+            {
+                ["threadId"] = _activeThread.Id,
+                ["projectId"] = _activeProject?.Id ?? string.Empty,
+                ["tabCount"] = _activeThread.Tabs.Count.ToString(),
+            });
         }
 
         private void ShowSettings()
         {
             _showingSettings = true;
             SettingsFrame.Navigate(typeof(SettingsPage));
-            SettingsFrame.Visibility = Visibility.Visible;
-            TerminalTabs.Visibility = Visibility.Collapsed;
+            UpdateWorkspaceVisibility();
             UpdateSidebarActions();
             UpdateHeader();
+            LogAutomationEvent("shell", "view.settings", "Opened preferences");
         }
 
         private void ShowTerminalShell()
         {
             _showingSettings = false;
-            SettingsFrame.Visibility = Visibility.Collapsed;
-            TerminalTabs.Visibility = Visibility.Visible;
+            UpdateWorkspaceVisibility();
             UpdateSidebarActions();
             FocusSelectedTerminal();
             RequestFitForSelectedTerminal();
             UpdateHeader();
+            LogAutomationEvent("shell", "view.terminal", _activeThread is null ? "Showing empty project state" : "Showing terminal workspace", new Dictionary<string, string>
+            {
+                ["projectId"] = _activeProject?.Id ?? string.Empty,
+                ["threadId"] = _activeThread?.Id ?? string.Empty,
+            });
         }
 
         private void FocusSelectedTerminal()
@@ -960,6 +1229,12 @@ namespace SelfContainedDeployment
             if (TerminalTabs.SelectedItem is TabViewItem item && item.Tag is TerminalTabRecord tab)
             {
                 tab.Terminal.RequestFit();
+                LogAutomationEvent("render", "terminal.fit_requested", $"Requested fit for tab {tab.Id}", new Dictionary<string, string>
+                {
+                    ["tabId"] = tab.Id,
+                    ["threadId"] = _activeThread?.Id ?? string.Empty,
+                    ["projectId"] = _activeProject?.Id ?? string.Empty,
+                });
             }
         }
 
@@ -968,6 +1243,13 @@ namespace SelfContainedDeployment
             if (TerminalTabs.SelectedItem is TabViewItem item && item.Tag is TerminalTabRecord tab)
             {
                 tab.Terminal.SendInput(text);
+                LogAutomationEvent("terminal", "input.sent", "Sent input to selected terminal", new Dictionary<string, string>
+                {
+                    ["tabId"] = tab.Id,
+                    ["threadId"] = _activeThread?.Id ?? string.Empty,
+                    ["projectId"] = _activeProject?.Id ?? string.Empty,
+                    ["length"] = (text?.Length ?? 0).ToString(),
+                });
             }
         }
 
@@ -988,6 +1270,10 @@ namespace SelfContainedDeployment
 
             ToolTipService.SetToolTip(PaneToggleButton, isOpen ? "Collapse sidebar" : "Expand sidebar");
             RefreshProjectTree();
+            LogAutomationEvent("render", "pane.layout", isOpen ? "Sidebar expanded" : "Sidebar collapsed", new Dictionary<string, string>
+            {
+                ["paneOpen"] = isOpen.ToString(),
+            });
         }
 
         private void UpdateHeader()
@@ -1005,8 +1291,8 @@ namespace SelfContainedDeployment
                     return;
                 }
 
-                ThreadNameBox.IsReadOnly = false;
-                ThreadNameBox.Text = _activeThread?.Name ?? "Thread";
+                ThreadNameBox.IsReadOnly = _activeThread is null;
+                ThreadNameBox.Text = _activeThread?.Name ?? "No thread selected";
                 ActiveDirectoryText.Visibility = Visibility.Visible;
                 ActiveDirectoryText.Text = _activeProject is null ? string.Empty : FormatProjectPath(_activeProject);
             }
@@ -1014,6 +1300,23 @@ namespace SelfContainedDeployment
             {
                 _suppressThreadNameSync = false;
             }
+        }
+
+        private void UpdateWorkspaceVisibility()
+        {
+            if (_showingSettings)
+            {
+                SettingsFrame.Visibility = Visibility.Visible;
+                TerminalTabs.Visibility = Visibility.Collapsed;
+                EmptyThreadStatePanel.Visibility = Visibility.Collapsed;
+                return;
+            }
+
+            SettingsFrame.Visibility = Visibility.Collapsed;
+
+            bool showEmptyState = _activeProject is not null && _activeThread is null;
+            TerminalTabs.Visibility = showEmptyState ? Visibility.Collapsed : Visibility.Visible;
+            EmptyThreadStatePanel.Visibility = showEmptyState ? Visibility.Visible : Visibility.Collapsed;
         }
 
         private void ApplyThemeToAllTerminals(ElementTheme resolvedTheme)
@@ -1129,6 +1432,16 @@ namespace SelfContainedDeployment
                 Y = bounds.Y,
                 Width = bounds.Width,
                 Height = bounds.Height,
+                Margin = SerializeThickness(TryGetThickness(node, "Margin")),
+                Padding = SerializeThickness(TryGetThickness(node, "Padding")),
+                BorderThickness = SerializeThickness(TryGetThickness(node, "BorderThickness")),
+                CornerRadius = SerializeCornerRadius(TryGetCornerRadius(node, "CornerRadius")),
+                Background = SerializeBrush(TryGetBrush(node, "Background")),
+                BorderBrush = SerializeBrush(TryGetBrush(node, "BorderBrush")),
+                Foreground = SerializeBrush(TryGetBrush(node, "Foreground")),
+                Opacity = element?.Opacity ?? 1,
+                FontSize = TryGetDouble(node, "FontSize"),
+                FontWeight = TryGetFontWeight(node, "FontWeight"),
                 Children = children,
             };
 
@@ -1165,11 +1478,6 @@ namespace SelfContainedDeployment
 
         private static bool IsInteractiveUiNode(DependencyObject node, string automationId)
         {
-            if (!string.IsNullOrWhiteSpace(automationId))
-            {
-                return true;
-            }
-
             return node is Button
                 or ToggleButton
                 or RadioButton
@@ -1248,6 +1556,82 @@ namespace SelfContainedDeployment
                 .ToArray();
 
             return filtered.Length == 0 ? null : string.Join(" ", filtered);
+        }
+
+        private static Thickness? TryGetThickness(object instance, string propertyName)
+        {
+            var property = instance?.GetType().GetProperty(propertyName);
+            if (property is null)
+            {
+                return null;
+            }
+
+            object value = property.GetValue(instance);
+            return value is Thickness thickness ? thickness : null;
+        }
+
+        private static CornerRadius? TryGetCornerRadius(object instance, string propertyName)
+        {
+            var property = instance?.GetType().GetProperty(propertyName);
+            if (property is null)
+            {
+                return null;
+            }
+
+            object value = property.GetValue(instance);
+            return value is CornerRadius cornerRadius ? cornerRadius : null;
+        }
+
+        private static Brush TryGetBrush(object instance, string propertyName)
+        {
+            var property = instance?.GetType().GetProperty(propertyName);
+            return property?.GetValue(instance) as Brush;
+        }
+
+        private static double TryGetDouble(object instance, string propertyName)
+        {
+            var property = instance?.GetType().GetProperty(propertyName);
+            object value = property?.GetValue(instance);
+            return value is double number ? number : 0;
+        }
+
+        private static string TryGetFontWeight(object instance, string propertyName)
+        {
+            var property = instance?.GetType().GetProperty(propertyName);
+            object value = property?.GetValue(instance);
+            return value is Windows.UI.Text.FontWeight fontWeight ? fontWeight.Weight.ToString() : null;
+        }
+
+        private static string SerializeThickness(Thickness? thickness)
+        {
+            if (thickness is null)
+            {
+                return null;
+            }
+
+            Thickness value = thickness.Value;
+            return $"{value.Left:0.##},{value.Top:0.##},{value.Right:0.##},{value.Bottom:0.##}";
+        }
+
+        private static string SerializeCornerRadius(CornerRadius? cornerRadius)
+        {
+            if (cornerRadius is null)
+            {
+                return null;
+            }
+
+            CornerRadius value = cornerRadius.Value;
+            return $"{value.TopLeft:0.##},{value.TopRight:0.##},{value.BottomRight:0.##},{value.BottomLeft:0.##}";
+        }
+
+        private static string SerializeBrush(Brush brush)
+        {
+            return brush switch
+            {
+                null => null,
+                SolidColorBrush solid => $"#{solid.Color.A:X2}{solid.Color.R:X2}{solid.Color.G:X2}{solid.Color.B:X2}",
+                _ => brush.GetType().Name,
+            };
         }
 
         private static void CollectVisualText(DependencyObject node, List<string> parts)
@@ -1537,6 +1921,52 @@ namespace SelfContainedDeployment
             throw new InvalidOperationException($"Element '{node.GetType().Name}' could not be invoked.");
         }
 
+        private void DoubleClickUiElement(DependencyObject node)
+        {
+            if (node is FrameworkElement element && TryInvokeKnownDoubleClickAction(element))
+            {
+                return;
+            }
+
+            InvokeUiElement(node);
+            InvokeUiElement(node);
+        }
+
+        private bool TryInvokeKnownDoubleClickAction(FrameworkElement element)
+        {
+            string automationId = AutomationProperties.GetAutomationId(element);
+            if (string.IsNullOrWhiteSpace(automationId))
+            {
+                return false;
+            }
+
+            if (automationId.StartsWith("shell-thread-", StringComparison.Ordinal))
+            {
+                _ = BeginRenameThreadAsync(automationId["shell-thread-".Length..]);
+                return true;
+            }
+
+            return false;
+        }
+
+        private static void ApplyUiVisualState(DependencyObject node, string stateName)
+        {
+            if (node is Control control)
+            {
+                if (VisualStateManager.GoToState(control, stateName, false))
+                {
+                    return;
+                }
+            }
+
+            if (node is TabViewItem tabItem && VisualStateManager.GoToState(tabItem, stateName, false))
+            {
+                return;
+            }
+
+            throw new InvalidOperationException($"Element '{node.GetType().Name}' does not expose visual state '{stateName}'.");
+        }
+
         private bool TryInvokeKnownShellAction(DependencyObject node)
         {
             if (node is not FrameworkElement element)
@@ -1730,6 +2160,11 @@ namespace SelfContainedDeployment
 
             if (item is MenuFlyoutItem menuItem && TryInvokeViaAutomationPeer(menuItem))
             {
+                LogAutomationEvent("automation", "context-menu.invoked", $"Invoked context menu item {menuItemText}", new Dictionary<string, string>
+                {
+                    ["menuItemText"] = menuItemText ?? string.Empty,
+                    ["targetAutomationId"] = AutomationProperties.GetAutomationId(element) ?? string.Empty,
+                });
                 return;
             }
 

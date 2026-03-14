@@ -90,6 +90,8 @@ try {
     Assert-True ($health.ok -eq $true) "Automation health check failed."
     Add-Check "health" "automation endpoint responded from pid $($health.pid)"
 
+    $null = Invoke-AutomationPost "/events/clear" $null
+
     $state = Invoke-AutomationGet "/state"
     Assert-True (@($state.projects).Count -ge 1) "Expected at least one project."
     Assert-True (@($state.threads).Count -ge 1) "Expected at least one thread."
@@ -197,11 +199,10 @@ try {
     Add-Check "duplicate-thread" "duplicated thread selected as '$((Get-ThreadById -Project $activeProject -ThreadId $duplicateThreadId).name)'"
 
     $invokeRename = Invoke-AutomationPost "/ui-action" @{
-        action = "invokeMenuItem"
+        action = "doubleClick"
         automationId = "shell-thread-$duplicateThreadId"
-        menuItemText = "Rename"
     }
-    Assert-True ($invokeRename.ok -eq $true) "Rename thread menu action failed."
+    Assert-True ($invokeRename.ok -eq $true) "Rename thread double-click action failed."
 
     $renameTree = Wait-Until -FailureMessage "Rename dialog was not exposed in ui-tree." -Condition {
         $tree = Invoke-AutomationGet "/ui-tree"
@@ -236,6 +237,26 @@ try {
         return $null
     }
     Add-Check "rename-thread-dialog" "thread renamed through dialog automation"
+
+    $threadCountBeforeDelete = @($activeProject.threads).Count
+    $deleteThread = Invoke-AutomationPost "/action" @{
+        action = "deleteThread"
+        threadId = $duplicateThreadId
+    }
+    Assert-True ($deleteThread.ok -eq $true) "Delete thread action failed."
+
+    $state = Wait-Until -FailureMessage "Deleted thread still present in state." -Condition {
+        $latestState = Invoke-AutomationGet "/state"
+        $latestProject = Get-ProjectById -State $latestState -ProjectId $latestState.projectId
+        $deletedThread = Get-ThreadById -Project $latestProject -ThreadId $duplicateThreadId
+        if ($null -eq $deletedThread -and @($latestProject.threads).Count -eq ($threadCountBeforeDelete - 1)) {
+            return $latestState
+        }
+
+        return $null
+    }
+    $activeProject = Get-ProjectById -State $state -ProjectId $state.projectId
+    Add-Check "delete-thread" "thread removed while project remained with $(@($activeProject.threads).Count) thread(s)"
 
     New-Item -ItemType Directory -Path $tempProjectPath -Force | Out-Null
 
@@ -284,9 +305,53 @@ try {
     }
     Add-Check "new-project-dialog" "new project added at $tempProjectPath"
 
+    $threadIdToDelete = $state.activeThreadId
+    $deleteLastThread = Invoke-AutomationPost "/action" @{
+        action = "deleteThread"
+        threadId = $threadIdToDelete
+    }
+    Assert-True ($deleteLastThread.ok -eq $true) "Deleting the only thread in a project failed."
+
+    $state = Wait-Until -FailureMessage "Project did not enter the empty-thread state." -Condition {
+        $latestState = Invoke-AutomationGet "/state"
+        $latestProject = Get-ProjectById -State $latestState -ProjectId $latestState.projectId
+        if ($latestProject.rootPath -eq $tempProjectPath -and @($latestProject.threads).Count -eq 0 -and [string]::IsNullOrWhiteSpace($latestState.activeThreadId)) {
+            return $latestState
+        }
+
+        return $null
+    }
+    $emptyTree = Invoke-AutomationGet "/ui-tree"
+    Assert-True (@($emptyTree.interactiveNodes | Where-Object { $_.automationId -eq "shell-empty-new-thread" }).Count -gt 0) "Empty project state was not visible."
+    Add-Check "delete-last-thread" "project remained open with zero threads"
+
+    $restoreThread = Invoke-AutomationPost "/ui-action" @{
+        action = "click"
+        automationId = "shell-empty-new-thread"
+    }
+    Assert-True ($restoreThread.ok -eq $true) "Could not create a thread from the empty project state."
+
+    $state = Wait-Until -FailureMessage "Empty project did not recover after creating a new thread." -Condition {
+        $latestState = Invoke-AutomationGet "/state"
+        $latestProject = Get-ProjectById -State $latestState -ProjectId $latestState.projectId
+        if ($latestProject.rootPath -eq $tempProjectPath -and @($latestProject.threads).Count -eq 1 -and -not [string]::IsNullOrWhiteSpace($latestState.activeThreadId)) {
+            return $latestState
+        }
+
+        return $null
+    }
+    Add-Check "empty-project-recovery" "new thread created from empty project state"
+
     $annotatedShot = Invoke-AutomationPost "/screenshot" @{ path = ""; annotated = $true }
     Assert-True ($annotatedShot.ok -eq $true) "Annotated screenshot failed."
     Add-Check "annotated-screenshot" $annotatedShot.path
+
+    $events = Invoke-AutomationGet "/events"
+    $eventNames = @($events.events | ForEach-Object { $_.name })
+    Assert-True (@($eventNames | Where-Object { $_ -eq "tab.created" }).Count -gt 0) "Expected tab.created event."
+    Assert-True (@($eventNames | Where-Object { $_ -eq "thread.renamed" }).Count -gt 0) "Expected thread.renamed event."
+    Assert-True (@($eventNames | Where-Object { $_ -eq "thread.deleted" }).Count -gt 0) "Expected thread.deleted event."
+    Add-Check "event-log" "$(@($events.events).Count) event(s) captured"
 
     $resetTheme = Invoke-AutomationPost "/action" @{
         action = "setTheme"

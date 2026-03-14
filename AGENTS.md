@@ -12,7 +12,7 @@ The current shape of the app is:
 - ConPTY-backed shell process host
 - `WebView2` terminal renderer using local HTML/CSS/JS
 - Bun-managed debug helpers for attaching Playwright to the embedded renderer
-- native automation endpoints for shell state, UI-tree inspection, generic UI actions, terminal inspection, and screenshots
+- native automation endpoints for shell state, UI-tree inspection, style metadata, generic UI actions, event logging, terminal inspection, and screenshots
 
 This file is the handoff document for future agents.
 
@@ -28,7 +28,7 @@ What exists now:
 - ConPTY process bridge in C#
 - shared renderer under `Web/` hosted inside `WebView2`
 - WebView2 CDP debug workflow for Playwright-style inspection
-- native automation loop for shell state, UI-tree snapshots, generic UI actions, terminal snapshots, and native window screenshots
+- native automation loop for shell state, UI-tree snapshots, style metadata, generic UI actions, terminal snapshots, event logs, and native window screenshots
 
 What does not exist yet:
 
@@ -154,6 +154,8 @@ bun run native:health
 bun run native:state
 bun run native:ui-tree
 bun run native:ui-refs
+bun run native:events
+bun run native:events:clear
 bun run native:ui-action -- '{"action":"click","refLabel":"e2"}'
 bun run native:terminal-state
 bun run native:action -- '{"action":"newThread"}'
@@ -213,7 +215,9 @@ What this is good for:
 
 - inspecting shell state without clicking through it manually
 - dumping the WinUI visual tree and interactive controls
+- reading resolved colors, padding, margins, and sizing from the same tree
 - targeting native controls by `automationId`, `elementId`, `name`, or annotated `refLabel`
+- reading event logs for tab/thread/render sequencing
 - creating threads and tabs from the outside
 - switching theme and capturing native window screenshots
 - taking annotated native screenshots with overlay refs

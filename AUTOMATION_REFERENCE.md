@@ -9,10 +9,12 @@ Native automation server:
 - `GET /health`
 - `GET /state`
 - `GET /ui-tree`
+- `GET /events`
 - `POST /action`
 - `POST /ui-action`
 - `POST /terminal-state`
 - `POST /screenshot`
+- `POST /events/clear`
 
 Bun wrappers:
 
@@ -21,6 +23,8 @@ bun run native:health
 bun run native:state
 bun run native:ui-tree
 bun run native:ui-refs
+bun run native:events
+bun run native:events:clear
 bun run native:action -- '{"action":"newThread"}'
 bun run native:ui-action -- '{"action":"click","automationId":"shell-nav-settings"}'
 bun run native:terminal-state
@@ -51,6 +55,7 @@ Supported `action` values:
 - `setProfile`
 - `renameThread`
 - `duplicateThread`
+- `deleteThread`
 - `input`
 
 Relevant payload fields:
@@ -74,10 +79,14 @@ Supported `action` values:
 - `focus`
 - `click`
 - `invoke`
+- `doubleClick`
 - `rightClick`
 - `setText`
 - `select`
 - `toggle`
+- `hover`
+- `press`
+- `normalState`
 - `invokeMenuItem`
 
 Supported targeting fields:
@@ -98,6 +107,8 @@ Notes:
 - `refLabel` maps to the `e1`, `e2`, `e3` labels from annotated screenshots and `ui-refs`.
 - `setText` works on `TextBox` and `ComboBox`.
 - `invokeMenuItem` works on controls that expose a `ContextFlyout`.
+- `hover`, `press`, and `normalState` drive WinUI visual states for inspection. They are useful for checking hover and pressed styling even though they are not full pointer simulation.
+- `doubleClick` is supported for app-owned cases such as thread rename.
 
 ### Native UI discovery
 
@@ -125,6 +136,16 @@ Each `interactiveNodes` item includes:
 - `y`
 - `width`
 - `height`
+- `margin`
+- `padding`
+- `borderThickness`
+- `cornerRadius`
+- `background`
+- `borderBrush`
+- `foreground`
+- `opacity`
+- `fontSize`
+- `fontWeight`
 
 Important behavior:
 
@@ -166,6 +187,30 @@ This is enough for:
 - checking cursor movement
 - confirming shell profile and working directory
 
+### Event log
+
+`GET /events` returns a bounded in-memory event stream with:
+
+- `sequence`
+- `timestamp`
+- `category`
+- `name`
+- `message`
+- `data`
+
+`POST /events/clear` clears the current buffer.
+
+This is the primary way to inspect transient shell behavior such as:
+
+- thread creation and selection
+- tab creation and selection
+- tab view refreshes
+- terminal fit requests
+- terminal renderer ready / resize
+- terminal title changes
+- screenshot captures
+- automation action execution
+
 ### Screenshots
 
 `POST /screenshot` supports:
@@ -189,8 +234,12 @@ The current smoke run validates:
 - theme switching
 - duplicate thread through context menu
 - rename thread through dialog automation
+- delete thread while the project remains open
 - create project through dialog automation
+- delete the only thread in a project and confirm the empty state
+- recover from the empty project state by creating a new thread
 - annotated screenshot capture
+- event logging
 
 This is the current regression baseline for native automation coverage.
 
@@ -207,28 +256,37 @@ The app-owned new-project dialog is automatable. The external picker is not.
 
 ### Render-time and animation introspection
 
-I can inspect before/after state and capture screenshots, but I do not yet have a native timeline for:
+I now have a native event stream and can inspect sequencing around render-time behavior, but I still do not have true frame-by-frame tracing for:
 
 - tab insert/remove animation phases
 - subtle layout shifts during tab creation
 - transient loading badges or flashes that appear between frames
 - frame-by-frame sidebar or header transitions
 
-Today I can catch those only by:
+Today I can catch those by combining:
 
+- the event log
 - repeated screenshot capture
 - inspecting the final UI tree
 - comparing terminal-state or shell-state before and after
 
 ### Style and spacing introspection
 
-I do not yet have a structured endpoint for:
+I now have per-element metadata for:
 
-- resolved foreground/background brushes per element
-- margin and padding per element
-- corner radius per element
-- effective font size and weight per element
+- resolved solid-color foreground/background brushes
+- border brush
+- margin and padding
+- border thickness
+- corner radius
+- opacity
+- font size and font weight
+
+I still do not have:
+
 - theme resource key provenance
+- detailed template part ownership
+- non-solid brush breakdown beyond brush type
 
 So if the question is:
 
@@ -240,15 +298,14 @@ I still have to infer that from XAML/resources and screenshots rather than ask t
 
 ### Pointer nuance
 
-I do not yet have native automation primitives for:
+I now have app-owned visual-state controls for hover/pressed inspection and an app-owned double-click path for thread rename.
 
-- double click
-- hover
+I still do not have:
+
 - drag
 - click at arbitrary coordinates
 - resize drag handles
-
-Current native automation is element-driven, not pointer-path-driven.
+- true physical pointer move/click paths
 
 ### Keyboard nuance outside the terminal
 
@@ -264,34 +321,14 @@ I can send terminal text via the semantic `input` action, but I do not yet have 
 
 These are not automation gaps, they are app-feature gaps:
 
-- delete thread while keeping the project
-- double-click to rename a thread
 - split panes inside a tab
-- event stream for tab/thread lifecycle
 - persisted workspace/session restore
 
 ## What I Ideally Want Next
 
 If the goal is “full freedom and control,” these are the highest-leverage additions.
 
-### 1. Native event log
-
-Add a structured event stream or ring buffer for:
-
-- tab added
-- tab removed
-- tab selected
-- thread selected
-- thread renamed
-- project added
-- settings opened
-- theme changed
-- terminal ready
-- terminal exited
-
-With timestamps, this would make transient behavior debuggable without guessing.
-
-### 2. Render/layout snapshots with style data
+### 1. Render/layout snapshots with style data
 
 Add an endpoint that returns per-element:
 
@@ -308,7 +345,7 @@ Add an endpoint that returns per-element:
 
 This would solve color consistency, spacing, and container-tagging problems directly.
 
-### 3. Animation/frame tracing
+### 2. Animation/frame tracing
 
 Add an opt-in trace around UI actions that captures:
 
@@ -319,7 +356,7 @@ Add an opt-in trace around UI actions that captures:
 
 This is the missing piece for “I clicked new tab and something flashed weird for 150ms.”
 
-### 4. Native pointer and keyboard primitives
+### 3. Native pointer and keyboard primitives
 
 Add UI actions for:
 
@@ -332,7 +369,7 @@ Add UI actions for:
 
 That would cover rename-on-double-click, hover states, drag reorder, and coordinate-sensitive polish work.
 
-### 5. Explicit style/debug tagging
+### 4. Explicit style/debug tagging
 
 Add optional automation IDs or debug names for:
 
@@ -352,7 +389,10 @@ For app-owned shell behavior, I now have strong control over:
 - settings
 - dialogs
 - context menus
+- delete-thread and threadless project recovery
 - terminal inspection
+- event logging
+- hover/pressed visual-state inspection
 - annotated screenshots
 
-The biggest remaining observability gap is not clicking controls. It is seeing transient render-time behavior and resolved layout/style data.
+The biggest remaining observability gap is frame-by-frame render tracing and true native pointer/keyboard simulation.

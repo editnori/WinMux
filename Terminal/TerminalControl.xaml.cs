@@ -25,6 +25,8 @@ namespace SelfContainedDeployment.Terminal
         private bool _disposed;
         private int _cols = 120;
         private int _rows = 32;
+        private int _lastLoggedResizeCols;
+        private int _lastLoggedResizeRows;
         private string _sessionTitle = "Terminal";
         private ElementTheme _themePreference = ElementTheme.Default;
         private readonly StringBuilder _outputBuffer = new();
@@ -50,6 +52,16 @@ namespace SelfContainedDeployment.Terminal
         public string ProcessWorkingDirectory { get; set; }
 
         public string SessionTitle => _sessionTitle;
+
+        private void LogTerminalEvent(string name, string message = null, IReadOnlyDictionary<string, string> data = null)
+        {
+            NativeAutomationEventLog.Record("terminal", name, message, data ?? new Dictionary<string, string>
+            {
+                ["title"] = _sessionTitle ?? string.Empty,
+                ["displayWorkingDirectory"] = DisplayWorkingDirectory ?? string.Empty,
+                ["shellCommand"] = ShellCommand ?? string.Empty,
+            });
+        }
 
         private async void OnLoaded(object sender, RoutedEventArgs e)
         {
@@ -103,12 +115,24 @@ namespace SelfContainedDeployment.Terminal
             {
                 case "ready":
                     _rendererReady = true;
+                    LogTerminalEvent("renderer.ready", "Terminal renderer reported ready");
                     PostCurrentTheme();
                     EnsureStarted();
                     break;
                 case "resize":
                     _cols = Math.Max(1, message.Cols);
                     _rows = Math.Max(1, message.Rows);
+                    if (_cols != _lastLoggedResizeCols || _rows != _lastLoggedResizeRows)
+                    {
+                        _lastLoggedResizeCols = _cols;
+                        _lastLoggedResizeRows = _rows;
+                        LogTerminalEvent("renderer.resize", $"Renderer resized to {_cols}x{_rows}", new Dictionary<string, string>
+                        {
+                            ["cols"] = _cols.ToString(),
+                            ["rows"] = _rows.ToString(),
+                            ["title"] = _sessionTitle ?? string.Empty,
+                        });
+                    }
 
                     if (_started)
                     {
@@ -160,6 +184,13 @@ namespace SelfContainedDeployment.Terminal
                 _connection.OutputReceived += OnOutputReceived;
                 _connection.ProcessExited += OnProcessExited;
                 _connection.Start(_cols, _rows, ShellCommand, ResolveProcessWorkingDirectory());
+                LogTerminalEvent("session.started", "Started ConPTY session", new Dictionary<string, string>
+                {
+                    ["cols"] = _cols.ToString(),
+                    ["rows"] = _rows.ToString(),
+                    ["shellCommand"] = ShellCommand ?? string.Empty,
+                    ["processWorkingDirectory"] = ResolveProcessWorkingDirectory() ?? string.Empty,
+                });
 
                 string initialTitle = GetInitialTitle();
                 UpdateSessionTitle(initialTitle);
@@ -200,6 +231,7 @@ namespace SelfContainedDeployment.Terminal
 
                 PostMessage(new HostMessage { Type = "exit", Text = "Shell exited. Close the tab or open a new one." });
                 ShowStatus("Shell exited", keepVisible: true);
+                LogTerminalEvent("session.exited", "ConPTY session exited");
                 SessionExited?.Invoke(this, EventArgs.Empty);
             });
         }
@@ -213,6 +245,7 @@ namespace SelfContainedDeployment.Terminal
 
             TerminalView.Focus(FocusState.Programmatic);
             PostMessage(new HostMessage { Type = "focus" });
+            LogTerminalEvent("focus.requested", "Terminal focus requested");
         }
 
         public void ApplyTheme(ElementTheme theme)
@@ -230,6 +263,10 @@ namespace SelfContainedDeployment.Terminal
 
             EnsureStarted();
             _connection?.WriteInput(text);
+            LogTerminalEvent("input.sent", "Input forwarded to terminal", new Dictionary<string, string>
+            {
+                ["length"] = text.Length.ToString(),
+            });
         }
 
         private static void CopySelectionToClipboard(string text)
@@ -248,6 +285,7 @@ namespace SelfContainedDeployment.Terminal
         public void RequestFit()
         {
             PostMessage(new HostMessage { Type = "fit" });
+            LogTerminalEvent("fit.requested", "Renderer fit requested");
         }
 
         public async Task<NativeAutomationTerminalSnapshot> GetTerminalSnapshotAsync()
@@ -332,6 +370,10 @@ namespace SelfContainedDeployment.Terminal
             }
 
             _sessionTitle = title;
+            LogTerminalEvent("title.updated", $"Session title set to {title}", new Dictionary<string, string>
+            {
+                ["title"] = title,
+            });
             SessionTitleChanged?.Invoke(this, title);
         }
 
@@ -496,6 +538,7 @@ namespace SelfContainedDeployment.Terminal
         {
             StatusText.Text = text;
             StatusBadge.Visibility = Visibility.Visible;
+            LogTerminalEvent("status.shown", text);
 
             if (!keepVisible)
             {

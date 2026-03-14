@@ -124,6 +124,10 @@ namespace SelfContainedDeployment.Automation
                         await WriteJsonAsync(stream, 200, uiTree).ConfigureAwait(false);
                         break;
 
+                    case ("GET", "/events"):
+                        await WriteJsonAsync(stream, 200, NativeAutomationEventLog.Snapshot()).ConfigureAwait(false);
+                        break;
+
                     case ("POST", "/action"):
                         var actionRequest = ReadJson<NativeAutomationActionRequest>(request.Body);
                         var actionResult = await InvokeOnUiThreadAsync(() => _window.PerformAutomationAction(actionRequest)).ConfigureAwait(false);
@@ -146,6 +150,14 @@ namespace SelfContainedDeployment.Automation
                         var screenshotRequest = ReadJson<NativeAutomationScreenshotRequest>(request.Body);
                         var screenshotResult = await InvokeOnUiThreadAsync(() => _window.CaptureAutomationScreenshotAsync(screenshotRequest)).ConfigureAwait(false);
                         await WriteJsonAsync(stream, 200, screenshotResult).ConfigureAwait(false);
+                        break;
+
+                    case ("POST", "/events/clear"):
+                        NativeAutomationEventLog.Clear();
+                        await WriteJsonAsync(stream, 200, new
+                        {
+                            ok = true,
+                        }).ConfigureAwait(false);
                         break;
 
                     default:
