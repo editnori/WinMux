@@ -48,6 +48,7 @@ bun run native:recording-start -- '{"fps":24,"maxDurationMs":5000,"keepFrames":f
 bun run native:recording-stop
 bun run native:demo-recording
 bun run native:demo-recording:cinematic
+bun run native:new-project-recording
 bun run native:render-trace
 bun run native:screenshot
 bun run native:screenshot:annotated
@@ -383,6 +384,8 @@ Important behavior:
 - `manifest.json`
 
 `bun run native:demo-recording:cinematic` runs a slower and higher-resolution variant.
+
+`bun run native:new-project-recording` isolates the new-project dialog flow, keeps frames by default, and validates the missing-directory WSL startup path.
 
 The demo currently covers:
 

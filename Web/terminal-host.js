@@ -1,6 +1,10 @@
 (function () {
     const bridge = window.chrome && window.chrome.webview ? window.chrome.webview : null;
     const termRoot = document.getElementById("terminal-root");
+    const contextMenu = document.getElementById("terminal-menu");
+    const copyMenuItem = document.getElementById("terminal-menu-copy");
+    const pasteMenuItem = document.getElementById("terminal-menu-paste");
+    const selectAllMenuItem = document.getElementById("terminal-menu-select-all");
     const statusLine = document.getElementById("status-line");
     let fitFrame = 0;
     const darkTheme = {
@@ -91,6 +95,20 @@
     function setStatus(text, visible) {
         statusLine.textContent = text || "";
         statusLine.dataset.visible = visible ? "true" : "false";
+    }
+
+    function hideContextMenu() {
+        contextMenu.hidden = true;
+    }
+
+    function showContextMenu(clientX, clientY) {
+        copyMenuItem.disabled = !term.hasSelection();
+        contextMenu.hidden = false;
+
+        const maxLeft = Math.max(8, window.innerWidth - contextMenu.offsetWidth - 8);
+        const maxTop = Math.max(8, window.innerHeight - contextMenu.offsetHeight - 8);
+        contextMenu.style.left = `${Math.min(clientX, maxLeft)}px`;
+        contextMenu.style.top = `${Math.min(clientY, maxTop)}px`;
     }
 
     function post(message) {
@@ -283,15 +301,44 @@
         }
     }
 
-    function copySelectionToHost() {
+    async function copySelectionToClipboard() {
         const selection = term.getSelection();
         if (!selection) {
-            return;
+            return false;
         }
 
-        post({ type: "copy", data: selection });
+        if (bridge) {
+            post({ type: "copy", data: selection });
+        }
+        else if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(selection);
+        }
+        else {
+            return false;
+        }
+
         setStatus("Copied selection", true);
         window.setTimeout(() => setStatus("", false), 900);
+        return true;
+    }
+
+    async function pasteFromClipboard() {
+        if (bridge) {
+            post({ type: "paste" });
+            return true;
+        }
+
+        if (!navigator.clipboard || !navigator.clipboard.readText) {
+            return false;
+        }
+
+        const text = await navigator.clipboard.readText();
+        if (!text) {
+            return false;
+        }
+
+        term.paste(text);
+        return true;
     }
 
     function getVisibleText() {
@@ -324,7 +371,14 @@
         return lines.join("\n");
     }
 
-    document.addEventListener("pointerdown", () => term.focus());
+    document.addEventListener("pointerdown", (event) => {
+        if (!contextMenu.hidden && contextMenu.contains(event.target)) {
+            return;
+        }
+
+        hideContextMenu();
+        term.focus();
+    });
 
     term.onData((data) => {
         if (bridge) {
@@ -342,19 +396,60 @@
 
     window.addEventListener("keydown", (event) => {
         const wantsCopy = (event.ctrlKey || event.metaKey) && ((event.shiftKey && event.key.toLowerCase() === "c") || event.key === "Insert");
-        if (!wantsCopy) {
+        const wantsPaste = (event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === "v"
+            || (event.shiftKey && event.key === "Insert");
+
+        if (event.key === "Escape" && !contextMenu.hidden) {
+            event.preventDefault();
+            hideContextMenu();
             return;
         }
 
-        if (!term.hasSelection()) {
+        if (wantsCopy) {
+            if (!term.hasSelection()) {
+                return;
+            }
+
+            event.preventDefault();
+            void copySelectionToClipboard();
+            return;
+        }
+
+        if (!wantsPaste) {
             return;
         }
 
         event.preventDefault();
-        copySelectionToHost();
+        void pasteFromClipboard();
     }, true);
 
-    window.addEventListener("resize", scheduleFit);
+    termRoot.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        term.focus();
+        showContextMenu(event.clientX, event.clientY);
+    });
+
+    copyMenuItem.addEventListener("click", () => {
+        hideContextMenu();
+        void copySelectionToClipboard();
+    });
+
+    pasteMenuItem.addEventListener("click", () => {
+        hideContextMenu();
+        void pasteFromClipboard();
+    });
+
+    selectAllMenuItem.addEventListener("click", () => {
+        hideContextMenu();
+        term.selectAll();
+        term.focus();
+    });
+
+    window.addEventListener("blur", hideContextMenu);
+    window.addEventListener("resize", () => {
+        hideContextMenu();
+        scheduleFit();
+    });
     new ResizeObserver(() => scheduleFit()).observe(document.body);
     new ResizeObserver(() => scheduleFit()).observe(termRoot);
 

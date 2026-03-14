@@ -165,6 +165,9 @@ namespace SelfContainedDeployment.Terminal
                 case "copy":
                     CopySelectionToClipboard(message.Data);
                     break;
+                case "paste":
+                    PasteClipboardToTerminalAsync();
+                    break;
                 case "title":
                     UpdateSessionTitle(string.IsNullOrWhiteSpace(message.Title) ? _sessionTitle : message.Title.Trim());
                     break;
@@ -290,6 +293,27 @@ namespace SelfContainedDeployment.Terminal
             package.SetText(text);
             Clipboard.SetContent(package);
             Clipboard.Flush();
+        }
+
+        private async void PasteClipboardToTerminalAsync()
+        {
+            try
+            {
+                DataPackageView package = Clipboard.GetContent();
+                if (package is null || !package.Contains(StandardDataFormats.Text))
+                {
+                    return;
+                }
+
+                string text = await package.GetTextAsync();
+                if (!string.IsNullOrEmpty(text))
+                {
+                    SendInput(text);
+                }
+            }
+            catch
+            {
+            }
         }
 
         public void RequestFit()

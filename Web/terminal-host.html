@@ -9,6 +9,11 @@
 </head>
 <body>
     <div id="terminal-root"></div>
+    <div id="terminal-menu" class="terminal-menu" hidden>
+        <button id="terminal-menu-copy" class="terminal-menu-item" type="button">Copy</button>
+        <button id="terminal-menu-paste" class="terminal-menu-item" type="button">Paste</button>
+        <button id="terminal-menu-select-all" class="terminal-menu-item" type="button">Select all</button>
+    </div>
     <div id="status-line" class="status-line" data-visible="false"></div>
 
     <script src="./vendor/xterm.min.js"></script>

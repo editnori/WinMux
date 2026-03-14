@@ -12,6 +12,7 @@ using SelfContainedDeployment.Terminal;
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using Windows.Storage.Pickers;
 using Windows.Foundation;
@@ -595,6 +596,7 @@ namespace SelfContainedDeployment
         private WorkspaceProject GetOrCreateProject(string rootPath, string name = null, string shellProfileId = null)
         {
             string normalizedPath = ResolveRequestedPath(rootPath);
+            ShellProfiles.EnsureProjectDirectory(normalizedPath, out _);
             WorkspaceProject existing = _projects.FirstOrDefault(candidate => string.Equals(candidate.RootPath, normalizedPath, StringComparison.OrdinalIgnoreCase));
             if (existing is not null)
             {
@@ -2420,46 +2422,82 @@ namespace SelfContainedDeployment
         {
             TextBox pathBox = new()
             {
-                Header = "Project directory",
                 Text = _activeProject?.RootPath ?? Environment.CurrentDirectory,
                 Style = (Style)Application.Current.Resources["ShellInlineTextBoxStyle"],
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                MinWidth = 0,
             };
             AutomationProperties.SetAutomationId(pathBox, "dialog-project-path");
 
             Button browseButton = new()
             {
                 Content = "Browse…",
-                HorizontalAlignment = HorizontalAlignment.Left,
-                MinWidth = 96,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                MinWidth = 108,
+                Style = (Style)Application.Current.Resources["ShellNavButtonStyle"],
             };
             AutomationProperties.SetAutomationId(browseButton, "dialog-project-browse");
-            browseButton.Click += async (_, _) =>
-            {
-                string selectedPath = await BrowseForFolderAsync(pathBox.Text);
-                if (!string.IsNullOrWhiteSpace(selectedPath))
-                {
-                    pathBox.Text = selectedPath;
-                }
-            };
 
             ComboBox profileBox = new()
             {
-                Header = "Shell profile",
                 DisplayMemberPath = nameof(ShellProfileDefinition.Name),
                 SelectedValuePath = nameof(ShellProfileDefinition.Id),
                 ItemsSource = ShellProfiles.All,
                 SelectedValue = _activeProject?.ShellProfileId ?? SampleConfig.DefaultShellProfileId,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
             };
             AutomationProperties.SetAutomationId(profileBox, "dialog-project-shell-profile");
 
+            TextBlock previewValue = new()
+            {
+                Style = (Style)Application.Current.Resources["ShellBodyTextStyle"],
+                TextWrapping = TextWrapping.WrapWholeWords,
+            };
+            AutomationProperties.SetAutomationId(previewValue, "dialog-project-preview");
+
+            TextBlock helperText = new()
+            {
+                Style = (Style)Application.Current.Resources["ShellHintTextStyle"],
+                TextWrapping = TextWrapping.WrapWholeWords,
+            };
+            AutomationProperties.SetAutomationId(helperText, "dialog-project-helper");
+
+            Grid pathRow = new()
+            {
+                ColumnSpacing = 10,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+            };
+            pathRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            pathRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            pathRow.Children.Add(pathBox);
+            Grid.SetColumn(browseButton, 1);
+            pathRow.Children.Add(browseButton);
+
             StackPanel body = new()
             {
-                Spacing = 12,
+                Spacing = 14,
+                Width = 560,
             };
             AutomationProperties.SetAutomationId(body, "dialog-project-body");
-            body.Children.Add(pathBox);
-            body.Children.Add(browseButton);
+            body.Children.Add(new TextBlock
+            {
+                Text = "Project directory",
+                Style = (Style)Application.Current.Resources["ShellHintTextStyle"],
+            });
+            body.Children.Add(pathRow);
+            body.Children.Add(new TextBlock
+            {
+                Text = "Shell profile",
+                Style = (Style)Application.Current.Resources["ShellHintTextStyle"],
+            });
             body.Children.Add(profileBox);
+            body.Children.Add(new TextBlock
+            {
+                Text = "Terminal path",
+                Style = (Style)Application.Current.Resources["ShellHintTextStyle"],
+            });
+            body.Children.Add(previewValue);
+            body.Children.Add(helperText);
 
             ContentDialog dialog = new()
             {
@@ -2469,8 +2507,71 @@ namespace SelfContainedDeployment
                 CloseButtonText = "Cancel",
                 DefaultButton = ContentDialogButton.Primary,
                 Content = body,
+                MinWidth = 620,
             };
 
+            string selectedPath = null;
+            string selectedProfileId = null;
+
+            void RefreshDraftPreview()
+            {
+                ProjectDraftPreview preview = BuildProjectDraftPreview(pathBox.Text, profileBox.SelectedValue as string ?? SampleConfig.DefaultShellProfileId);
+                previewValue.Text = preview.DisplayPath;
+                helperText.Text = preview.HelperText;
+                helperText.Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources[preview.CanSubmit
+                    ? "ShellTextTertiaryBrush"
+                    : "SystemFillColorCriticalBrush"];
+                dialog.IsPrimaryButtonEnabled = preview.CanSubmit;
+            }
+
+            browseButton.Click += async (_, _) =>
+            {
+                string selectedFolder = await BrowseForFolderAsync(pathBox.Text);
+                if (!string.IsNullOrWhiteSpace(selectedFolder))
+                {
+                    pathBox.Text = selectedFolder;
+                }
+
+                RefreshDraftPreview();
+            };
+
+            pathBox.TextChanged += (_, _) => RefreshDraftPreview();
+            profileBox.SelectionChanged += (_, _) => RefreshDraftPreview();
+            dialog.PrimaryButtonClick += (_, args) =>
+            {
+                ProjectDraftPreview preview = BuildProjectDraftPreview(pathBox.Text, profileBox.SelectedValue as string ?? SampleConfig.DefaultShellProfileId);
+                previewValue.Text = preview.DisplayPath;
+                helperText.Text = preview.HelperText;
+                helperText.Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources[preview.CanSubmit
+                    ? "ShellTextTertiaryBrush"
+                    : "SystemFillColorCriticalBrush"];
+                dialog.IsPrimaryButtonEnabled = preview.CanSubmit;
+
+                if (!preview.CanSubmit)
+                {
+                    args.Cancel = true;
+                    return;
+                }
+
+                selectedPath = preview.NormalizedPath;
+                selectedProfileId = preview.ShellProfileId;
+
+                if (!string.IsNullOrWhiteSpace(preview.LocalStoragePath))
+                {
+                    try
+                    {
+                        Directory.CreateDirectory(preview.LocalStoragePath);
+                    }
+                    catch (Exception ex)
+                    {
+                        helperText.Text = $"Could not prepare the project folder: {ex.Message}";
+                        helperText.Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SystemFillColorCriticalBrush"];
+                        args.Cancel = true;
+                    }
+                }
+            };
+
+            RefreshDraftPreview();
             ContentDialogResult result = await dialog.ShowAsync();
             if (result != ContentDialogResult.Primary)
             {
@@ -2478,8 +2579,8 @@ namespace SelfContainedDeployment
             }
 
             return new ProjectDraft(
-                string.IsNullOrWhiteSpace(pathBox.Text) ? Environment.CurrentDirectory : pathBox.Text.Trim(),
-                profileBox.SelectedValue as string ?? SampleConfig.DefaultShellProfileId);
+                selectedPath ?? ResolveRequestedPath(pathBox.Text),
+                selectedProfileId ?? profileBox.SelectedValue as string ?? SampleConfig.DefaultShellProfileId);
         }
 
         private async System.Threading.Tasks.Task<string> PromptForThreadNameAsync(string title, string initialValue)
@@ -2529,5 +2630,53 @@ namespace SelfContainedDeployment
         }
 
         private sealed record ProjectDraft(string ProjectPath, string ShellProfileId);
+
+        private sealed record ProjectDraftPreview(
+            string NormalizedPath,
+            string ShellProfileId,
+            string DisplayPath,
+            string HelperText,
+            bool CanSubmit,
+            string LocalStoragePath);
+
+        private static ProjectDraftPreview BuildProjectDraftPreview(string rawPath, string shellProfileId)
+        {
+            string profileId = ShellProfiles.Resolve(shellProfileId).Id;
+            string normalizedPath = ResolveRequestedPath(rawPath);
+            string displayPath = ShellProfiles.ResolveDisplayPath(normalizedPath, profileId);
+
+            if (string.IsNullOrWhiteSpace(normalizedPath))
+            {
+                return new ProjectDraftPreview(
+                    Environment.CurrentDirectory,
+                    profileId,
+                    ShellProfiles.ResolveDisplayPath(Environment.CurrentDirectory, profileId),
+                    "Enter a project directory before adding the project.",
+                    CanSubmit: false,
+                    LocalStoragePath: null);
+            }
+
+            if (ShellProfiles.TryResolveLocalStoragePath(normalizedPath, out string localStoragePath))
+            {
+                bool exists = Directory.Exists(localStoragePath);
+                return new ProjectDraftPreview(
+                    normalizedPath,
+                    profileId,
+                    displayPath,
+                    exists
+                        ? "WinMux will open the project in this existing folder."
+                        : "This folder will be created when you add the project.",
+                    CanSubmit: true,
+                    LocalStoragePath: localStoragePath);
+            }
+
+            return new ProjectDraftPreview(
+                normalizedPath,
+                profileId,
+                displayPath,
+                "WSL-native paths outside /mnt/... are used as-is. Make sure the folder already exists before you add the project.",
+                CanSubmit: true,
+                LocalStoragePath: null);
+        }
     }
 }

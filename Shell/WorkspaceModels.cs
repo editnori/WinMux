@@ -93,11 +93,10 @@ namespace SelfContainedDeployment.Shell
         {
             string normalizedPath = NormalizeProjectPath(projectPath);
 
-            if (!string.IsNullOrWhiteSpace(normalizedPath) &&
-                !IsWslPath(normalizedPath) &&
-                Directory.Exists(normalizedPath))
+            if (TryResolveLocalStoragePath(normalizedPath, out string localPath) &&
+                Directory.Exists(localPath))
             {
-                return normalizedPath;
+                return localPath;
             }
 
             return Environment.CurrentDirectory;
@@ -110,12 +109,42 @@ namespace SelfContainedDeployment.Shell
                 return Environment.CurrentDirectory;
             }
 
-            if (IsWslPath(projectPath))
+            string trimmed = projectPath.Trim();
+            if (TryConvertToWindowsPath(trimmed, out string windowsPath))
             {
-                return projectPath.Trim();
+                return Path.GetFullPath(windowsPath);
             }
 
-            return Path.GetFullPath(projectPath.Trim());
+            if (IsWslPath(trimmed))
+            {
+                return trimmed.Replace('\\', '/');
+            }
+
+            return Path.GetFullPath(trimmed);
+        }
+
+        public static bool TryResolveLocalStoragePath(string projectPath, out string localPath)
+        {
+            string normalizedPath = NormalizeProjectPath(projectPath);
+            if (!string.IsNullOrWhiteSpace(normalizedPath) && !IsWslPath(normalizedPath))
+            {
+                localPath = normalizedPath;
+                return true;
+            }
+
+            localPath = null;
+            return false;
+        }
+
+        public static bool EnsureProjectDirectory(string projectPath, out string localPath)
+        {
+            if (!TryResolveLocalStoragePath(projectPath, out localPath))
+            {
+                return false;
+            }
+
+            Directory.CreateDirectory(localPath);
+            return true;
         }
 
         public static string DeriveName(string path)
@@ -159,6 +188,35 @@ namespace SelfContainedDeployment.Shell
         private static bool IsWslPath(string path)
         {
             return path.StartsWith("/", StringComparison.Ordinal);
+        }
+
+        private static bool TryConvertToWindowsPath(string path, out string windowsPath)
+        {
+            windowsPath = null;
+            if (!IsWslPath(path))
+            {
+                return false;
+            }
+
+            string normalized = path.Replace('\\', '/').Trim();
+            string[] segments = normalized.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            if (segments.Length < 2 || !string.Equals(segments[0], "mnt", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            string driveSegment = segments[1];
+            if (driveSegment.Length != 1 || !char.IsLetter(driveSegment[0]))
+            {
+                return false;
+            }
+
+            string suffix = string.Join(Path.DirectorySeparatorChar, segments.Skip(2));
+            string root = $"{char.ToUpperInvariant(driveSegment[0])}:{Path.DirectorySeparatorChar}";
+            windowsPath = string.IsNullOrWhiteSpace(suffix)
+                ? root
+                : Path.Combine(root, suffix);
+            return true;
         }
     }
 

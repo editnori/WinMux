@@ -2,6 +2,7 @@
     --app-bg: #09090b;
     --border: rgba(255, 255, 255, 0.08);
     --overlay-bg: rgba(15, 16, 19, 0.94);
+    --text-primary: #f4f4f5;
     --text-muted: #8f949c;
 }
 
@@ -10,6 +11,7 @@ body[data-theme="dark"] {
     --app-bg: #09090b;
     --border: rgba(255, 255, 255, 0.08);
     --overlay-bg: rgba(15, 16, 19, 0.94);
+    --text-primary: #f4f4f5;
     --text-muted: #8f949c;
 }
 
@@ -18,6 +20,7 @@ body[data-theme="light"] {
     --app-bg: #ffffff;
     --border: rgba(24, 24, 27, 0.12);
     --overlay-bg: rgba(255, 255, 255, 0.96);
+    --text-primary: #18181b;
     --text-muted: #71717a;
 }
 
@@ -34,6 +37,7 @@ body {
 body {
     position: relative;
     background: var(--app-bg);
+    color: var(--text-primary);
 }
 
 #terminal-root {
@@ -78,4 +82,40 @@ body {
 
 .status-line[data-visible="false"] {
     display: none;
+}
+
+.terminal-menu {
+    position: absolute;
+    z-index: 30;
+    display: grid;
+    min-width: 140px;
+    padding: 6px;
+    gap: 4px;
+    border: 1px solid var(--border);
+    background: var(--overlay-bg);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.28);
+}
+
+.terminal-menu[hidden] {
+    display: none;
+}
+
+.terminal-menu-item {
+    appearance: none;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    text-align: left;
+    padding: 7px 8px;
+    font: inherit;
+    font-size: 12px;
+    cursor: default;
+}
+
+.terminal-menu-item:hover:not(:disabled) {
+    background: var(--border);
+}
+
+.terminal-menu-item:disabled {
+    opacity: 0.4;
 }
