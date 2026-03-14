@@ -16,7 +16,8 @@
                 Background="{ThemeResource ShellMutedSurfaceBrush}"
                 BorderBrush="{ThemeResource ShellBorderBrush}"
                 BorderThickness="1"
-                CornerRadius="4">
+                CornerRadius="4"
+                Visibility="Collapsed">
             <TextBlock x:Name="StatusText"
                        Style="{StaticResource ShellMetaTextStyle}"
                        Text="Starting terminal…" />

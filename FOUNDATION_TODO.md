@@ -19,8 +19,8 @@ This pass is about making the app operable and debuggable before more UI work la
 
 ## 3. Projects, threads, and tabs
 
-- [x] Model a project as the root workspace.
-- [x] Model threads as independent conversation/session buckets inside the project.
+- [x] Model multiple projects with independent root paths and shell profiles.
+- [x] Model threads as nested conversation/session buckets inside each project.
 - [x] Model tabs as independent terminal surfaces owned by a single thread.
-- [x] Preserve the selected tab per thread when switching threads.
-- [ ] Add persistence so projects, threads, and selected tabs survive relaunch.
+- [x] Preserve the selected tab per thread when switching projects and threads.
+- [ ] Add persistence so projects, threads, profiles, and selected tabs survive relaunch.

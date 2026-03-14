@@ -2,51 +2,52 @@
     const bridge = window.chrome && window.chrome.webview ? window.chrome.webview : null;
     const termRoot = document.getElementById("terminal-root");
     const statusLine = document.getElementById("status-line");
+    let fitFrame = 0;
     const darkTheme = {
-        background: "#0f1217",
-        foreground: "#e6edf3",
-        cursor: "#e6edf3",
-        cursorAccent: "#0f1217",
-        selectionBackground: "rgba(122, 162, 247, 0.22)",
-        black: "#151922",
-        red: "#f7768e",
-        green: "#9ece6a",
-        yellow: "#e0af68",
-        blue: "#7aa2f7",
-        magenta: "#bb9af7",
-        cyan: "#7dcfff",
-        white: "#c0caf5",
-        brightBlack: "#5b6370",
-        brightRed: "#ff899d",
-        brightGreen: "#b7e27d",
-        brightYellow: "#f3c980",
-        brightBlue: "#8db3ff",
-        brightMagenta: "#ceb7ff",
-        brightCyan: "#97e6ff",
+        background: "#09090b",
+        foreground: "#f4f4f5",
+        cursor: "#f4f4f5",
+        cursorAccent: "#09090b",
+        selectionBackground: "rgba(244, 244, 245, 0.14)",
+        black: "#050506",
+        red: "#f87171",
+        green: "#4ade80",
+        yellow: "#fbbf24",
+        blue: "#94a3b8",
+        magenta: "#c084fc",
+        cyan: "#22d3ee",
+        white: "#d4d4d8",
+        brightBlack: "#52525b",
+        brightRed: "#fca5a5",
+        brightGreen: "#86efac",
+        brightYellow: "#fcd34d",
+        brightBlue: "#cbd5e1",
+        brightMagenta: "#d8b4fe",
+        brightCyan: "#67e8f9",
         brightWhite: "#ffffff",
     };
     const lightTheme = {
-        background: "#fbf9f4",
-        foreground: "#211e1a",
-        cursor: "#211e1a",
-        cursorAccent: "#fbf9f4",
-        selectionBackground: "rgba(122, 162, 247, 0.18)",
-        black: "#1f1c18",
-        red: "#b4455b",
-        green: "#2f6a3b",
-        yellow: "#8f6420",
-        blue: "#2f5b9c",
-        magenta: "#7d4ea6",
-        cyan: "#2f6f80",
-        white: "#d8d1c3",
-        brightBlack: "#70695f",
-        brightRed: "#d45a74",
-        brightGreen: "#41854d",
-        brightYellow: "#aa7a2b",
-        brightBlue: "#4674b7",
-        brightMagenta: "#9668bc",
-        brightCyan: "#43889b",
-        brightWhite: "#f2ede4",
+        background: "#ffffff",
+        foreground: "#18181b",
+        cursor: "#18181b",
+        cursorAccent: "#ffffff",
+        selectionBackground: "rgba(24, 24, 27, 0.12)",
+        black: "#18181b",
+        red: "#be123c",
+        green: "#15803d",
+        yellow: "#a16207",
+        blue: "#1d4ed8",
+        magenta: "#9333ea",
+        cyan: "#0f766e",
+        white: "#e4e4e7",
+        brightBlack: "#71717a",
+        brightRed: "#e11d48",
+        brightGreen: "#16a34a",
+        brightYellow: "#ca8a04",
+        brightBlue: "#2563eb",
+        brightMagenta: "#a855f7",
+        brightCyan: "#0d9488",
+        brightWhite: "#fafafa",
     };
 
     const term = new Terminal({
@@ -57,9 +58,13 @@
         fontFamily: '"Cascadia Mono", Consolas, "Courier New", monospace',
         fontSize: 13,
         letterSpacing: 0,
-        lineHeight: 1.08,
+        lineHeight: 1,
         scrollback: 6000,
         theme: darkTheme,
+        windowsPty: {
+            backend: "conpty",
+            buildNumber: 22621,
+        },
     });
 
     const fitAddon = new FitAddon.FitAddon();
@@ -100,6 +105,17 @@
             type: "resize",
             cols: term.cols,
             rows: term.rows,
+        });
+    }
+
+    function scheduleFit() {
+        if (fitFrame) {
+            cancelAnimationFrame(fitFrame);
+        }
+
+        fitFrame = requestAnimationFrame(() => {
+            fitFrame = 0;
+            fitTerminal();
         });
     }
 
@@ -239,6 +255,9 @@
             case "focus":
                 window.setTimeout(() => term.focus(), 0);
                 break;
+            case "fit":
+                scheduleFit();
+                break;
             case "setTitle":
                 setTitle(message.title);
                 break;
@@ -266,11 +285,13 @@
         post({ type: "title", title });
     });
 
-    window.addEventListener("resize", fitTerminal);
+    window.addEventListener("resize", scheduleFit);
+    new ResizeObserver(() => scheduleFit()).observe(document.body);
+    new ResizeObserver(() => scheduleFit()).observe(termRoot);
 
     requestAnimationFrame(() => {
         setTheme("dark");
-        fitTerminal();
+        scheduleFit();
         term.focus();
 
         if (bridge) {

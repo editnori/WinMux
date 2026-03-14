@@ -31,11 +31,16 @@ namespace SelfContainedDeployment.Terminal
             InitializeComponent();
             InitialWorkingDirectory = Environment.CurrentDirectory;
             ActualThemeChanged += OnActualThemeChanged;
+            SizeChanged += OnTerminalSizeChanged;
         }
 
         public string ShellCommand { get; set; }
 
         public string InitialWorkingDirectory { get; set; }
+
+        public string DisplayWorkingDirectory { get; set; }
+
+        public string ProcessWorkingDirectory { get; set; }
 
         public string SessionTitle => _sessionTitle;
 
@@ -141,13 +146,12 @@ namespace SelfContainedDeployment.Terminal
                 _connection = new ConPtyConnection();
                 _connection.OutputReceived += OnOutputReceived;
                 _connection.ProcessExited += OnProcessExited;
-                _connection.Start(_cols, _rows, ShellCommand, InitialWorkingDirectory);
+                _connection.Start(_cols, _rows, ShellCommand, ResolveProcessWorkingDirectory());
 
                 string initialTitle = GetInitialTitle();
                 UpdateSessionTitle(initialTitle);
                 PostMessage(new HostMessage { Type = "setTitle", Title = initialTitle });
                 PostMessage(new HostMessage { Type = "focus" });
-                ShowStatus($"Connected to {Path.GetFileName(InitialWorkingDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))}", keepVisible: false);
             }
             catch (Exception ex)
             {
@@ -203,6 +207,22 @@ namespace SelfContainedDeployment.Terminal
             PostCurrentTheme();
         }
 
+        public void SendInput(string text)
+        {
+            if (_disposed || string.IsNullOrEmpty(text))
+            {
+                return;
+            }
+
+            EnsureStarted();
+            _connection?.WriteInput(text);
+        }
+
+        public void RequestFit()
+        {
+            PostMessage(new HostMessage { Type = "fit" });
+        }
+
         public void DisposeTerminal()
         {
             if (_disposed)
@@ -254,15 +274,40 @@ namespace SelfContainedDeployment.Terminal
 
         private string GetInitialTitle()
         {
-            if (string.IsNullOrWhiteSpace(InitialWorkingDirectory))
+            string titleSource = string.IsNullOrWhiteSpace(DisplayWorkingDirectory)
+                ? InitialWorkingDirectory
+                : DisplayWorkingDirectory;
+
+            if (string.IsNullOrWhiteSpace(titleSource))
             {
                 return "Command Prompt";
             }
 
-            string trimmed = InitialWorkingDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            string trimmed = titleSource.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
             string leaf = Path.GetFileName(trimmed);
 
             return string.IsNullOrWhiteSpace(leaf) ? trimmed : leaf;
+        }
+
+        private void OnTerminalSizeChanged(object sender, SizeChangedEventArgs e)
+        {
+            RequestFit();
+        }
+
+        private string ResolveProcessWorkingDirectory()
+        {
+            if (!string.IsNullOrWhiteSpace(ProcessWorkingDirectory))
+            {
+                return ProcessWorkingDirectory;
+            }
+
+            if (!string.IsNullOrWhiteSpace(InitialWorkingDirectory) &&
+                !InitialWorkingDirectory.StartsWith("/", StringComparison.Ordinal))
+            {
+                return InitialWorkingDirectory;
+            }
+
+            return Environment.CurrentDirectory;
         }
 
         private void OnActualThemeChanged(FrameworkElement sender, object args)

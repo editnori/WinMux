@@ -8,29 +8,16 @@
 
     <Grid Background="{ThemeResource ShellPageBackgroundBrush}">
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <Border Grid.Row="0"
-                Padding="24,20,24,16"
-                Background="{ThemeResource ShellSurfaceBackgroundBrush}"
-                BorderBrush="{ThemeResource ShellBorderBrush}"
-                BorderThickness="0,0,0,1">
-            <StackPanel Spacing="4">
-                <TextBlock Style="{StaticResource ShellSectionTextStyle}" Text="Preferences" />
-                <TextBlock Style="{StaticResource ShellHintTextStyle}"
-                           Text="Keep the chrome quiet. Use the settings to tune only what changes behavior." />
-            </StackPanel>
-        </Border>
-
-        <ScrollViewer Grid.Row="1">
-            <StackPanel Margin="24,20,24,20" Spacing="24">
+        <ScrollViewer Grid.Row="0">
+            <StackPanel Margin="24,24,24,24" Spacing="28">
                 <StackPanel Spacing="6">
                     <TextBlock Style="{StaticResource ShellSectionTextStyle}" Text="Appearance" />
                     <TextBlock Style="{StaticResource ShellHintTextStyle}"
-                               Text="Pick the theme for the shell chrome and terminal host." />
+                               Text="Keep the shell monochrome and quiet. Theme changes apply to the native chrome and the terminal host." />
                 </StackPanel>
 
                 <StackPanel x:Name="themePanel" Spacing="8">
@@ -56,15 +43,39 @@
                         </RadioButton.Tag>
                     </RadioButton>
                 </StackPanel>
+
+                <StackPanel Spacing="6">
+                    <TextBlock Style="{StaticResource ShellSectionTextStyle}" Text="Default shell" />
+                    <TextBlock Style="{StaticResource ShellHintTextStyle}"
+                               Text="New projects and new tabs use this profile. WSL projects start in the translated Linux path so `/mnt/...` sessions land where you expect." />
+                </StackPanel>
+
+                <StackPanel x:Name="shellProfilePanel" Spacing="8">
+                    <RadioButton x:Name="CommandPromptShellRadio"
+                                 AutomationProperties.AutomationId="settings-shell-cmd"
+                                 Checked="OnShellProfileRadioButtonChecked"
+                                 Content="Command Prompt"
+                                 Tag="cmd" />
+                    <RadioButton x:Name="PowerShellRadio"
+                                 AutomationProperties.AutomationId="settings-shell-powershell"
+                                 Checked="OnShellProfileRadioButtonChecked"
+                                 Content="PowerShell"
+                                 Tag="powershell" />
+                    <RadioButton x:Name="WslShellRadio"
+                                 AutomationProperties.AutomationId="settings-shell-wsl"
+                                 Checked="OnShellProfileRadioButtonChecked"
+                                 Content="WSL"
+                                 Tag="wsl" />
+                </StackPanel>
             </StackPanel>
         </ScrollViewer>
 
-        <Border Grid.Row="2"
+        <Border Grid.Row="1"
                 Padding="24,12"
                 BorderBrush="{ThemeResource ShellBorderBrush}"
                 BorderThickness="0,1,0,0">
             <TextBlock Style="{StaticResource ShellHintTextStyle}"
-                       Text="Theme changes apply to the native shell and the embedded terminal surface." />
+                       Text="Existing tabs keep their current shell. New tabs follow the selected profile." />
         </Border>
     </Grid>
 </Page>

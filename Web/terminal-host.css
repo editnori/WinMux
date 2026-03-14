@@ -1,24 +1,24 @@
 :root {
-    --app-bg: #0f1217;
+    --app-bg: #09090b;
     --border: rgba(255, 255, 255, 0.08);
-    --overlay-bg: rgba(16, 20, 26, 0.92);
-    --text-muted: #8e99a7;
+    --overlay-bg: rgba(15, 16, 19, 0.94);
+    --text-muted: #8f949c;
 }
 
 body[data-theme="dark"] {
     color-scheme: dark;
-    --app-bg: #0f1217;
+    --app-bg: #09090b;
     --border: rgba(255, 255, 255, 0.08);
-    --overlay-bg: rgba(16, 20, 26, 0.92);
-    --text-muted: #8e99a7;
+    --overlay-bg: rgba(15, 16, 19, 0.94);
+    --text-muted: #8f949c;
 }
 
 body[data-theme="light"] {
     color-scheme: light;
-    --app-bg: #fbf9f4;
-    --border: rgba(33, 30, 26, 0.14);
-    --overlay-bg: rgba(251, 249, 244, 0.95);
-    --text-muted: #6b655e;
+    --app-bg: #ffffff;
+    --border: rgba(24, 24, 27, 0.12);
+    --overlay-bg: rgba(255, 255, 255, 0.96);
+    --text-muted: #71717a;
 }
 
 html,
@@ -39,16 +39,14 @@ body {
 #terminal-root {
     width: 100%;
     height: 100%;
+    box-sizing: border-box;
 }
 
 #terminal-root .xterm,
 #terminal-root .xterm-screen,
 #terminal-root .xterm-viewport {
     height: 100%;
-}
-
-#terminal-root .xterm {
-    padding: 8px 10px 6px;
+    box-sizing: border-box;
 }
 
 #terminal-root .xterm-viewport {

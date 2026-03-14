@@ -14,6 +14,9 @@ $dotnetPath = "C:\Program Files\dotnet\dotnet.exe"
 $exePath = Join-Path $repoRoot "bin\$Platform\$Configuration\net6.0-windows10.0.19041.0\win10-$Platform\SelfContainedDeployment.exe"
 $webRoot = Join-Path $repoRoot "Web"
 
+Get-Process SelfContainedDeployment -ErrorAction SilentlyContinue | Stop-Process -Force
+Start-Sleep -Milliseconds 750
+
 if (-not $SkipBuild) {
     & $dotnetPath build $projectPath -p:Platform=$Platform | Out-Host
 }

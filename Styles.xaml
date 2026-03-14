@@ -14,43 +14,136 @@
 
     <ResourceDictionary.ThemeDictionaries>
         <ResourceDictionary x:Key="Default">
-            <SolidColorBrush x:Key="ShellPageBackgroundBrush" Color="#0F1217" />
-            <SolidColorBrush x:Key="ShellPaneBackgroundBrush" Color="#13171E" />
-            <SolidColorBrush x:Key="ShellSurfaceBackgroundBrush" Color="#10141A" />
-            <SolidColorBrush x:Key="ShellMutedSurfaceBrush" Color="#151B23" />
-            <SolidColorBrush x:Key="ShellBorderBrush" Color="#212834" />
-            <SolidColorBrush x:Key="ShellNavHoverBrush" Color="#141A22" />
-            <SolidColorBrush x:Key="ShellNavActiveBrush" Color="#1A212B" />
-            <SolidColorBrush x:Key="ShellTextPrimaryBrush" Color="#E8EDF3" />
-            <SolidColorBrush x:Key="ShellTextSecondaryBrush" Color="#98A2AF" />
-            <SolidColorBrush x:Key="ShellTextTertiaryBrush" Color="#6E7784" />
-            <SolidColorBrush x:Key="ShellSuccessBrush" Color="#9ECE6A" />
+            <SolidColorBrush x:Key="ShellPageBackgroundBrush" Color="#09090B" />
+            <SolidColorBrush x:Key="ShellPaneBackgroundBrush" Color="#0E1013" />
+            <SolidColorBrush x:Key="ShellSurfaceBackgroundBrush" Color="#111214" />
+            <SolidColorBrush x:Key="ShellMutedSurfaceBrush" Color="#17181C" />
+            <SolidColorBrush x:Key="ShellBorderBrush" Color="#23252B" />
+            <SolidColorBrush x:Key="ShellNavHoverBrush" Color="#17191E" />
+            <SolidColorBrush x:Key="ShellNavActiveBrush" Color="#1F2228" />
+            <SolidColorBrush x:Key="ShellTextPrimaryBrush" Color="#FAFAFA" />
+            <SolidColorBrush x:Key="ShellTextSecondaryBrush" Color="#A1A1AA" />
+            <SolidColorBrush x:Key="ShellTextTertiaryBrush" Color="#71717A" />
+            <SolidColorBrush x:Key="ShellSuccessBrush" Color="#4ADE80" />
+
+            <SolidColorBrush x:Key="TabViewBackground" Color="#111214" />
+            <SolidColorBrush x:Key="TabViewItemHeaderBackground" Color="#111214" />
+            <SolidColorBrush x:Key="TabViewItemHeaderBackgroundSelected" Color="#1A1C21" />
+            <SolidColorBrush x:Key="TabViewItemHeaderBackgroundPointerOver" Color="#17191E" />
+            <SolidColorBrush x:Key="TabViewItemHeaderBackgroundPressed" Color="#1F2228" />
+            <SolidColorBrush x:Key="TabViewItemHeaderBackgroundDisabled" Color="#111214" />
+            <SolidColorBrush x:Key="TabViewItemHeaderForeground" Color="#A1A1AA" />
+            <SolidColorBrush x:Key="TabViewItemHeaderForegroundPressed" Color="#FAFAFA" />
+            <SolidColorBrush x:Key="TabViewItemHeaderForegroundSelected" Color="#FAFAFA" />
+            <SolidColorBrush x:Key="TabViewItemHeaderForegroundPointerOver" Color="#FAFAFA" />
+            <SolidColorBrush x:Key="TabViewItemHeaderForegroundDisabled" Color="#71717A" />
+            <SolidColorBrush x:Key="TabViewItemIconForegroundSelected" Color="#FAFAFA" />
+            <SolidColorBrush x:Key="TabViewItemHeaderSelectedCloseButtonBackground" Color="#1A1C21" />
+            <SolidColorBrush x:Key="TabViewItemHeaderSelectedCloseButtonForeground" Color="#FAFAFA" />
+            <SolidColorBrush x:Key="TabViewItemHeaderCloseButtonBorderBrushSelected" Color="#1A1C21" />
+            <SolidColorBrush x:Key="TabViewButtonBackground" Color="#111214" />
+            <SolidColorBrush x:Key="TabViewButtonBackgroundPressed" Color="#1F2228" />
+            <SolidColorBrush x:Key="TabViewButtonBackgroundPointerOver" Color="#17191E" />
+            <SolidColorBrush x:Key="TabViewButtonForeground" Color="#A1A1AA" />
+            <SolidColorBrush x:Key="TabViewButtonForegroundPressed" Color="#FAFAFA" />
+            <SolidColorBrush x:Key="TabViewButtonForegroundPointerOver" Color="#FAFAFA" />
+            <SolidColorBrush x:Key="TabViewButtonForegroundDisabled" Color="#71717A" />
+            <SolidColorBrush x:Key="TabViewButtonForegroundActiveTab" Color="#FAFAFA" />
+            <SolidColorBrush x:Key="TabViewScrollButtonBackground" Color="#111214" />
+            <SolidColorBrush x:Key="TabViewScrollButtonBackgroundPressed" Color="#1F2228" />
+            <SolidColorBrush x:Key="TabViewScrollButtonBackgroundPointerOver" Color="#17191E" />
+            <SolidColorBrush x:Key="TabViewScrollButtonForeground" Color="#A1A1AA" />
+            <SolidColorBrush x:Key="TabViewScrollButtonForegroundPressed" Color="#FAFAFA" />
+            <SolidColorBrush x:Key="TabViewScrollButtonForegroundPointerOver" Color="#FAFAFA" />
+            <SolidColorBrush x:Key="TabViewScrollButtonForegroundDisabled" Color="#71717A" />
         </ResourceDictionary>
         <ResourceDictionary x:Key="Dark">
-            <SolidColorBrush x:Key="ShellPageBackgroundBrush" Color="#0F1217" />
-            <SolidColorBrush x:Key="ShellPaneBackgroundBrush" Color="#13171E" />
-            <SolidColorBrush x:Key="ShellSurfaceBackgroundBrush" Color="#10141A" />
-            <SolidColorBrush x:Key="ShellMutedSurfaceBrush" Color="#151B23" />
-            <SolidColorBrush x:Key="ShellBorderBrush" Color="#212834" />
-            <SolidColorBrush x:Key="ShellNavHoverBrush" Color="#141A22" />
-            <SolidColorBrush x:Key="ShellNavActiveBrush" Color="#1A212B" />
-            <SolidColorBrush x:Key="ShellTextPrimaryBrush" Color="#E8EDF3" />
-            <SolidColorBrush x:Key="ShellTextSecondaryBrush" Color="#98A2AF" />
-            <SolidColorBrush x:Key="ShellTextTertiaryBrush" Color="#6E7784" />
-            <SolidColorBrush x:Key="ShellSuccessBrush" Color="#9ECE6A" />
+            <SolidColorBrush x:Key="ShellPageBackgroundBrush" Color="#09090B" />
+            <SolidColorBrush x:Key="ShellPaneBackgroundBrush" Color="#0E1013" />
+            <SolidColorBrush x:Key="ShellSurfaceBackgroundBrush" Color="#111214" />
+            <SolidColorBrush x:Key="ShellMutedSurfaceBrush" Color="#17181C" />
+            <SolidColorBrush x:Key="ShellBorderBrush" Color="#23252B" />
+            <SolidColorBrush x:Key="ShellNavHoverBrush" Color="#17191E" />
+            <SolidColorBrush x:Key="ShellNavActiveBrush" Color="#1F2228" />
+            <SolidColorBrush x:Key="ShellTextPrimaryBrush" Color="#FAFAFA" />
+            <SolidColorBrush x:Key="ShellTextSecondaryBrush" Color="#A1A1AA" />
+            <SolidColorBrush x:Key="ShellTextTertiaryBrush" Color="#71717A" />
+            <SolidColorBrush x:Key="ShellSuccessBrush" Color="#4ADE80" />
+
+            <SolidColorBrush x:Key="TabViewBackground" Color="#111214" />
+            <SolidColorBrush x:Key="TabViewItemHeaderBackground" Color="#111214" />
+            <SolidColorBrush x:Key="TabViewItemHeaderBackgroundSelected" Color="#1A1C21" />
+            <SolidColorBrush x:Key="TabViewItemHeaderBackgroundPointerOver" Color="#17191E" />
+            <SolidColorBrush x:Key="TabViewItemHeaderBackgroundPressed" Color="#1F2228" />
+            <SolidColorBrush x:Key="TabViewItemHeaderBackgroundDisabled" Color="#111214" />
+            <SolidColorBrush x:Key="TabViewItemHeaderForeground" Color="#A1A1AA" />
+            <SolidColorBrush x:Key="TabViewItemHeaderForegroundPressed" Color="#FAFAFA" />
+            <SolidColorBrush x:Key="TabViewItemHeaderForegroundSelected" Color="#FAFAFA" />
+            <SolidColorBrush x:Key="TabViewItemHeaderForegroundPointerOver" Color="#FAFAFA" />
+            <SolidColorBrush x:Key="TabViewItemHeaderForegroundDisabled" Color="#71717A" />
+            <SolidColorBrush x:Key="TabViewItemIconForegroundSelected" Color="#FAFAFA" />
+            <SolidColorBrush x:Key="TabViewItemHeaderSelectedCloseButtonBackground" Color="#1A1C21" />
+            <SolidColorBrush x:Key="TabViewItemHeaderSelectedCloseButtonForeground" Color="#FAFAFA" />
+            <SolidColorBrush x:Key="TabViewItemHeaderCloseButtonBorderBrushSelected" Color="#1A1C21" />
+            <SolidColorBrush x:Key="TabViewButtonBackground" Color="#111214" />
+            <SolidColorBrush x:Key="TabViewButtonBackgroundPressed" Color="#1F2228" />
+            <SolidColorBrush x:Key="TabViewButtonBackgroundPointerOver" Color="#17191E" />
+            <SolidColorBrush x:Key="TabViewButtonForeground" Color="#A1A1AA" />
+            <SolidColorBrush x:Key="TabViewButtonForegroundPressed" Color="#FAFAFA" />
+            <SolidColorBrush x:Key="TabViewButtonForegroundPointerOver" Color="#FAFAFA" />
+            <SolidColorBrush x:Key="TabViewButtonForegroundDisabled" Color="#71717A" />
+            <SolidColorBrush x:Key="TabViewButtonForegroundActiveTab" Color="#FAFAFA" />
+            <SolidColorBrush x:Key="TabViewScrollButtonBackground" Color="#111214" />
+            <SolidColorBrush x:Key="TabViewScrollButtonBackgroundPressed" Color="#1F2228" />
+            <SolidColorBrush x:Key="TabViewScrollButtonBackgroundPointerOver" Color="#17191E" />
+            <SolidColorBrush x:Key="TabViewScrollButtonForeground" Color="#A1A1AA" />
+            <SolidColorBrush x:Key="TabViewScrollButtonForegroundPressed" Color="#FAFAFA" />
+            <SolidColorBrush x:Key="TabViewScrollButtonForegroundPointerOver" Color="#FAFAFA" />
+            <SolidColorBrush x:Key="TabViewScrollButtonForegroundDisabled" Color="#71717A" />
         </ResourceDictionary>
         <ResourceDictionary x:Key="Light">
-            <SolidColorBrush x:Key="ShellPageBackgroundBrush" Color="#F6F3EC" />
-            <SolidColorBrush x:Key="ShellPaneBackgroundBrush" Color="#ECE8DF" />
-            <SolidColorBrush x:Key="ShellSurfaceBackgroundBrush" Color="#FBF9F4" />
-            <SolidColorBrush x:Key="ShellMutedSurfaceBrush" Color="#F1EEE6" />
-            <SolidColorBrush x:Key="ShellBorderBrush" Color="#D8D1C3" />
-            <SolidColorBrush x:Key="ShellNavHoverBrush" Color="#EAE4D8" />
-            <SolidColorBrush x:Key="ShellNavActiveBrush" Color="#DFD8CB" />
-            <SolidColorBrush x:Key="ShellTextPrimaryBrush" Color="#211E1A" />
-            <SolidColorBrush x:Key="ShellTextSecondaryBrush" Color="#615A53" />
-            <SolidColorBrush x:Key="ShellTextTertiaryBrush" Color="#8A837A" />
-            <SolidColorBrush x:Key="ShellSuccessBrush" Color="#2F6A3B" />
+            <SolidColorBrush x:Key="ShellPageBackgroundBrush" Color="#FAFAFA" />
+            <SolidColorBrush x:Key="ShellPaneBackgroundBrush" Color="#F4F4F5" />
+            <SolidColorBrush x:Key="ShellSurfaceBackgroundBrush" Color="#FFFFFF" />
+            <SolidColorBrush x:Key="ShellMutedSurfaceBrush" Color="#F4F4F5" />
+            <SolidColorBrush x:Key="ShellBorderBrush" Color="#E4E4E7" />
+            <SolidColorBrush x:Key="ShellNavHoverBrush" Color="#F1F1F3" />
+            <SolidColorBrush x:Key="ShellNavActiveBrush" Color="#E7E7EB" />
+            <SolidColorBrush x:Key="ShellTextPrimaryBrush" Color="#18181B" />
+            <SolidColorBrush x:Key="ShellTextSecondaryBrush" Color="#52525B" />
+            <SolidColorBrush x:Key="ShellTextTertiaryBrush" Color="#71717A" />
+            <SolidColorBrush x:Key="ShellSuccessBrush" Color="#16A34A" />
+
+            <SolidColorBrush x:Key="TabViewBackground" Color="#FFFFFF" />
+            <SolidColorBrush x:Key="TabViewItemHeaderBackground" Color="#F8F8F9" />
+            <SolidColorBrush x:Key="TabViewItemHeaderBackgroundSelected" Color="#FFFFFF" />
+            <SolidColorBrush x:Key="TabViewItemHeaderBackgroundPointerOver" Color="#F1F1F3" />
+            <SolidColorBrush x:Key="TabViewItemHeaderBackgroundPressed" Color="#ECECF0" />
+            <SolidColorBrush x:Key="TabViewItemHeaderBackgroundDisabled" Color="#F8F8F9" />
+            <SolidColorBrush x:Key="TabViewItemHeaderForeground" Color="#71717A" />
+            <SolidColorBrush x:Key="TabViewItemHeaderForegroundPressed" Color="#18181B" />
+            <SolidColorBrush x:Key="TabViewItemHeaderForegroundSelected" Color="#18181B" />
+            <SolidColorBrush x:Key="TabViewItemHeaderForegroundPointerOver" Color="#18181B" />
+            <SolidColorBrush x:Key="TabViewItemHeaderForegroundDisabled" Color="#A1A1AA" />
+            <SolidColorBrush x:Key="TabViewItemIconForegroundSelected" Color="#18181B" />
+            <SolidColorBrush x:Key="TabViewItemHeaderSelectedCloseButtonBackground" Color="#FFFFFF" />
+            <SolidColorBrush x:Key="TabViewItemHeaderSelectedCloseButtonForeground" Color="#18181B" />
+            <SolidColorBrush x:Key="TabViewItemHeaderCloseButtonBorderBrushSelected" Color="#FFFFFF" />
+            <SolidColorBrush x:Key="TabViewButtonBackground" Color="#FFFFFF" />
+            <SolidColorBrush x:Key="TabViewButtonBackgroundPressed" Color="#ECECF0" />
+            <SolidColorBrush x:Key="TabViewButtonBackgroundPointerOver" Color="#F1F1F3" />
+            <SolidColorBrush x:Key="TabViewButtonForeground" Color="#52525B" />
+            <SolidColorBrush x:Key="TabViewButtonForegroundPressed" Color="#18181B" />
+            <SolidColorBrush x:Key="TabViewButtonForegroundPointerOver" Color="#18181B" />
+            <SolidColorBrush x:Key="TabViewButtonForegroundDisabled" Color="#A1A1AA" />
+            <SolidColorBrush x:Key="TabViewButtonForegroundActiveTab" Color="#18181B" />
+            <SolidColorBrush x:Key="TabViewScrollButtonBackground" Color="#FFFFFF" />
+            <SolidColorBrush x:Key="TabViewScrollButtonBackgroundPressed" Color="#ECECF0" />
+            <SolidColorBrush x:Key="TabViewScrollButtonBackgroundPointerOver" Color="#F1F1F3" />
+            <SolidColorBrush x:Key="TabViewScrollButtonForeground" Color="#52525B" />
+            <SolidColorBrush x:Key="TabViewScrollButtonForegroundPressed" Color="#18181B" />
+            <SolidColorBrush x:Key="TabViewScrollButtonForegroundPointerOver" Color="#18181B" />
+            <SolidColorBrush x:Key="TabViewScrollButtonForegroundDisabled" Color="#A1A1AA" />
         </ResourceDictionary>
     </ResourceDictionary.ThemeDictionaries>
 
@@ -124,7 +217,13 @@
     </Style>
 
     <Style x:Key="ShellNavButtonStyle" TargetType="Button" BasedOn="{StaticResource ShellButtonBaseStyle}">
-        <Setter Property="Height" Value="34" />
+        <Setter Property="Height" Value="32" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    </Style>
+
+    <Style x:Key="ShellSidebarThreadButtonStyle" TargetType="Button" BasedOn="{StaticResource ShellButtonBaseStyle}">
+        <Setter Property="Height" Value="30" />
+        <Setter Property="Padding" Value="8,4" />
         <Setter Property="HorizontalContentAlignment" Value="Stretch" />
     </Style>
 
@@ -133,6 +232,12 @@
         <Setter Property="Height" Value="28" />
         <Setter Property="Padding" Value="0" />
         <Setter Property="HorizontalContentAlignment" Value="Center" />
+    </Style>
+
+    <Style x:Key="ShellSubItemButtonStyle" TargetType="Button" BasedOn="{StaticResource ShellButtonBaseStyle}">
+        <Setter Property="Height" Value="30" />
+        <Setter Property="Padding" Value="10,4" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
     </Style>
 
     <Style x:Key="ShellTitleTextStyle" TargetType="TextBlock" BasedOn="{StaticResource BaseTextBlockStyle}">
@@ -160,6 +265,32 @@
     <Style x:Key="ShellHintTextStyle" TargetType="TextBlock" BasedOn="{StaticResource BaseTextBlockStyle}">
         <Setter Property="FontSize" Value="11" />
         <Setter Property="Foreground" Value="{ThemeResource ShellTextTertiaryBrush}" />
+    </Style>
+
+    <Style x:Key="ShellInlineTextBoxStyle" TargetType="TextBox">
+        <Setter Property="Background" Value="{ThemeResource ShellPageBackgroundBrush}" />
+        <Setter Property="BorderBrush" Value="{ThemeResource ShellBorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="4" />
+        <Setter Property="Foreground" Value="{ThemeResource ShellTextPrimaryBrush}" />
+        <Setter Property="Padding" Value="8,0" />
+        <Setter Property="Height" Value="28" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="MinWidth" Value="180" />
+    </Style>
+
+    <Style x:Key="ShellInlineInputStyle" TargetType="TextBox">
+        <Setter Property="Background" Value="{ThemeResource ShellMutedSurfaceBrush}" />
+        <Setter Property="BorderBrush" Value="{ThemeResource ShellBorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="4" />
+        <Setter Property="Foreground" Value="{ThemeResource ShellTextPrimaryBrush}" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Height" Value="28" />
+        <Setter Property="MinWidth" Value="180" />
+        <Setter Property="Padding" Value="8,0" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
     </Style>
 
     <Style x:Key="SymbolButton" TargetType="ToggleButton">

@@ -22,6 +22,27 @@ namespace SelfContainedDeployment.Automation
 
         public bool PaneOpen { get; set; }
 
+        public string ShellProfileId { get; set; }
+
+        public List<NativeAutomationProjectState> Projects { get; set; } = new();
+
+        public List<NativeAutomationThreadState> Threads { get; set; } = new();
+    }
+
+    public sealed class NativeAutomationProjectState
+    {
+        public string Id { get; set; }
+
+        public string Name { get; set; }
+
+        public string RootPath { get; set; }
+
+        public string DisplayPath { get; set; }
+
+        public string ShellProfileId { get; set; }
+
+        public string SelectedThreadId { get; set; }
+
         public List<NativeAutomationThreadState> Threads { get; set; } = new();
     }
 
@@ -50,6 +71,8 @@ namespace SelfContainedDeployment.Automation
     public sealed class NativeAutomationActionRequest
     {
         public string Action { get; set; }
+
+        public string ProjectId { get; set; }
 
         public string ThreadId { get; set; }
 

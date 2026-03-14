@@ -13,9 +13,11 @@ namespace SelfContainedDeployment
 {
     public partial class MainPage : Page
     {
-        private readonly WorkspaceProject _project;
+        private readonly List<WorkspaceProject> _projects = new();
+        private WorkspaceProject _activeProject;
         private WorkspaceThread _activeThread;
         private bool _showingSettings;
+        private bool _suppressThreadNameSync;
         private int _threadSequence = 1;
         private int _tabSequence = 1;
 
@@ -25,7 +27,6 @@ namespace SelfContainedDeployment
         {
             InitializeComponent();
             Current = this;
-            _project = new WorkspaceProject(Environment.CurrentDirectory);
             Loaded += OnLoaded;
             ActualThemeChanged += OnActualThemeChanged;
         }
@@ -36,37 +37,51 @@ namespace SelfContainedDeployment
             ShellRoot.RequestedTheme = theme;
             SettingsFrame.RequestedTheme = theme;
 
-            RefreshThreadButtons();
-            UpdateRailVisualState(showTerminal: !_showingSettings);
+            RefreshProjectTree();
+            UpdateSidebarActions();
+            UpdateHeader();
             ApplyThemeToAllTerminals(ResolveTheme(theme));
+        }
+
+        public void ApplyShellProfile(string profileId)
+        {
+            SampleConfig.DefaultShellProfileId = ShellProfiles.Resolve(profileId).Id;
+
+            if (_activeProject is not null)
+            {
+                _activeProject.ShellProfileId = SampleConfig.DefaultShellProfileId;
+                RefreshProjectTree();
+                UpdateHeader();
+            }
         }
 
         public NativeAutomationState GetAutomationState()
         {
+            List<NativeAutomationProjectState> projects = _projects.Select(project => new NativeAutomationProjectState
+            {
+                Id = project.Id,
+                Name = project.Name,
+                RootPath = project.RootPath,
+                DisplayPath = FormatProjectPath(project),
+                ShellProfileId = project.ShellProfileId,
+                SelectedThreadId = project.SelectedThreadId,
+                Threads = project.Threads.Select(BuildThreadState).ToList(),
+            }).ToList();
+
             return new NativeAutomationState
             {
                 WindowTitle = ((App)Application.Current).MainWindowInstance?.Title,
-                ProjectId = _project.Id,
-                ProjectName = _project.Name,
-                ProjectPath = _project.RootPath,
+                ProjectId = _activeProject?.Id,
+                ProjectName = _activeProject?.Name,
+                ProjectPath = _activeProject?.RootPath,
                 ActiveThreadId = _activeThread?.Id,
                 ActiveTabId = _activeThread?.SelectedTabId,
                 ActiveView = _showingSettings ? "settings" : "terminal",
                 Theme = ResolveTheme(SampleConfig.CurrentTheme).ToString().ToLowerInvariant(),
                 PaneOpen = ShellSplitView.IsPaneOpen,
-                Threads = _project.Threads.Select(thread => new NativeAutomationThreadState
-                {
-                    Id = thread.Id,
-                    Name = thread.Name,
-                    SelectedTabId = thread.SelectedTabId,
-                    TabCount = thread.Tabs.Count,
-                    Tabs = thread.Tabs.Select(tab => new NativeAutomationTabState
-                    {
-                        Id = tab.Id,
-                        Title = FormatTabHeader(tab.Header),
-                        Exited = tab.IsExited,
-                    }).ToList(),
-                }).ToList(),
+                ShellProfileId = _activeProject?.ShellProfileId,
+                Projects = projects,
+                Threads = projects.SelectMany(project => project.Threads).ToList(),
             };
         }
 
@@ -76,13 +91,12 @@ namespace SelfContainedDeployment
 
             try
             {
-                string action = request.Action?.Trim().ToLowerInvariant();
-
-                switch (action)
+                switch (request.Action?.Trim().ToLowerInvariant())
                 {
                     case "togglepane":
                         ShellSplitView.IsPaneOpen = !ShellSplitView.IsPaneOpen;
                         UpdatePaneLayout();
+                        RequestFitForSelectedTerminal();
                         break;
                     case "showterminal":
                         ShowTerminalShell();
@@ -90,13 +104,21 @@ namespace SelfContainedDeployment
                     case "showsettings":
                         ShowSettings();
                         break;
+                    case "newproject":
+                        ActivateThread(CreateThread(GetOrCreateProject(ResolveRequestedPath(request.Value), null, SampleConfig.DefaultShellProfileId)));
+                        ShowTerminalShell();
+                        break;
                     case "newthread":
-                        ActivateThread(CreateThread());
+                        ActivateThread(CreateThread(ResolveActionProject(request), ResolveThreadName(request.Value)));
                         ShowTerminalShell();
                         break;
                     case "newtab":
                         ShowTerminalShell();
-                        AddTerminalTab(_activeThread);
+                        AddTerminalTab(_activeProject, _activeThread);
+                        break;
+                    case "selectproject":
+                        ActivateProject(FindProject(request.ProjectId));
+                        ShowTerminalShell();
                         break;
                     case "selectthread":
                         ActivateThread(FindThread(request.ThreadId));
@@ -111,6 +133,15 @@ namespace SelfContainedDeployment
                         break;
                     case "settheme":
                         ApplyTheme(ParseTheme(request.Value));
+                        break;
+                    case "setprofile":
+                        ApplyShellProfile(request.Value);
+                        break;
+                    case "renamethread":
+                        RenameThread(request.ThreadId, request.Value);
+                        break;
+                    case "input":
+                        SendInputToSelectedTerminal(request.Value);
                         break;
                     default:
                         return new NativeAutomationActionResponse
@@ -151,8 +182,9 @@ namespace SelfContainedDeployment
         {
             if (SampleConfig.CurrentTheme == ElementTheme.Default)
             {
-                RefreshThreadButtons();
-                UpdateRailVisualState(showTerminal: !_showingSettings);
+                RefreshProjectTree();
+                UpdateSidebarActions();
+                UpdateHeader();
                 ApplyThemeToAllTerminals(ResolveTheme(ElementTheme.Default));
             }
         }
@@ -161,11 +193,7 @@ namespace SelfContainedDeployment
         {
             ShellSplitView.IsPaneOpen = !ShellSplitView.IsPaneOpen;
             UpdatePaneLayout();
-        }
-
-        private void OnTerminalNavClicked(object sender, RoutedEventArgs e)
-        {
-            ShowTerminalShell();
+            RequestFitForSelectedTerminal();
         }
 
         private void OnSettingsNavClicked(object sender, RoutedEventArgs e)
@@ -173,16 +201,26 @@ namespace SelfContainedDeployment
             ShowSettings();
         }
 
-        private void OnNewThreadClicked(object sender, RoutedEventArgs e)
+        private async void OnNewThreadClicked(object sender, RoutedEventArgs e)
         {
-            ActivateThread(CreateThread());
+            ThreadDraft draft = await PromptForThreadAsync();
+            if (draft is null)
+            {
+                return;
+            }
+
+            WorkspaceProject project = GetOrCreateProject(draft.ProjectPath, null, draft.ShellProfileId);
+            ActivateThread(CreateThread(project, draft.ThreadName));
             ShowTerminalShell();
         }
 
-        private void OnNewTabClicked(object sender, RoutedEventArgs e)
+        private void OnProjectButtonClicked(object sender, RoutedEventArgs e)
         {
-            ShowTerminalShell();
-            AddTerminalTab(_activeThread);
+            if (sender is Button button && button.Tag is string projectId)
+            {
+                ActivateProject(FindProject(projectId));
+                ShowTerminalShell();
+            }
         }
 
         private void OnThreadButtonClicked(object sender, RoutedEventArgs e)
@@ -194,9 +232,20 @@ namespace SelfContainedDeployment
             }
         }
 
+        private void OnThreadNameTextChanged(object sender, TextChangedEventArgs e)
+        {
+            if (_suppressThreadNameSync || _showingSettings || _activeThread is null)
+            {
+                return;
+            }
+
+            _activeThread.Name = string.IsNullOrWhiteSpace(ThreadNameBox.Text) ? "Untitled thread" : ThreadNameBox.Text.Trim();
+            RefreshProjectTree();
+        }
+
         private void TerminalTabs_AddTabButtonClick(TabView sender, object args)
         {
-            AddTerminalTab(_activeThread);
+            AddTerminalTab(_activeProject, _activeThread);
         }
 
         private void TerminalTabs_TabCloseRequested(TabView sender, TabViewTabCloseRequestedEventArgs args)
@@ -220,54 +269,79 @@ namespace SelfContainedDeployment
             }
 
             FocusSelectedTerminal();
-            RefreshThreadButtons();
+            RequestFitForSelectedTerminal();
+            RefreshProjectTree();
             UpdateHeader();
         }
 
         private void InitializeShellModel()
         {
-            ProjectNameText.Text = _project.Name;
-            ProjectNamePaneText.Text = _project.Name;
+            WorkspaceProject project = GetOrCreateProject(Environment.CurrentDirectory, null, SampleConfig.DefaultShellProfileId);
+            if (project.Threads.Count == 0)
+            {
+                CreateThread(project);
+            }
 
-            if (_project.Threads.Count == 0)
-            {
-                ActivateThread(CreateThread());
-            }
-            else
-            {
-                ActivateThread(_project.Threads[0]);
-            }
+            ActivateProject(project);
         }
 
-        private WorkspaceThread CreateThread()
+        private WorkspaceProject GetOrCreateProject(string rootPath, string name = null, string shellProfileId = null)
         {
-            var thread = new WorkspaceThread($"Thread {_threadSequence++}");
-            _project.Threads.Add(thread);
-            EnsureThreadHasTab(thread);
-            RefreshThreadButtons();
+            string normalizedPath = ResolveRequestedPath(rootPath);
+            WorkspaceProject existing = _projects.FirstOrDefault(candidate => string.Equals(candidate.RootPath, normalizedPath, StringComparison.OrdinalIgnoreCase));
+            if (existing is not null)
+            {
+                if (!string.IsNullOrWhiteSpace(shellProfileId))
+                {
+                    existing.ShellProfileId = ShellProfiles.Resolve(shellProfileId).Id;
+                }
+
+                return existing;
+            }
+
+            WorkspaceProject project = new(normalizedPath, ShellProfiles.Resolve(shellProfileId ?? SampleConfig.DefaultShellProfileId).Id, name);
+            _projects.Add(project);
+            RefreshProjectTree();
+            return project;
+        }
+
+        private WorkspaceThread CreateThread(WorkspaceProject project, string threadName = null)
+        {
+            project ??= _activeProject ?? GetOrCreateProject(Environment.CurrentDirectory);
+
+            WorkspaceThread thread = new(project, string.IsNullOrWhiteSpace(threadName) ? $"Thread {_threadSequence++}" : threadName.Trim());
+
+            project.Threads.Add(thread);
+            project.SelectedThreadId = thread.Id;
+            EnsureThreadHasTab(project, thread);
+            RefreshProjectTree();
             return thread;
         }
 
-        private void EnsureThreadHasTab(WorkspaceThread thread)
+        private void EnsureThreadHasTab(WorkspaceProject project, WorkspaceThread thread)
         {
             if (thread.Tabs.Count == 0)
             {
-                AddTerminalTab(thread);
+                AddTerminalTab(project, thread);
             }
         }
 
-        private TerminalTabRecord AddTerminalTab(WorkspaceThread thread)
+        private TerminalTabRecord AddTerminalTab(WorkspaceProject project, WorkspaceThread thread)
         {
-            thread ??= _activeThread ?? CreateThread();
+            project ??= _activeProject ?? GetOrCreateProject(Environment.CurrentDirectory);
+            thread ??= _activeThread ?? CreateThread(project);
 
-            var terminal = new TerminalControl
+            TerminalControl terminal = new()
             {
-                InitialWorkingDirectory = _project.RootPath,
+                DisplayWorkingDirectory = FormatProjectPath(project),
+                InitialWorkingDirectory = FormatProjectPath(project),
+                ProcessWorkingDirectory = ShellProfiles.ResolveProcessWorkingDirectory(project.RootPath),
+                ShellCommand = ShellProfiles.BuildLaunchCommand(project.ShellProfileId, project.RootPath),
             };
 
             terminal.ApplyTheme(ResolveTheme(SampleConfig.CurrentTheme));
 
-            var tab = new TerminalTabRecord($"Tab {_tabSequence++}", terminal);
+            TerminalTabRecord tab = new($"Tab {_tabSequence++}", terminal);
             terminal.SessionTitleChanged += (_, title) =>
             {
                 tab.Header = title;
@@ -284,18 +358,20 @@ namespace SelfContainedDeployment
                     RefreshTabView();
                 }
 
-                RefreshThreadButtons();
+                RefreshProjectTree();
             };
 
             thread.Tabs.Add(tab);
             thread.SelectedTabId = tab.Id;
+            project.SelectedThreadId = thread.Id;
 
             if (thread == _activeThread)
             {
                 RefreshTabView();
+                RequestFitForSelectedTerminal();
             }
 
-            RefreshThreadButtons();
+            RefreshProjectTree();
             return tab;
         }
 
@@ -306,33 +382,37 @@ namespace SelfContainedDeployment
                 return;
             }
 
-            foreach (WorkspaceThread thread in _project.Threads)
+            foreach (WorkspaceProject project in _projects)
             {
-                TerminalTabRecord tab = thread.Tabs.FirstOrDefault(candidate => candidate.Id == tabId);
-                if (tab is null)
+                foreach (WorkspaceThread thread in project.Threads)
                 {
-                    continue;
+                    TerminalTabRecord tab = thread.Tabs.FirstOrDefault(candidate => candidate.Id == tabId);
+                    if (tab is null)
+                    {
+                        continue;
+                    }
+
+                    tab.Terminal.DisposeTerminal();
+                    thread.Tabs.Remove(tab);
+
+                    if (thread.Tabs.Count == 0)
+                    {
+                        AddTerminalTab(project, thread);
+                    }
+
+                    thread.SelectedTabId = thread.Tabs.FirstOrDefault()?.Id;
+
+                    if (thread == _activeThread)
+                    {
+                        RefreshTabView();
+                        FocusSelectedTerminal();
+                        RequestFitForSelectedTerminal();
+                    }
+
+                    RefreshProjectTree();
+                    UpdateHeader();
+                    return;
                 }
-
-                tab.Terminal.DisposeTerminal();
-                thread.Tabs.Remove(tab);
-
-                if (thread.Tabs.Count == 0)
-                {
-                    AddTerminalTab(thread);
-                }
-
-                thread.SelectedTabId = thread.Tabs.FirstOrDefault()?.Id;
-
-                if (thread == _activeThread)
-                {
-                    RefreshTabView();
-                    FocusSelectedTerminal();
-                }
-
-                RefreshThreadButtons();
-                UpdateHeader();
-                return;
             }
         }
 
@@ -343,91 +423,184 @@ namespace SelfContainedDeployment
                 return;
             }
 
-            foreach (WorkspaceThread thread in _project.Threads)
+            foreach (WorkspaceProject project in _projects)
             {
-                TerminalTabRecord tab = thread.Tabs.FirstOrDefault(candidate => candidate.Id == tabId);
-                if (tab is null)
+                foreach (WorkspaceThread thread in project.Threads)
                 {
-                    continue;
-                }
+                    TerminalTabRecord tab = thread.Tabs.FirstOrDefault(candidate => candidate.Id == tabId);
+                    if (tab is null)
+                    {
+                        continue;
+                    }
 
-                ActivateThread(thread);
-                thread.SelectedTabId = tab.Id;
-                RefreshTabView();
-                FocusSelectedTerminal();
-                return;
+                    ActivateThread(thread);
+                    thread.SelectedTabId = tab.Id;
+                    project.SelectedThreadId = thread.Id;
+                    RefreshTabView();
+                    FocusSelectedTerminal();
+                    RequestFitForSelectedTerminal();
+                    return;
+                }
             }
 
             throw new InvalidOperationException($"Unknown tab '{tabId}'.");
         }
 
+        private void ActivateProject(WorkspaceProject project)
+        {
+            _activeProject = project ?? throw new ArgumentNullException(nameof(project));
+
+            WorkspaceThread thread = project.Threads.FirstOrDefault(candidate => candidate.Id == project.SelectedThreadId)
+                ?? project.Threads.FirstOrDefault()
+                ?? CreateThread(project);
+
+            ActivateThread(thread);
+        }
+
         private void ActivateThread(WorkspaceThread thread)
         {
             _activeThread = thread ?? throw new ArgumentNullException(nameof(thread));
-            EnsureThreadHasTab(thread);
-            RefreshThreadButtons();
+            _activeProject = FindProjectForThread(thread);
+            _activeProject.SelectedThreadId = thread.Id;
+            EnsureThreadHasTab(_activeProject, thread);
+            RefreshProjectTree();
             RefreshTabView();
+            UpdateHeader();
+            RequestFitForSelectedTerminal();
+        }
+
+        private void RenameThread(string threadId, string nextName)
+        {
+            WorkspaceThread thread = string.IsNullOrWhiteSpace(threadId) ? _activeThread : FindThread(threadId);
+            if (thread is null)
+            {
+                return;
+            }
+
+            thread.Name = string.IsNullOrWhiteSpace(nextName) ? thread.Name : nextName.Trim();
+            RefreshProjectTree();
             UpdateHeader();
         }
 
-        private void RefreshThreadButtons()
+        private void RefreshProjectTree()
         {
-            ThreadListPanel.Children.Clear();
-
+            ProjectListPanel.Children.Clear();
             bool isOpen = ShellSplitView.IsPaneOpen;
 
-            foreach (WorkspaceThread thread in _project.Threads)
+            foreach (WorkspaceProject project in _projects)
             {
-                var button = new Button
+                StackPanel group = new()
+                {
+                    Spacing = 2,
+                };
+
+                Button projectButton = new()
                 {
                     Style = (Style)Application.Current.Resources["ShellNavButtonStyle"],
-                    Tag = thread.Id,
+                    Tag = project.Id,
                     HorizontalContentAlignment = HorizontalAlignment.Stretch,
                 };
-                AutomationProperties.SetAutomationId(button, $"shell-thread-{thread.Id}");
-                button.Click += OnThreadButtonClicked;
+                AutomationProperties.SetAutomationId(projectButton, $"shell-project-{project.Id}");
+                projectButton.Click += OnProjectButtonClicked;
 
-                var layout = new Grid
+                Grid projectLayout = new()
                 {
                     ColumnSpacing = 10,
                 };
-                layout.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-                layout.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                projectLayout.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                projectLayout.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-                layout.Children.Add(new FontIcon
+                projectLayout.Children.Add(new FontIcon
                 {
                     FontSize = 12,
-                    Glyph = "\uE8BD",
+                    Glyph = "\uE8B7",
                     VerticalAlignment = VerticalAlignment.Center,
                 });
 
                 if (isOpen)
                 {
-                    var textStack = new StackPanel
+                    StackPanel textStack = new()
                     {
                         Spacing = 0,
                     };
                     Grid.SetColumn(textStack, 1);
-
                     textStack.Children.Add(new TextBlock
                     {
-                        Text = thread.Name,
+                        Text = project.Name,
                         FontSize = 12,
                     });
                     textStack.Children.Add(new TextBlock
                     {
-                        Text = thread.TabSummary,
+                        Text = FormatProjectPath(project),
                         Style = (Style)Application.Current.Resources["ShellHintTextStyle"],
                     });
-                    layout.Children.Add(textStack);
+                    projectLayout.Children.Add(textStack);
                 }
 
-                button.Content = layout;
-                ApplyThreadButtonState(button, thread == _activeThread);
-                ThreadListPanel.Children.Add(button);
-            }
+                projectButton.Content = projectLayout;
+                ApplyProjectButtonState(projectButton, project == _activeProject && !_showingSettings);
+                group.Children.Add(projectButton);
 
-            ThreadSectionText.Visibility = isOpen ? Visibility.Visible : Visibility.Collapsed;
+                if (isOpen)
+                {
+                    StackPanel threadStack = new()
+                    {
+                        Spacing = 2,
+                        Margin = new Thickness(20, 0, 0, 0),
+                    };
+
+                    foreach (WorkspaceThread thread in project.Threads)
+                    {
+                        Button threadButton = new()
+                        {
+                            Style = (Style)Application.Current.Resources["ShellSidebarThreadButtonStyle"],
+                            Tag = thread.Id,
+                            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                        };
+                        AutomationProperties.SetAutomationId(threadButton, $"shell-thread-{thread.Id}");
+                        threadButton.Click += OnThreadButtonClicked;
+
+                        Grid threadLayout = new()
+                        {
+                            ColumnSpacing = 8,
+                        };
+                        threadLayout.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                        threadLayout.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+                        threadLayout.Children.Add(new FontIcon
+                        {
+                            FontSize = 10,
+                            Glyph = "\uE8BD",
+                            VerticalAlignment = VerticalAlignment.Center,
+                        });
+
+                        StackPanel threadText = new()
+                        {
+                            Spacing = 0,
+                        };
+                        Grid.SetColumn(threadText, 1);
+                        threadText.Children.Add(new TextBlock
+                        {
+                            Text = thread.Name,
+                            FontSize = 12,
+                        });
+                        threadText.Children.Add(new TextBlock
+                        {
+                            Text = thread.TabSummary,
+                            Style = (Style)Application.Current.Resources["ShellHintTextStyle"],
+                        });
+
+                        threadLayout.Children.Add(threadText);
+                        threadButton.Content = threadLayout;
+                        ApplyThreadButtonState(threadButton, thread == _activeThread && !_showingSettings);
+                        threadStack.Children.Add(threadButton);
+                    }
+
+                    group.Children.Add(threadStack);
+                }
+
+                ProjectListPanel.Children.Add(group);
+            }
         }
 
         private void RefreshTabView()
@@ -446,7 +619,7 @@ namespace SelfContainedDeployment
 
             foreach (TerminalTabRecord tab in _activeThread.Tabs)
             {
-                var item = new TabViewItem
+                TabViewItem item = new()
                 {
                     Header = FormatTabHeader(tab.Header, tab.IsExited),
                     Content = tab.Terminal,
@@ -458,7 +631,7 @@ namespace SelfContainedDeployment
             }
 
             string selectedTabId = _activeThread.SelectedTabId ?? _activeThread.Tabs.FirstOrDefault()?.Id;
-            var selectedItem = TerminalTabs.TabItems
+            TabViewItem selectedItem = TerminalTabs.TabItems
                 .OfType<TabViewItem>()
                 .FirstOrDefault(item => (item.Tag as TerminalTabRecord)?.Id == selectedTabId)
                 ?? TerminalTabs.TabItems.OfType<TabViewItem>().FirstOrDefault();
@@ -477,7 +650,7 @@ namespace SelfContainedDeployment
             SettingsFrame.Navigate(typeof(SettingsPage));
             SettingsFrame.Visibility = Visibility.Visible;
             TerminalTabs.Visibility = Visibility.Collapsed;
-            UpdateRailVisualState(showTerminal: false);
+            UpdateSidebarActions();
             UpdateHeader();
         }
 
@@ -486,8 +659,9 @@ namespace SelfContainedDeployment
             _showingSettings = false;
             SettingsFrame.Visibility = Visibility.Collapsed;
             TerminalTabs.Visibility = Visibility.Visible;
-            UpdateRailVisualState(showTerminal: true);
+            UpdateSidebarActions();
             FocusSelectedTerminal();
+            RequestFitForSelectedTerminal();
             UpdateHeader();
         }
 
@@ -499,12 +673,26 @@ namespace SelfContainedDeployment
             }
         }
 
-        private void UpdateRailVisualState(bool showTerminal)
+        private void RequestFitForSelectedTerminal()
         {
-            ApplyRailState(TerminalNavButton, TerminalNavText, showTerminal);
-            ApplyRailState(SettingsNavButton, SettingsNavText, !showTerminal);
-            ApplyRailState(NewThreadButton, NewThreadText, false);
-            ApplyRailState(NewTabRailButton, NewTabText, false);
+            if (TerminalTabs.SelectedItem is TabViewItem item && item.Tag is TerminalTabRecord tab)
+            {
+                tab.Terminal.RequestFit();
+            }
+        }
+
+        private void SendInputToSelectedTerminal(string text)
+        {
+            if (TerminalTabs.SelectedItem is TabViewItem item && item.Tag is TerminalTabRecord tab)
+            {
+                tab.Terminal.SendInput(text);
+            }
+        }
+
+        private void UpdateSidebarActions()
+        {
+            ApplyActionButtonState(SettingsNavButton, SettingsNavText, _showingSettings);
+            ApplyActionButtonState(NewThreadButton, NewThreadText, false);
         }
 
         private void UpdatePaneLayout()
@@ -512,30 +700,37 @@ namespace SelfContainedDeployment
             bool isOpen = ShellSplitView.IsPaneOpen;
 
             PaneBrandText.Visibility = isOpen ? Visibility.Visible : Visibility.Collapsed;
-            ProjectNamePaneText.Visibility = isOpen ? Visibility.Visible : Visibility.Collapsed;
-            TerminalNavText.Visibility = isOpen ? Visibility.Visible : Visibility.Collapsed;
-            SettingsNavText.Visibility = isOpen ? Visibility.Visible : Visibility.Collapsed;
             NewThreadText.Visibility = isOpen ? Visibility.Visible : Visibility.Collapsed;
-            NewTabText.Visibility = isOpen ? Visibility.Visible : Visibility.Collapsed;
+            SettingsNavText.Visibility = isOpen ? Visibility.Visible : Visibility.Collapsed;
 
             ToolTipService.SetToolTip(PaneToggleButton, isOpen ? "Collapse sidebar" : "Expand sidebar");
-            RefreshThreadButtons();
+            RefreshProjectTree();
         }
 
         private void UpdateHeader()
         {
-            ProjectNameText.Text = _project.Name;
-            ProjectNamePaneText.Text = _project.RootPath;
+            _suppressThreadNameSync = true;
 
-            if (_showingSettings)
+            try
             {
-                ActiveThreadText.Text = $"preferences  ·  {_project.RootPath}";
-                return;
-            }
+                if (_showingSettings)
+                {
+                    ThreadNameBox.Text = "Preferences";
+                    ThreadNameBox.IsReadOnly = true;
+                    ActiveDirectoryText.Visibility = Visibility.Visible;
+                    ActiveDirectoryText.Text = "Theme, shell profile, and launch defaults";
+                    return;
+                }
 
-            ActiveThreadText.Text = _activeThread is null
-                ? _project.RootPath
-                : $"{_activeThread.Name}  ·  {_project.RootPath}";
+                ThreadNameBox.IsReadOnly = false;
+                ThreadNameBox.Text = _activeThread?.Name ?? "Thread";
+                ActiveDirectoryText.Visibility = Visibility.Visible;
+                ActiveDirectoryText.Text = _activeProject is null ? string.Empty : FormatProjectPath(_activeProject);
+            }
+            finally
+            {
+                _suppressThreadNameSync = false;
+            }
         }
 
         private void ApplyThemeToAllTerminals(ElementTheme resolvedTheme)
@@ -548,13 +743,62 @@ namespace SelfContainedDeployment
 
         private IEnumerable<TerminalControl> EnumerateTerminals()
         {
-            return _project.Threads.SelectMany(thread => thread.Tabs).Select(tab => tab.Terminal);
+            return _projects.SelectMany(project => project.Threads).SelectMany(thread => thread.Tabs).Select(tab => tab.Terminal);
+        }
+
+        private WorkspaceProject ResolveActionProject(NativeAutomationActionRequest request)
+        {
+            if (!string.IsNullOrWhiteSpace(request.ProjectId))
+            {
+                return FindProject(request.ProjectId);
+            }
+
+            if (LooksLikePath(request.Value))
+            {
+                return GetOrCreateProject(request.Value);
+            }
+
+            return _activeProject ?? GetOrCreateProject(Environment.CurrentDirectory);
+        }
+
+        private static string ResolveThreadName(string value)
+        {
+            return LooksLikePath(value) ? null : value;
+        }
+
+        private WorkspaceProject FindProject(string projectId)
+        {
+            return _projects.FirstOrDefault(project => project.Id == projectId)
+                ?? throw new InvalidOperationException($"Unknown project '{projectId}'.");
         }
 
         private WorkspaceThread FindThread(string threadId)
         {
-            return _project.Threads.FirstOrDefault(thread => thread.Id == threadId)
+            return _projects.SelectMany(project => project.Threads).FirstOrDefault(thread => thread.Id == threadId)
                 ?? throw new InvalidOperationException($"Unknown thread '{threadId}'.");
+        }
+
+        private WorkspaceProject FindProjectForThread(WorkspaceThread thread)
+        {
+            return _projects.FirstOrDefault(project => ReferenceEquals(project, thread.Project) || project.Threads.Contains(thread))
+                ?? throw new InvalidOperationException($"Unknown project for thread '{thread.Id}'.");
+        }
+
+        private static NativeAutomationThreadState BuildThreadState(WorkspaceThread thread)
+        {
+            return new NativeAutomationThreadState
+            {
+                Id = thread.Id,
+                Name = thread.Name,
+                SelectedTabId = thread.SelectedTabId,
+                TabCount = thread.Tabs.Count,
+                Tabs = thread.Tabs.Select(tab => new NativeAutomationTabState
+                {
+                    Id = tab.Id,
+                    Title = FormatTabHeader(tab.Header),
+                    Exited = tab.IsExited,
+                }).ToList(),
+            };
         }
 
         private static ElementTheme ParseTheme(string value)
@@ -583,7 +827,7 @@ namespace SelfContainedDeployment
             return (Brush)Application.Current.Resources[key];
         }
 
-        private static void ApplyRailState(Button button, TextBlock label, bool active)
+        private static void ApplyActionButtonState(Button button, TextBlock label, bool active)
         {
             button.Background = active ? AppBrush("ShellNavActiveBrush") : null;
             button.BorderBrush = active ? AppBrush("ShellBorderBrush") : null;
@@ -591,11 +835,33 @@ namespace SelfContainedDeployment
             label.Foreground = active ? AppBrush("ShellTextPrimaryBrush") : AppBrush("ShellTextSecondaryBrush");
         }
 
-        private static void ApplyThreadButtonState(Button button, bool active)
+        private static void ApplyProjectButtonState(Button button, bool active)
         {
             button.Background = active ? AppBrush("ShellNavActiveBrush") : null;
             button.BorderBrush = active ? AppBrush("ShellBorderBrush") : null;
             button.Foreground = active ? AppBrush("ShellTextPrimaryBrush") : AppBrush("ShellTextSecondaryBrush");
+        }
+
+        private static void ApplyThreadButtonState(Button button, bool active)
+        {
+            button.Background = active ? AppBrush("ShellMutedSurfaceBrush") : null;
+            button.BorderBrush = active ? AppBrush("ShellBorderBrush") : null;
+            button.Foreground = active ? AppBrush("ShellTextPrimaryBrush") : AppBrush("ShellTextSecondaryBrush");
+        }
+
+        private static string ResolveRequestedPath(string rootPath)
+        {
+            return ShellProfiles.NormalizeProjectPath(rootPath);
+        }
+
+        private static bool LooksLikePath(string value)
+        {
+            return !string.IsNullOrWhiteSpace(value) && (value.Contains('\\') || value.Contains('/') || value.Contains(':'));
+        }
+
+        private static string FormatProjectPath(WorkspaceProject project)
+        {
+            return project.DisplayPath;
         }
 
         private static string FormatTabHeader(string title, bool exited = false)
@@ -621,5 +887,61 @@ namespace SelfContainedDeployment
 
             return exited ? $"{nextTitle} (ended)" : nextTitle;
         }
+
+        private async System.Threading.Tasks.Task<ThreadDraft> PromptForThreadAsync()
+        {
+            TextBox pathBox = new()
+            {
+                Header = "Project directory",
+                Text = _activeProject?.RootPath ?? Environment.CurrentDirectory,
+            };
+
+            TextBox threadBox = new()
+            {
+                Header = "Thread name",
+                Text = $"Thread {_threadSequence}",
+            };
+
+            ComboBox profileBox = new()
+            {
+                Header = "Shell profile",
+                DisplayMemberPath = nameof(ShellProfileDefinition.Name),
+                SelectedValuePath = nameof(ShellProfileDefinition.Id),
+                ItemsSource = ShellProfiles.All,
+                SelectedValue = _activeProject?.ShellProfileId ?? SampleConfig.DefaultShellProfileId,
+            };
+
+            StackPanel body = new()
+            {
+                Spacing = 12,
+            };
+            body.Children.Add(pathBox);
+            body.Children.Add(threadBox);
+            body.Children.Add(profileBox);
+
+            ContentDialog dialog = new()
+            {
+                XamlRoot = XamlRoot,
+                Title = "New thread",
+                PrimaryButtonText = "Create",
+                CloseButtonText = "Cancel",
+                DefaultButton = ContentDialogButton.Primary,
+                Content = body,
+            };
+
+            ContentDialogResult result = await dialog.ShowAsync();
+            if (result != ContentDialogResult.Primary)
+            {
+                return null;
+            }
+
+            string projectPath = string.IsNullOrWhiteSpace(pathBox.Text) ? Environment.CurrentDirectory : pathBox.Text.Trim();
+            string threadName = string.IsNullOrWhiteSpace(threadBox.Text) ? $"Thread {_threadSequence}" : threadBox.Text.Trim();
+            string profileId = profileBox.SelectedValue as string ?? SampleConfig.DefaultShellProfileId;
+
+            return new ThreadDraft(projectPath, threadName, profileId);
+        }
+
+        private sealed record ThreadDraft(string ProjectPath, string ThreadName, string ShellProfileId);
     }
 }

@@ -9,12 +9,19 @@ namespace SelfContainedDeployment
     {
         public SettingsPage()
         {
-            this.InitializeComponent();
+            InitializeComponent();
         }
 
         protected override void OnNavigatedTo(NavigationEventArgs e)
         {
-            themePanel.Children.Cast<RadioButton>().First(c => (ElementTheme)c.Tag == SampleConfig.CurrentTheme).IsChecked = true;
+            themePanel.Children.Cast<RadioButton>()
+                .First(button => (ElementTheme)button.Tag == SampleConfig.CurrentTheme)
+                .IsChecked = true;
+
+            shellProfilePanel.Children.Cast<RadioButton>()
+                .First(button => string.Equals((string)button.Tag, SampleConfig.DefaultShellProfileId, System.StringComparison.OrdinalIgnoreCase))
+                .IsChecked = true;
+
             base.OnNavigatedTo(e);
         }
 
@@ -22,6 +29,12 @@ namespace SelfContainedDeployment
         {
             ElementTheme selectedTheme = (ElementTheme)((RadioButton)sender).Tag;
             MainPage.Current?.ApplyTheme(selectedTheme);
+        }
+
+        private void OnShellProfileRadioButtonChecked(object sender, RoutedEventArgs e)
+        {
+            string shellProfileId = (string)((RadioButton)sender).Tag;
+            MainPage.Current?.ApplyShellProfile(shellProfileId);
         }
     }
 }

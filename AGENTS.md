@@ -21,7 +21,7 @@ The app is no longer the original sample shell.
 What exists now:
 
 - fixed native shell layout with a dense inline sidebar and a top tab strip
-- one project containing independent threads, each with its own tab set
+- multiple projects, each with nested threads and per-thread tab sets
 - terminal tabs backed by `TerminalControl`
 - ConPTY process bridge in C#
 - shared renderer under `Web/` hosted inside `WebView2`
@@ -94,7 +94,7 @@ What does not exist yet:
 Responsibilities:
 
 - collapsible inline sidebar via `SplitView`
-- project -> thread -> tab workspace model
+- project -> thread -> tab workspace model with per-project root paths and shell profiles
 - top-level `TabView`
 - settings view switching
 - creating and closing terminal tabs

@@ -41,6 +41,7 @@ namespace SelfContainedDeployment.Terminal
 
             shellCommand ??= Environment.GetEnvironmentVariable("COMSPEC") ?? "cmd.exe";
             workingDirectory ??= Environment.CurrentDirectory;
+            SetTerminalEnvironmentDefaults();
 
             SECURITY_ATTRIBUTES securityAttributes = new()
             {
@@ -166,6 +167,16 @@ namespace SelfContainedDeployment.Terminal
                 CloseHandleIfOpen(ref processInfo.hThread);
                 CloseHandleIfOpen(ref processInfo.hProcess);
             }
+        }
+
+        private static void SetTerminalEnvironmentDefaults()
+        {
+            Environment.SetEnvironmentVariable("TERM_PROGRAM", SelfContainedDeployment.SampleConfig.FeatureName);
+            Environment.SetEnvironmentVariable("TERM_PROGRAM_VERSION", "0.1");
+            Environment.SetEnvironmentVariable("COLORTERM", "truecolor");
+            Environment.SetEnvironmentVariable("TERM", "xterm-256color");
+            Environment.SetEnvironmentVariable("WT_SESSION", SelfContainedDeployment.SampleConfig.FeatureName);
+            Environment.SetEnvironmentVariable("WT_PROFILE_ID", SelfContainedDeployment.SampleConfig.FeatureName);
         }
 
         public void WriteInput(string text)
