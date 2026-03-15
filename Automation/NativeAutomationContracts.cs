@@ -264,6 +264,12 @@ namespace SelfContainedDeployment.Automation
 
         public int BufferLength { get; set; }
 
+        public string ReplayTool { get; set; }
+
+        public string ReplaySessionId { get; set; }
+
+        public string ReplayCommand { get; set; }
+
         public string Selection { get; set; }
 
         public string VisibleText { get; set; }

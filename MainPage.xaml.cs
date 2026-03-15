@@ -941,6 +941,9 @@ namespace SelfContainedDeployment
                                 Title = pane.Title,
                                 HasCustomTitle = pane.HasCustomTitle,
                                 BrowserUri = pane is BrowserPaneRecord browserPane ? browserPane.Browser.CurrentUri : null,
+                                ReplayTool = pane.ReplayTool,
+                                ReplaySessionId = pane.ReplaySessionId,
+                                ReplayCommand = pane.ReplayCommand,
                             })
                             .ToList(),
                     }).ToList(),
@@ -1323,6 +1326,13 @@ namespace SelfContainedDeployment
 
                 QueueSessionSave();
             };
+            terminal.ReplayStateChanged += (_, _) =>
+            {
+                pane.ReplayTool = terminal.ReplayTool;
+                pane.ReplaySessionId = terminal.ReplaySessionId;
+                pane.ReplayCommand = terminal.ReplayCommand;
+                QueueSessionSave();
+            };
             terminal.SessionExited += (_, _) =>
             {
                 pane.MarkExited();
@@ -1368,11 +1378,26 @@ namespace SelfContainedDeployment
             {
                 "browser" => CreateBrowserPane(project, thread, snapshot.BrowserUri, string.IsNullOrWhiteSpace(snapshot.Title) ? "Preview" : snapshot.Title, snapshot.Id),
                 "editor" => CreateTerminalPane(project, thread, WorkspacePaneKind.Editor, "nvim .\r", string.IsNullOrWhiteSpace(snapshot.Title) ? "Editor" : snapshot.Title, snapshot.Id),
-                _ => CreateTerminalPane(project, thread, WorkspacePaneKind.Terminal, startupInput: null, string.IsNullOrWhiteSpace(snapshot.Title) ? FormatProjectPath(project) : snapshot.Title, snapshot.Id),
+                _ => CreateTerminalPane(project, thread, WorkspacePaneKind.Terminal, BuildReplayStartupInput(snapshot), string.IsNullOrWhiteSpace(snapshot.Title) ? FormatProjectPath(project) : snapshot.Title, snapshot.Id),
             };
 
             pane.HasCustomTitle = snapshot.HasCustomTitle;
+            pane.ReplayTool = snapshot.ReplayTool;
+            pane.ReplaySessionId = snapshot.ReplaySessionId;
+            pane.ReplayCommand = snapshot.ReplayCommand;
             return pane;
+        }
+
+        private static string BuildReplayStartupInput(PaneSessionSnapshot snapshot)
+        {
+            if (snapshot is null || string.IsNullOrWhiteSpace(snapshot.ReplayCommand))
+            {
+                return null;
+            }
+
+            return snapshot.ReplayCommand.EndsWith("\r", StringComparison.Ordinal)
+                ? snapshot.ReplayCommand
+                : snapshot.ReplayCommand + "\r";
         }
 
         private void AttachPaneInteraction(WorkspaceProject project, WorkspaceThread thread, WorkspacePaneRecord pane)

@@ -8,6 +8,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.UI;
@@ -22,6 +23,10 @@ namespace SelfContainedDeployment.Terminal
         };
         private static readonly object EnvironmentSync = new();
         private static Task<CoreWebView2Environment> SharedEnvironmentTask;
+        private static readonly Regex CodexResumeRegex = new(@"codex\s+resume\s+([0-9a-f-]+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        private static readonly Regex ClaudeResumeRegex = new(@"claude\s+--resume\s+([0-9a-f-]+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        private static readonly Regex CodexResumeInlineRegex = new(@"^codex\s+resume\s+([0-9a-f-]+)\s*(.*)$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        private static readonly Regex ClaudeResumeInlineRegex = new(@"^claude\s+--resume\s+([0-9a-f-]+)\s*(.*)$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         private ConPtyConnection _connection;
         private bool _rendererReady;
@@ -36,13 +41,19 @@ namespace SelfContainedDeployment.Terminal
         private string _sessionTitle = "Terminal";
         private ElementTheme _themePreference = ElementTheme.Default;
         private readonly StringBuilder _outputBuffer = new();
+        private readonly StringBuilder _inputLineBuffer = new();
         private readonly Dictionary<string, TaskCompletionSource<NativeAutomationTerminalSnapshot>> _inspectionRequests = new();
         private readonly DispatcherQueueTimer _fitTimer;
+        private string _replayTool;
+        private string _replaySessionId;
+        private string _replayCommand;
+        private string _toolLaunchArguments;
 
         public event EventHandler<string> SessionTitleChanged;
         public event EventHandler RendererReady;
         public event EventHandler SessionExited;
         public event EventHandler InteractionRequested;
+        public event EventHandler ReplayStateChanged;
 
         public TerminalControl()
         {
@@ -71,6 +82,12 @@ namespace SelfContainedDeployment.Terminal
         public string SessionTitle => _sessionTitle;
 
         public string InitialTitleHint => GetInitialTitle();
+
+        public string ReplayTool => _replayTool;
+
+        public string ReplaySessionId => _replaySessionId;
+
+        public string ReplayCommand => _replayCommand;
 
         private void LogTerminalEvent(string name, string message = null, IReadOnlyDictionary<string, string> data = null)
         {
@@ -175,6 +192,7 @@ namespace SelfContainedDeployment.Terminal
 
                     break;
                 case "input":
+                    TrackInput(message.Data);
                     _connection?.WriteInput(message.Data);
                     break;
                 case "copy":
@@ -253,6 +271,7 @@ namespace SelfContainedDeployment.Terminal
                 }
 
                 AppendOutput(text);
+                UpdateReplayCommandFromOutput();
                 HideStartupMask();
                 PostMessage(new HostMessage { Type = "output", Data = text });
                 HideStatus();
@@ -302,6 +321,7 @@ namespace SelfContainedDeployment.Terminal
             }
 
             EnsureStarted();
+            TrackInput(text);
             _connection?.WriteInput(text);
             LogTerminalEvent("input.sent", "Input forwarded to terminal", new Dictionary<string, string>
             {
@@ -317,6 +337,7 @@ namespace SelfContainedDeployment.Terminal
             }
 
             _connection?.WriteInput(StartupInput);
+            TrackInput(StartupInput);
             _startupInputSent = true;
             LogTerminalEvent("startup-input.sent", "Startup input sent to terminal", new Dictionary<string, string>
             {
@@ -601,6 +622,146 @@ namespace SelfContainedDeployment.Terminal
             }
         }
 
+        private void TrackInput(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return;
+            }
+
+            foreach (char character in text)
+            {
+                switch (character)
+                {
+                    case '\r':
+                    case '\n':
+                        CommitTrackedInputLine();
+                        break;
+                    case '\b':
+                    case (char)127:
+                        if (_inputLineBuffer.Length > 0)
+                        {
+                            _inputLineBuffer.Length--;
+                        }
+                        break;
+                    default:
+                        if (!char.IsControl(character))
+                        {
+                            _inputLineBuffer.Append(character);
+                        }
+                        break;
+                }
+            }
+        }
+
+        private void CommitTrackedInputLine()
+        {
+            if (_inputLineBuffer.Length == 0)
+            {
+                return;
+            }
+
+            string line = _inputLineBuffer.ToString().Trim();
+            _inputLineBuffer.Clear();
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                return;
+            }
+
+            if (TryUpdateReplayTemplateFromCommand(line))
+            {
+                ReplayStateChanged?.Invoke(this, EventArgs.Empty);
+            }
+        }
+
+        private bool TryUpdateReplayTemplateFromCommand(string line)
+        {
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                return false;
+            }
+
+            string trimmed = line.Trim();
+            if (trimmed.StartsWith("codex", StringComparison.OrdinalIgnoreCase))
+            {
+                _replayTool = "codex";
+                Match resumeMatch = CodexResumeInlineRegex.Match(trimmed);
+                if (resumeMatch.Success)
+                {
+                    _toolLaunchArguments = resumeMatch.Groups[2].Value.Trim();
+                    return SetReplayCommand("codex", resumeMatch.Groups[1].Value, BuildReplayCommand("codex", resumeMatch.Groups[1].Value, _toolLaunchArguments));
+                }
+
+                _toolLaunchArguments = Regex.Match(trimmed, @"^codex\b\s*(.*)$", RegexOptions.IgnoreCase).Groups[1].Value.Trim();
+                return false;
+            }
+
+            if (trimmed.StartsWith("claude", StringComparison.OrdinalIgnoreCase))
+            {
+                _replayTool = "claude";
+                Match resumeMatch = ClaudeResumeInlineRegex.Match(trimmed);
+                if (resumeMatch.Success)
+                {
+                    _toolLaunchArguments = resumeMatch.Groups[2].Value.Trim();
+                    return SetReplayCommand("claude", resumeMatch.Groups[1].Value, BuildReplayCommand("claude", resumeMatch.Groups[1].Value, _toolLaunchArguments));
+                }
+
+                _toolLaunchArguments = Regex.Match(trimmed, @"^claude\b\s*(.*)$", RegexOptions.IgnoreCase).Groups[1].Value.Trim();
+                return false;
+            }
+
+            return false;
+        }
+
+        private void UpdateReplayCommandFromOutput()
+        {
+            string buffer = _outputBuffer.ToString();
+            if (buffer.Length > 8000)
+            {
+                buffer = buffer[^8000..];
+            }
+
+            Match codexMatch = CodexResumeRegex.Match(buffer);
+            if (codexMatch.Success)
+            {
+                if (SetReplayCommand("codex", codexMatch.Groups[1].Value, BuildReplayCommand("codex", codexMatch.Groups[1].Value, _replayTool == "codex" ? _toolLaunchArguments : null)))
+                {
+                    ReplayStateChanged?.Invoke(this, EventArgs.Empty);
+                }
+
+                return;
+            }
+
+            Match claudeMatch = ClaudeResumeRegex.Match(buffer);
+            if (claudeMatch.Success && SetReplayCommand("claude", claudeMatch.Groups[1].Value, BuildReplayCommand("claude", claudeMatch.Groups[1].Value, _replayTool == "claude" ? _toolLaunchArguments : null)))
+            {
+                ReplayStateChanged?.Invoke(this, EventArgs.Empty);
+            }
+        }
+
+        private bool SetReplayCommand(string tool, string sessionId, string command)
+        {
+            if (string.Equals(_replayTool, tool, StringComparison.Ordinal) &&
+                string.Equals(_replaySessionId, sessionId, StringComparison.Ordinal) &&
+                string.Equals(_replayCommand, command, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            _replayTool = tool;
+            _replaySessionId = sessionId;
+            _replayCommand = command;
+            return true;
+        }
+
+        private static string BuildReplayCommand(string tool, string sessionId, string arguments)
+        {
+            string suffix = string.IsNullOrWhiteSpace(arguments) ? string.Empty : " " + arguments.Trim();
+            return string.Equals(tool, "codex", StringComparison.OrdinalIgnoreCase)
+                ? $"codex resume {sessionId}{suffix}"
+                : $"claude --resume {sessionId}{suffix}";
+        }
+
         private NativeAutomationTerminalSnapshot BuildFallbackTerminalSnapshot()
         {
             string buffer = _outputBuffer.ToString();
@@ -620,6 +781,9 @@ namespace SelfContainedDeployment.Terminal
                 Rows = _rows,
                 ViewportY = 0,
                 BufferLength = 0,
+                ReplayTool = _replayTool,
+                ReplaySessionId = _replaySessionId,
+                ReplayCommand = _replayCommand,
                 BufferTail = buffer,
             };
         }
@@ -651,6 +815,9 @@ namespace SelfContainedDeployment.Terminal
                 CursorY = message.CursorY,
                 ViewportY = Math.Max(0, message.ViewportY),
                 BufferLength = Math.Max(0, message.BufferLength),
+                ReplayTool = _replayTool,
+                ReplaySessionId = _replaySessionId,
+                ReplayCommand = _replayCommand,
                 Selection = message.Selection,
                 VisibleText = message.VisibleText,
                 BufferTail = string.IsNullOrWhiteSpace(message.BufferTail) ? BuildFallbackTerminalSnapshot().BufferTail : message.BufferTail,

@@ -75,6 +75,12 @@ namespace SelfContainedDeployment.Persistence
         public bool HasCustomTitle { get; set; }
 
         public string BrowserUri { get; set; }
+
+        public string ReplayTool { get; set; }
+
+        public string ReplaySessionId { get; set; }
+
+        public string ReplayCommand { get; set; }
     }
 
     internal static class WorkspaceSessionStore

@@ -423,6 +423,12 @@ namespace SelfContainedDeployment.Shell
 
         public bool HasCustomTitle { get; set; }
 
+        public string ReplayTool { get; set; }
+
+        public string ReplaySessionId { get; set; }
+
+        public string ReplayCommand { get; set; }
+
         public WorkspacePaneKind Kind { get; }
 
         public virtual bool IsExited { get; protected set; }
