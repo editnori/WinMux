@@ -91,6 +91,9 @@ Supported `action` values:
 - `moveTabAfter`
 - `closeTab`
 - `setLayout`
+- `setThreadWorktree`
+- `refreshDiff`
+- `selectDiffFile`
 - `navigateBrowser`
 - `setTheme`
 - `setProfile`
@@ -117,9 +120,32 @@ Notes:
 - `clearBrowserCredentials` clears the imported WinMux credential vault.
 - `autofillBrowser` triggers a manual autofill attempt on the selected browser pane.
 - `setLayout` accepts `1|2|3|4` or `solo|dual|triple|quad`.
+- `setThreadWorktree` binds a thread to a different repo/worktree path for new panes, diff state, header text, and session replay.
+- `refreshDiff` refreshes the active thread's git snapshot.
+- `selectDiffFile` refreshes the active thread's git snapshot and selects one changed file by relative path.
 - `navigateBrowser` sends a URL to the selected browser pane; an empty `value` returns it to the built-in start page.
 - `input` sends text to the selected terminal/editor pane, not to arbitrary native controls.
 - `moveTabAfter` provides a semantic pane reorder path without coordinate dragging.
+
+### Git-aware thread state
+
+`GET /state` now includes git metadata for the active thread:
+
+- `gitBranch`
+- `worktreePath`
+- `changedFileCount`
+- `selectedDiffPath`
+
+Each thread entry also includes:
+
+- `worktreePath`
+- `branchName`
+- `changedFileCount`
+
+Notes:
+
+- git snapshots refresh on thread activation and can be forced with `refreshDiff`
+- non-git threads show a friendly "No git repository detected for this thread." message instead of raw git stderr
 
 ### Browser inspection
 

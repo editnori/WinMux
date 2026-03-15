@@ -374,6 +374,7 @@ namespace SelfContainedDeployment.Shell
             Project = project ?? throw new ArgumentNullException(nameof(project));
             Id = string.IsNullOrWhiteSpace(id) ? Guid.NewGuid().ToString("N") : id;
             Name = name;
+            WorktreePath = project.RootPath;
             LayoutPreset = WorkspaceLayoutPreset.Dual;
         }
 
@@ -382,6 +383,12 @@ namespace SelfContainedDeployment.Shell
         public string Name { get; set; }
 
         public WorkspaceProject Project { get; }
+
+        public string WorktreePath { get; set; }
+
+        public string BranchName { get; set; }
+
+        public int ChangedFileCount { get; set; }
 
         public string SelectedPaneId { get; set; }
 

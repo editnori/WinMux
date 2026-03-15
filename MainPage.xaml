@@ -137,8 +137,11 @@
                 </Grid>
 
                 <Grid Grid.Row="1"
-                      AutomationProperties.AutomationId="shell-workspace-host">
+                      AutomationProperties.AutomationId="shell-workspace-host"
+                      Background="{ThemeResource ShellPageBackgroundBrush}"
+                      ColumnDefinitions="*,320">
                     <Grid x:Name="PaneWorkspaceShell"
+                          Grid.Column="0"
                           AutomationProperties.AutomationId="shell-pane-workspace">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="40" />
@@ -190,13 +193,46 @@
                               Background="{ThemeResource ShellPaneDividerBrush}" />
                     </Grid>
 
+                    <Border Grid.Column="1"
+                            AutomationProperties.AutomationId="shell-diff-sidebar"
+                            Background="{ThemeResource ShellSurfaceBackgroundBrush}"
+                            BorderBrush="{ThemeResource ShellBorderBrush}"
+                            BorderThickness="1,0,0,0">
+                        <Border Padding="12,10,12,12">
+                            <StackPanel>
+                                <Button x:Name="RefreshDiffButton"
+                                        AutomationProperties.AutomationId="shell-diff-refresh"
+                                        Click="OnRefreshDiffClicked"
+                                        Content="Refresh diff" />
+                                <TextBlock x:Name="DiffBranchText"
+                                           AutomationProperties.AutomationId="shell-diff-branch"
+                                           Text="No git context" />
+                                <TextBlock x:Name="DiffWorktreeText"
+                                           AutomationProperties.AutomationId="shell-diff-worktree" />
+                                <TextBlock x:Name="DiffSummaryText"
+                                           AutomationProperties.AutomationId="shell-diff-summary"
+                                           Text="No working tree changes" />
+                                <ListView x:Name="DiffFileListView"
+                                          AutomationProperties.AutomationId="shell-diff-file-list"
+                                          SelectionMode="Single"
+                                          SelectionChanged="OnDiffFileSelectionChanged" />
+                                <TextBox x:Name="DiffPreviewBox"
+                                         AutomationProperties.AutomationId="shell-diff-preview"
+                                         IsReadOnly="True"
+                                         AcceptsReturn="True" />
+                            </StackPanel>
+                        </Border>
+                    </Border>
+
                     <Frame x:Name="SettingsFrame"
                            AutomationProperties.AutomationId="shell-settings-frame"
+                           Grid.ColumnSpan="2"
                            Visibility="Collapsed"
                            Background="{ThemeResource ShellPageBackgroundBrush}" />
 
                     <StackPanel x:Name="EmptyThreadStatePanel"
                                 AutomationProperties.AutomationId="shell-empty-thread-state"
+                                Grid.ColumnSpan="2"
                                 HorizontalAlignment="Center"
                                 VerticalAlignment="Center"
                                 Visibility="Collapsed"

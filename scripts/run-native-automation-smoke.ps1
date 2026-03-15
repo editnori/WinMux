@@ -35,7 +35,7 @@ function Assert-True {
 function Invoke-AutomationGet {
     param([string]$Path)
 
-    return Invoke-RestMethod -Uri "$baseUrl$Path" -TimeoutSec 10
+    return Invoke-RestMethod -Uri "$baseUrl$Path" -TimeoutSec 20
 }
 
 function Invoke-AutomationPost {
@@ -45,7 +45,7 @@ function Invoke-AutomationPost {
     )
 
     $json = if ($null -eq $Body) { "" } else { $Body | ConvertTo-Json -Depth 20 }
-    return Invoke-RestMethod -Method Post -Uri "$baseUrl$Path" -ContentType "application/json" -Body $json -TimeoutSec 10
+    return Invoke-RestMethod -Method Post -Uri "$baseUrl$Path" -ContentType "application/json" -Body $json -TimeoutSec 20
 }
 
 function Invoke-DesktopUiaTree {

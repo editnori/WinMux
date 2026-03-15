@@ -53,6 +53,10 @@ namespace SelfContainedDeployment.Persistence
 
         public string Name { get; set; }
 
+        public string WorktreePath { get; set; }
+
+        public string BranchName { get; set; }
+
         public string SelectedPaneId { get; set; }
 
         public string Layout { get; set; }

@@ -25,6 +25,7 @@ What exists now:
 
 - fixed native shell layout with a dense inline sidebar and a top pane strip
 - multiple projects, each with nested threads and per-thread pane workspaces
+- worktree-aware thread metadata and a right-side git diff rail for the active thread
 - autosaved workspace/session replay across app relaunches
 - terminal panes backed by `TerminalControl`
 - browser preview panes backed by `WebView2` with a built-in start page and a shared WinMux browser profile
@@ -41,6 +42,7 @@ What does not exist yet:
 
 - thread overview / niri-style vertical workspace navigation
 - true ConPTY process hibernation beyond workspace replay
+- thread-start / checkpoint diff history beyond the current live git snapshot
 - true live Chrome-profile reuse and Google account sync parity inside the shared browser
 - custom pane-strip visuals and overview polish
 

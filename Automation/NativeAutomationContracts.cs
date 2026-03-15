@@ -24,6 +24,14 @@ namespace SelfContainedDeployment.Automation
 
         public string ShellProfileId { get; set; }
 
+        public string GitBranch { get; set; }
+
+        public string WorktreePath { get; set; }
+
+        public int ChangedFileCount { get; set; }
+
+        public string SelectedDiffPath { get; set; }
+
         public List<NativeAutomationProjectState> Projects { get; set; } = new();
 
         public List<NativeAutomationThreadState> Threads { get; set; } = new();
@@ -52,6 +60,10 @@ namespace SelfContainedDeployment.Automation
 
         public string Name { get; set; }
 
+        public string WorktreePath { get; set; }
+
+        public string BranchName { get; set; }
+
         public string SelectedTabId { get; set; }
 
         public int TabCount { get; set; }
@@ -67,6 +79,8 @@ namespace SelfContainedDeployment.Automation
         public double PrimarySplitRatio { get; set; }
 
         public double SecondarySplitRatio { get; set; }
+
+        public int ChangedFileCount { get; set; }
 
         public List<NativeAutomationTabState> Tabs { get; set; } = new();
 
