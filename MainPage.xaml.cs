@@ -3230,14 +3230,16 @@ namespace SelfContainedDeployment
                 return;
             }
 
+            int totalAddedLines = _activeGitSnapshot.ChangedFiles.Sum(file => file.AddedLines);
+            int totalRemovedLines = _activeGitSnapshot.ChangedFiles.Sum(file => file.RemovedLines);
             DiffBranchText.Text = string.IsNullOrWhiteSpace(_activeGitSnapshot.BranchName)
                 ? "Git metadata unavailable"
                 : _activeGitSnapshot.BranchName;
             DiffWorktreeText.Text = _activeGitSnapshot.WorktreePath ?? string.Empty;
             DiffSummaryText.Text = string.IsNullOrWhiteSpace(_activeGitSnapshot.Error)
                 ? (string.IsNullOrWhiteSpace(_activeGitSnapshot.DiffSummary)
-                    ? _activeGitSnapshot.StatusSummary
-                    : $"{_activeGitSnapshot.StatusSummary}\n{_activeGitSnapshot.DiffSummary}")
+                    ? FormatGitSummary(_activeGitSnapshot.StatusSummary, totalAddedLines, totalRemovedLines)
+                    : $"{FormatGitSummary(_activeGitSnapshot.StatusSummary, totalAddedLines, totalRemovedLines)}\n{_activeGitSnapshot.DiffSummary}")
                 : _activeGitSnapshot.Error;
             PopulateDiffFileList(_activeGitSnapshot.ChangedFiles, _activeGitSnapshot.SelectedPath);
             RenderDiffPreview(_activeGitSnapshot.SelectedDiff ?? string.Empty);
@@ -3282,6 +3284,7 @@ namespace SelfContainedDeployment
             };
             layout.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             layout.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            layout.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
             TextBlock statusText = new()
             {
@@ -3317,6 +3320,42 @@ namespace SelfContainedDeployment
             });
 
             layout.Children.Add(textStack);
+
+            StackPanel metricsStack = new()
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 8,
+                VerticalAlignment = VerticalAlignment.Top,
+            };
+            Grid.SetColumn(metricsStack, 2);
+
+            if (changedFile.AddedLines > 0)
+            {
+                metricsStack.Children.Add(new TextBlock
+                {
+                    Text = $"+{changedFile.AddedLines}",
+                    FontSize = 11,
+                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                    Foreground = AppBrush(button, "ShellSuccessBrush"),
+                });
+            }
+
+            if (changedFile.RemovedLines > 0)
+            {
+                metricsStack.Children.Add(new TextBlock
+                {
+                    Text = $"-{changedFile.RemovedLines}",
+                    FontSize = 11,
+                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                    Foreground = AppBrush(button, "ShellDangerBrush"),
+                });
+            }
+
+            if (metricsStack.Children.Count > 0)
+            {
+                layout.Children.Add(metricsStack);
+            }
+
             button.Content = layout;
             return button;
         }
@@ -3368,6 +3407,26 @@ namespace SelfContainedDeployment
             }
 
             DiffPreviewBlock.Blocks.Add(paragraph);
+        }
+
+        private static string FormatGitSummary(string statusSummary, int totalAddedLines, int totalRemovedLines)
+        {
+            List<string> parts = new()
+            {
+                string.IsNullOrWhiteSpace(statusSummary) ? "No working tree changes" : statusSummary,
+            };
+
+            if (totalAddedLines > 0)
+            {
+                parts.Add($"+{totalAddedLines}");
+            }
+
+            if (totalRemovedLines > 0)
+            {
+                parts.Add($"-{totalRemovedLines}");
+            }
+
+            return string.Join(" · ", parts);
         }
 
         private void FocusSelectedPane()

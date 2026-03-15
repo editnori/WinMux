@@ -13,6 +13,10 @@ namespace SelfContainedDeployment.Git
 
         public string Path { get; set; }
 
+        public int AddedLines { get; set; }
+
+        public int RemovedLines { get; set; }
+
         public string DisplayName => string.IsNullOrWhiteSpace(Path)
             ? string.Empty
             : Path.Replace('\\', '/');
@@ -54,6 +58,7 @@ namespace SelfContainedDeployment.Git
         private const string RootMarker = "__WINMUX_ROOT__";
         private const string StatusMarker = "__WINMUX_STATUS__";
         private const string DiffStatMarker = "__WINMUX_DIFFSTAT__";
+        private const string NumStatMarker = "__WINMUX_NUMSTAT__";
 
         public static GitThreadSnapshot Capture(string workingPath, string selectedPath = null)
         {
@@ -158,6 +163,7 @@ namespace SelfContainedDeployment.Git
             StringBuilder rootOutput = new();
             StringBuilder statusOutput = new();
             StringBuilder diffStatOutput = new();
+            StringBuilder numStatOutput = new();
             StringBuilder activeOutput = null;
 
             string[] lines = output?.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None) ?? Array.Empty<string>();
@@ -181,12 +187,55 @@ namespace SelfContainedDeployment.Git
                     continue;
                 }
 
+                if (string.Equals(line, NumStatMarker, StringComparison.Ordinal))
+                {
+                    activeOutput = numStatOutput;
+                    continue;
+                }
+
                 activeOutput?.AppendLine(line);
             }
 
             snapshot.RepositoryRootPath = rootOutput.ToString().Trim();
             ParseStatus(snapshot, statusOutput.ToString());
             snapshot.DiffSummary = diffStatOutput.ToString().Trim();
+            ApplyNumStat(snapshot, numStatOutput.ToString());
+        }
+
+        private static void ApplyNumStat(GitThreadSnapshot snapshot, string output)
+        {
+            if (snapshot.ChangedFiles.Count == 0 || string.IsNullOrWhiteSpace(output))
+            {
+                return;
+            }
+
+            Dictionary<string, GitChangedFile> filesByPath = snapshot.ChangedFiles
+                .Where(file => !string.IsNullOrWhiteSpace(file.Path))
+                .ToDictionary(file => file.Path, StringComparer.Ordinal);
+
+            string[] lines = output.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries);
+            foreach (string rawLine in lines)
+            {
+                string[] parts = rawLine.Split('\t');
+                if (parts.Length < 3)
+                {
+                    continue;
+                }
+
+                string path = parts[^1].Trim();
+                if (!filesByPath.TryGetValue(path, out GitChangedFile changedFile))
+                {
+                    continue;
+                }
+
+                changedFile.AddedLines = ParseNumStatValue(parts[0]);
+                changedFile.RemovedLines = ParseNumStatValue(parts[1]);
+            }
+        }
+
+        private static int ParseNumStatValue(string value)
+        {
+            return int.TryParse(value, out int parsed) ? parsed : 0;
         }
 
         private static GitCommandResult RunGitSnapshot(string workingPath)
@@ -199,6 +248,8 @@ namespace SelfContainedDeployment.Git
                 "git --no-optional-locks -c core.quotepath=false status --porcelain=v1 -b --untracked-files=all",
                 $"printf '%s\\n' '{DiffStatMarker}'",
                 "git --no-optional-locks -c core.quotepath=false diff --stat --compact-summary",
+                $"printf '%s\\n' '{NumStatMarker}'",
+                "git --no-optional-locks -c core.quotepath=false diff --numstat",
             });
 
             return RunWslShell(workingPath, script);

@@ -350,7 +350,29 @@ namespace SelfContainedDeployment.Panes
                 await EnsureCredentialCaptureScriptAsync(core).ConfigureAwait(true);
                 UpdateCredentialAutofillStatus();
 
-                if (string.IsNullOrWhiteSpace(InitialUri))
+                if (!string.IsNullOrWhiteSpace(_currentUri) &&
+                    !string.Equals(_currentUri, "about:blank", StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(_currentUri, "winmux://start", StringComparison.OrdinalIgnoreCase))
+                {
+                    LogBrowserEvent("webview.configure", $"Preserving in-flight browser navigation to {_currentUri}", new Dictionary<string, string>
+                    {
+                        ["step"] = "navigate.preserveCurrent",
+                        ["uri"] = _currentUri,
+                    });
+                }
+                else if (!string.IsNullOrWhiteSpace(AddressBox.Text) &&
+                    !string.Equals(AddressBox.Text, "about:blank", StringComparison.OrdinalIgnoreCase))
+                {
+                    string pendingUri = NormalizeUri(AddressBox.Text);
+                    LogBrowserEvent("webview.configure", $"Preserving pending browser navigation to {pendingUri}", new Dictionary<string, string>
+                    {
+                        ["step"] = "navigate.preserveAddress",
+                        ["uri"] = pendingUri,
+                    });
+                    core.Navigate(pendingUri);
+                    LogBrowserEvent("navigate.requested", $"Navigating browser pane to {pendingUri}");
+                }
+                else if (string.IsNullOrWhiteSpace(InitialUri))
                 {
                     LogBrowserEvent("webview.configure", "Navigating to browser start page", new Dictionary<string, string>
                     {

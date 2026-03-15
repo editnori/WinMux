@@ -83,6 +83,7 @@ for ($i = 0; $i -lt 40; $i++) {
         $targets = Invoke-RestMethod -Uri $targetsUrl -TimeoutSec 2
         $lastTargets = $targets
 
+        $pageTargets = @($targets | Where-Object { $_.type -eq "page" })
         $rendererTargets = @($targets | Where-Object {
             $_.type -eq "page" -and (
                 $_.url -like "*terminal-host.html*" -or
@@ -95,6 +96,9 @@ for ($i = 0; $i -lt 40; $i++) {
         if ($rendererTargets.Count -gt 0) {
             $rendererReady = $true
             $lastTargets = $rendererTargets
+        }
+        elseif ($pageTargets.Count -gt 0) {
+            $lastTargets = $pageTargets
         }
     }
     catch {
@@ -111,6 +115,13 @@ for ($i = 0; $i -lt 40; $i++) {
 
     if ($rendererReady -and $automationReady) {
         Write-Host "Detected WebView2 targets:"
+        $lastTargets | Select-Object title, url, type | Format-Table -AutoSize
+        Write-Host "Native automation server is healthy."
+        exit 0
+    }
+
+    if ($automationReady -and $lastTargets -and @($lastTargets).Count -gt 0) {
+        Write-Warning "Native automation is healthy and WebView2 has page targets, but the renderer is still on a transient page."
         $lastTargets | Select-Object title, url, type | Format-Table -AutoSize
         Write-Host "Native automation server is healthy."
         exit 0
