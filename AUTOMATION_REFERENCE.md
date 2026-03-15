@@ -82,6 +82,9 @@ Supported `action` values:
 - `newBrowserPane`
 - `newEditorPane`
 - `importBrowserPasswordsCsv`
+- `deleteBrowserCredential`
+- `clearBrowserCredentials`
+- `autofillBrowser`
 - `selectProject`
 - `selectThread`
 - `selectTab`
@@ -110,6 +113,9 @@ Notes:
 - `newBrowserPane` adds a preview pane to the active thread backed by the shared WinMux browser profile.
 - `newEditorPane` adds a terminal-backed editor pane that launches `nvim .`.
 - `importBrowserPasswordsCsv` imports a Google Passwords CSV into the WinMux-encrypted credential store.
+- `deleteBrowserCredential` removes one imported credential from the WinMux vault by credential id.
+- `clearBrowserCredentials` clears the imported WinMux credential vault.
+- `autofillBrowser` triggers a manual autofill attempt on the selected browser pane.
 - `setLayout` accepts `1|2|3|4` or `solo|dual|triple|quad`.
 - `navigateBrowser` sends a URL to the selected browser pane; an empty `value` returns it to the built-in start page.
 - `input` sends text to the selected terminal/editor pane, not to arbitrary native controls.
@@ -130,6 +136,11 @@ These routes expose browser-pane state directly from the native app, which is no
 - extension import status
 - credential autofill status
 - imported preferred extension names
+
+Notes:
+
+- imported credentials are stored in a WinMux-managed encrypted vault, not in WebView2's native password database
+- imported credentials can autofill matching pages such as Google sign-in username fields
 
 `POST /browser-eval` executes JavaScript inside a browser pane and returns the raw `ExecuteScriptAsync` result.
 

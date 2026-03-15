@@ -541,6 +541,15 @@ namespace SelfContainedDeployment
                     case "importbrowserpasswordscsv":
                         ImportBrowserPasswordsCsv(request.Value);
                         break;
+                    case "deletebrowsercredential":
+                        DeleteBrowserCredential(request.Value);
+                        break;
+                    case "clearbrowsercredentials":
+                        ClearBrowserCredentials();
+                        break;
+                    case "autofillbrowser":
+                        _ = ManualAutofillSelectedBrowserAsync();
+                        break;
                     case "settheme":
                         ApplyTheme(ParseTheme(request.Value));
                         break;
@@ -1319,20 +1328,96 @@ namespace SelfContainedDeployment
                 throw new InvalidOperationException(result.Message);
             }
 
-            foreach ((_, _, BrowserPaneRecord pane) in EnumerateBrowserRecords())
-            {
-                _ = pane.Browser.EnsureInitializedAsync();
-                if (!string.IsNullOrWhiteSpace(pane.Browser.CurrentUri))
-                {
-                    pane.Browser.Navigate(pane.Browser.CurrentUri);
-                }
-            }
+            RefreshBrowserCredentialState(reloadCurrentPages: true);
 
             LogAutomationEvent("browser", "credentials.imported", result.Message, new Dictionary<string, string>
             {
                 ["path"] = csvPath ?? string.Empty,
                 ["importedCount"] = result.ImportedCount.ToString(),
             });
+        }
+
+        private void DeleteBrowserCredential(string id)
+        {
+            if (!BrowserCredentialStore.DeleteCredential(id))
+            {
+                throw new InvalidOperationException("The requested browser credential could not be found.");
+            }
+
+            RefreshBrowserCredentialState(reloadCurrentPages: false);
+            LogAutomationEvent("browser", "credentials.deleted", "Deleted a browser credential from the WinMux vault", new Dictionary<string, string>
+            {
+                ["credentialId"] = id ?? string.Empty,
+            });
+        }
+
+        private void ClearBrowserCredentials()
+        {
+            int removed = BrowserCredentialStore.ClearCredentials();
+            RefreshBrowserCredentialState(reloadCurrentPages: false);
+            LogAutomationEvent("browser", "credentials.cleared", "Cleared the WinMux browser credential vault", new Dictionary<string, string>
+            {
+                ["removedCount"] = removed.ToString(),
+            });
+        }
+
+        private void RefreshBrowserCredentialState(bool reloadCurrentPages)
+        {
+            foreach ((_, _, BrowserPaneRecord pane) in EnumerateBrowserRecords())
+            {
+                pane.Browser.RefreshCredentialAutofillState();
+                if (reloadCurrentPages && !string.IsNullOrWhiteSpace(pane.Browser.CurrentUri))
+                {
+                    pane.Browser.Navigate(pane.Browser.CurrentUri);
+                }
+            }
+        }
+
+        internal IReadOnlyList<BrowserCredentialSummary> GetBrowserCredentialSummaries()
+        {
+            return BrowserCredentialStore.GetCredentialSummaries();
+        }
+
+        internal string ImportBrowserPasswordsCsvFromPath(string csvPath)
+        {
+            ImportBrowserPasswordsCsv(csvPath);
+            return $"Imported {BrowserCredentialStore.GetCredentialCount()} encrypted browser credential{(BrowserCredentialStore.GetCredentialCount() == 1 ? string.Empty : "s")} into WinMux.";
+        }
+
+        internal bool DeleteBrowserCredentialFromSettings(string id, out string message)
+        {
+            try
+            {
+                DeleteBrowserCredential(id);
+                message = "Removed credential from the WinMux vault.";
+                return true;
+            }
+            catch (Exception ex)
+            {
+                message = ex.Message;
+                return false;
+            }
+        }
+
+        internal string ClearBrowserCredentialsFromSettings()
+        {
+            int removed = BrowserCredentialStore.GetCredentialCount();
+            ClearBrowserCredentials();
+            return removed == 0
+                ? "The WinMux credential vault was already empty."
+                : $"Cleared {removed} browser credential{(removed == 1 ? string.Empty : "s")} from the WinMux vault.";
+        }
+
+        internal async System.Threading.Tasks.Task<string> ManualAutofillSelectedBrowserAsync()
+        {
+            BrowserPaneRecord pane = ResolveBrowserPane();
+            if (pane is null)
+            {
+                throw new InvalidOperationException("No browser pane is selected.");
+            }
+
+            await pane.Browser.ManualAutofillCurrentPageAsync().ConfigureAwait(true);
+            return pane.Browser.CredentialAutofillStatus;
         }
 
         private static WorkspaceLayoutPreset ParseLayoutPreset(string value)

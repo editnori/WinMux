@@ -179,6 +179,11 @@ namespace SelfContainedDeployment.Panes
         {
         }
 
+        public void RefreshCredentialAutofillState()
+        {
+            UpdateCredentialAutofillStatus();
+        }
+
         public void DisposePane()
         {
             if (_disposed)
@@ -466,6 +471,16 @@ namespace SelfContainedDeployment.Panes
             blankPaneItem.Click += (_, _) => OpenPaneRequested?.Invoke(this, null);
             flyout.Items.Add(blankPaneItem);
 
+            MenuFlyoutItem autofillItem = new()
+            {
+                Text = "Autofill this page",
+                IsEnabled = BrowserCredentialStore.GetCredentialCount() > 0
+                    && !string.IsNullOrWhiteSpace(_currentUri)
+                    && !string.Equals(_currentUri, "winmux://start", StringComparison.OrdinalIgnoreCase),
+            };
+            autofillItem.Click += async (_, _) => await ManualAutofillCurrentPageAsync().ConfigureAwait(true);
+            flyout.Items.Add(autofillItem);
+
             flyout.Items.Add(new MenuFlyoutItem
             {
                 Text = "Each browser pane keeps one live page. Use another pane when you need a second page.",
@@ -530,6 +545,12 @@ namespace SelfContainedDeployment.Panes
             CoreWebView2 core = await WaitForCoreWebView2Async().ConfigureAwait(true);
             string effectiveScript = string.IsNullOrWhiteSpace(script) ? "document.title" : script;
             return await core.ExecuteScriptAsync(effectiveScript).AsTask().ConfigureAwait(true);
+        }
+
+        public async Task ManualAutofillCurrentPageAsync()
+        {
+            await EnsureInitializedAsync().ConfigureAwait(true);
+            await TryAutofillMatchingCredentialsAsync().ConfigureAwait(true);
         }
 
         public async Task<(string Path, int Width, int Height)> CaptureBrowserPreviewAsync(string outputPath)

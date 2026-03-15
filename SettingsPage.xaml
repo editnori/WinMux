@@ -84,6 +84,52 @@
                     <ComboBoxItem Content="3 panes" Tag="3" />
                     <ComboBoxItem Content="4 panes" Tag="4" />
                 </ComboBox>
+
+                <StackPanel Spacing="6">
+                    <TextBlock Style="{StaticResource ShellSectionTextStyle}" Text="Browser credentials" />
+                    <TextBlock Style="{StaticResource ShellHintTextStyle}"
+                               Text="WinMux keeps imported browser credentials in an encrypted app vault. This is separate from WebView2's native password manager and separate from Chrome Sync." />
+                </StackPanel>
+
+                <TextBlock x:Name="browserCredentialStatusText"
+                           AutomationProperties.AutomationId="settings-browser-credential-status"
+                           Style="{StaticResource ShellHintTextStyle}"
+                           Text="No imported browser credentials yet." />
+
+                <Grid ColumnDefinitions="Auto,Auto,Auto" ColumnSpacing="8">
+                    <Button x:Name="ImportBrowserCredentialsButton"
+                            AutomationProperties.AutomationId="settings-browser-import"
+                            Style="{StaticResource ShellChromeButtonStyle}"
+                            Click="OnImportBrowserCredentialsClicked"
+                            Content="Import CSV" />
+
+                    <Button x:Name="AutofillCurrentBrowserButton"
+                            Grid.Column="1"
+                            AutomationProperties.AutomationId="settings-browser-autofill"
+                            Style="{StaticResource ShellChromeButtonStyle}"
+                            Click="OnAutofillCurrentBrowserClicked"
+                            Content="Autofill current page" />
+
+                    <Button x:Name="ClearBrowserCredentialsButton"
+                            Grid.Column="2"
+                            AutomationProperties.AutomationId="settings-browser-clear"
+                            Style="{StaticResource ShellChromeButtonStyle}"
+                            Click="OnClearBrowserCredentialsClicked"
+                            Content="Clear vault" />
+                </Grid>
+
+                <Border BorderBrush="{ThemeResource ShellBorderBrush}"
+                        BorderThickness="1"
+                        CornerRadius="6"
+                        Padding="10">
+                    <ScrollViewer MaxHeight="260"
+                                  VerticalScrollBarVisibility="Auto"
+                                  VerticalScrollMode="Auto">
+                        <StackPanel x:Name="browserCredentialListPanel"
+                                    AutomationProperties.AutomationId="settings-browser-credential-list"
+                                    Spacing="8" />
+                    </ScrollViewer>
+                </Border>
             </StackPanel>
         </ScrollViewer>
 

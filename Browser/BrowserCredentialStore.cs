@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Windows.Security.Cryptography;
@@ -22,6 +23,8 @@ namespace SelfContainedDeployment.Browser
 
     internal sealed class BrowserCredentialMatch
     {
+        public string Id { get; init; }
+
         public string Name { get; init; }
 
         public string Host { get; init; }
@@ -35,6 +38,21 @@ namespace SelfContainedDeployment.Browser
         public string Note { get; init; }
     }
 
+    internal sealed class BrowserCredentialSummary
+    {
+        public string Id { get; init; }
+
+        public string Name { get; init; }
+
+        public string Host { get; init; }
+
+        public string Url { get; init; }
+
+        public string Username { get; init; }
+
+        public string Note { get; init; }
+    }
+
     internal static class BrowserCredentialStore
     {
         private const string StoreFileName = "browser-credentials.dat";
@@ -42,6 +60,8 @@ namespace SelfContainedDeployment.Browser
 
         private sealed class BrowserCredentialEntry
         {
+            public string Id { get; set; }
+
             public string Name { get; set; }
 
             public string Url { get; set; }
@@ -165,6 +185,7 @@ namespace SelfContainedDeployment.Browser
 
             return new BrowserCredentialMatch
             {
+                Id = match.Id,
                 Name = match.Name,
                 Host = match.Host,
                 Url = match.Url,
@@ -177,6 +198,58 @@ namespace SelfContainedDeployment.Browser
         public static int GetCredentialCount()
         {
             return LoadEnvelope().Entries.Count;
+        }
+
+        public static IReadOnlyList<BrowserCredentialSummary> GetCredentialSummaries()
+        {
+            return LoadEnvelope().Entries
+                .OrderBy(entry => entry.Host, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(entry => entry.Username, StringComparer.OrdinalIgnoreCase)
+                .Select(entry => new BrowserCredentialSummary
+                {
+                    Id = entry.Id,
+                    Name = entry.Name,
+                    Host = entry.Host,
+                    Url = entry.Url,
+                    Username = entry.Username,
+                    Note = entry.Note,
+                })
+                .ToList();
+        }
+
+        public static bool DeleteCredential(string id)
+        {
+            if (string.IsNullOrWhiteSpace(id))
+            {
+                return false;
+            }
+
+            lock (Sync)
+            {
+                BrowserCredentialEnvelope envelope = LoadEnvelopeCore();
+                int removed = envelope.Entries.RemoveAll(entry => string.Equals(entry.Id, id, StringComparison.Ordinal));
+                if (removed == 0)
+                {
+                    return false;
+                }
+
+                SaveEnvelopeCore(envelope);
+                return true;
+            }
+        }
+
+        public static int ClearCredentials()
+        {
+            lock (Sync)
+            {
+                BrowserCredentialEnvelope envelope = LoadEnvelopeCore();
+                int removed = envelope.Entries.Count;
+                envelope.Entries.Clear();
+                envelope.ImportedAtUtc = DateTimeOffset.UtcNow;
+                envelope.SourcePath = string.Empty;
+                SaveEnvelopeCore(envelope);
+                return removed;
+            }
         }
 
         private static List<BrowserCredentialEntry> ParseGooglePasswordsCsv(string csvPath)
@@ -222,6 +295,7 @@ namespace SelfContainedDeployment.Browser
 
                 entries.Add(new BrowserCredentialEntry
                 {
+                    Id = BuildCredentialId(url, ReadColumn(row, columnIndex, "username"), password),
                     Name = ReadColumn(row, columnIndex, "name"),
                     Url = url,
                     Host = NormalizeHost(parsedUri.Host),
@@ -256,15 +330,7 @@ namespace SelfContainedDeployment.Browser
         {
             lock (Sync)
             {
-                string storePath = ResolveStorePath();
-                if (!File.Exists(storePath))
-                {
-                    return new BrowserCredentialEnvelope();
-                }
-
-                byte[] protectedBytes = File.ReadAllBytes(storePath);
-                byte[] rawBytes = Unprotect(protectedBytes);
-                return JsonSerializer.Deserialize<BrowserCredentialEnvelope>(rawBytes) ?? new BrowserCredentialEnvelope();
+                return LoadEnvelopeCore();
             }
         }
 
@@ -272,16 +338,59 @@ namespace SelfContainedDeployment.Browser
         {
             lock (Sync)
             {
-                string storePath = ResolveStorePath();
-                Directory.CreateDirectory(Path.GetDirectoryName(storePath)!);
-
-                byte[] rawBytes = JsonSerializer.SerializeToUtf8Bytes(envelope, new JsonSerializerOptions
-                {
-                    WriteIndented = false,
-                });
-                byte[] protectedBytes = Protect(rawBytes);
-                File.WriteAllBytes(storePath, protectedBytes);
+                SaveEnvelopeCore(envelope);
             }
+        }
+
+        private static BrowserCredentialEnvelope LoadEnvelopeCore()
+        {
+            string storePath = ResolveStorePath();
+            if (!File.Exists(storePath))
+            {
+                return new BrowserCredentialEnvelope();
+            }
+
+            byte[] protectedBytes = File.ReadAllBytes(storePath);
+            byte[] rawBytes = Unprotect(protectedBytes);
+            BrowserCredentialEnvelope envelope = JsonSerializer.Deserialize<BrowserCredentialEnvelope>(rawBytes) ?? new BrowserCredentialEnvelope();
+
+            bool updated = false;
+            foreach (BrowserCredentialEntry entry in envelope.Entries)
+            {
+                if (string.IsNullOrWhiteSpace(entry.Id))
+                {
+                    entry.Id = BuildCredentialId(entry.Url, entry.Username, entry.Password);
+                    updated = true;
+                }
+            }
+
+            if (updated)
+            {
+                SaveEnvelopeCore(envelope);
+            }
+
+            return envelope;
+        }
+
+        private static void SaveEnvelopeCore(BrowserCredentialEnvelope envelope)
+        {
+            string storePath = ResolveStorePath();
+            Directory.CreateDirectory(Path.GetDirectoryName(storePath)!);
+
+            byte[] rawBytes = JsonSerializer.SerializeToUtf8Bytes(envelope, new JsonSerializerOptions
+            {
+                WriteIndented = false,
+            });
+            byte[] protectedBytes = Protect(rawBytes);
+            File.WriteAllBytes(storePath, protectedBytes);
+        }
+
+        private static string BuildCredentialId(string url, string username, string password)
+        {
+            string value = $"{url ?? string.Empty}\n{username ?? string.Empty}\n{password ?? string.Empty}";
+            byte[] bytes = Encoding.UTF8.GetBytes(value);
+            byte[] hash = SHA256.HashData(bytes);
+            return Convert.ToHexString(hash[..12]).ToLowerInvariant();
         }
 
         private static byte[] Protect(byte[] rawBytes)
