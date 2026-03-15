@@ -114,6 +114,15 @@ namespace SelfContainedDeployment.Git
                 return "Git metadata timed out.";
             }
 
+            if (error.Contains("ambiguous argument", StringComparison.OrdinalIgnoreCase) ||
+                error.Contains("bad revision", StringComparison.OrdinalIgnoreCase) ||
+                error.Contains("unknown revision", StringComparison.OrdinalIgnoreCase) ||
+                error.Contains("pathspec", StringComparison.OrdinalIgnoreCase) ||
+                error.Contains("fatal:", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Patch unavailable for this file.";
+            }
+
             return error.Trim();
         }
 
@@ -144,7 +153,7 @@ namespace SelfContainedDeployment.Git
                 snapshot.ChangedFiles.Add(new GitChangedFile
                 {
                     Status = line[..2].Trim(),
-                    Path = line[3..].Trim(),
+                    Path = NormalizeTrackedPath(line[3..].Trim()),
                 });
             }
         }
@@ -223,7 +232,7 @@ namespace SelfContainedDeployment.Git
                     continue;
                 }
 
-                string path = parts[^1].Trim();
+                string path = NormalizeTrackedPath(parts[^1].Trim());
                 if (!filesByPath.TryGetValue(path, out GitChangedFile changedFile))
                 {
                     continue;
@@ -259,10 +268,23 @@ namespace SelfContainedDeployment.Git
         private static GitCommandResult RunGitDiff(string workingPath, string selectedPath, string status)
         {
             string normalizedStatus = status?.Trim() ?? string.Empty;
+            selectedPath = NormalizeTrackedPath(selectedPath);
             if (string.Equals(normalizedStatus, "??", StringComparison.Ordinal))
             {
                 const string untrackedScript = "if [ -e \"$1\" ]; then git --no-optional-locks -c core.quotepath=false diff --no-index -- /dev/null -- \"$1\"; code=$?; if [ $code -le 1 ]; then exit 0; fi; exit $code; fi";
                 return RunWslShell(workingPath, untrackedScript, selectedPath);
+            }
+
+            if (normalizedStatus.IndexOf('A') >= 0 ||
+                normalizedStatus.IndexOf('R') >= 0 ||
+                normalizedStatus.IndexOf('C') >= 0)
+            {
+                const string stagedFirstScript = "git --no-optional-locks -c core.quotepath=false diff --cached -- \"$1\"";
+                GitCommandResult stagedDiff = RunWslShell(workingPath, stagedFirstScript, selectedPath);
+                if (stagedDiff.Ok && !string.IsNullOrWhiteSpace(stagedDiff.Output))
+                {
+                    return stagedDiff;
+                }
             }
 
             const string headScript = "git --no-optional-locks -c core.quotepath=false diff HEAD -- \"$1\"";
@@ -280,7 +302,30 @@ namespace SelfContainedDeployment.Git
             }
 
             const string workingTreeScript = "git --no-optional-locks -c core.quotepath=false diff -- \"$1\"";
-            return RunWslShell(workingPath, workingTreeScript, selectedPath);
+            GitCommandResult workingTreeDiff = RunWslShell(workingPath, workingTreeScript, selectedPath);
+            if (workingTreeDiff.Ok || string.IsNullOrWhiteSpace(workingTreeDiff.Error))
+            {
+                return workingTreeDiff;
+            }
+
+            return new GitCommandResult(false, string.Empty, NormalizeGitError(workingTreeDiff.Error));
+        }
+
+        private static string NormalizeTrackedPath(string path)
+        {
+            string normalized = path?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(normalized))
+            {
+                return string.Empty;
+            }
+
+            int renameSeparator = normalized.LastIndexOf(" -> ", StringComparison.Ordinal);
+            if (renameSeparator >= 0 && renameSeparator + 4 < normalized.Length)
+            {
+                return normalized[(renameSeparator + 4)..].Trim();
+            }
+
+            return normalized;
         }
 
         private static GitCommandResult RunWslShell(string workingPath, string shellScript, string argument = null)

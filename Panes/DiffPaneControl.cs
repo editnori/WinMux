@@ -9,6 +9,7 @@ namespace SelfContainedDeployment.Panes
 {
     public sealed class DiffPaneControl : UserControl
     {
+        private readonly Border _headerBorder;
         private readonly TextBlock _pathText;
         private readonly TextBlock _summaryText;
         private readonly RichTextBlock _diffBlock;
@@ -22,7 +23,7 @@ namespace SelfContainedDeployment.Panes
             root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
 
-            Border headerBorder = new()
+            _headerBorder = new Border
             {
                 BorderBrush = ResolveBrush("ShellBorderBrush"),
                 BorderThickness = new Thickness(0, 0, 0, 1),
@@ -52,8 +53,8 @@ namespace SelfContainedDeployment.Panes
             };
             headerStack.Children.Add(_summaryText);
 
-            headerBorder.Child = headerStack;
-            root.Children.Add(headerBorder);
+            _headerBorder.Child = headerStack;
+            root.Children.Add(_headerBorder);
 
             _diffBlock = new RichTextBlock
             {
@@ -91,7 +92,12 @@ namespace SelfContainedDeployment.Panes
         {
             RequestedTheme = theme;
             Background = ResolveBrush("ShellSurfaceBackgroundBrush");
+            _headerBorder.Background = ResolveBrush("ShellSurfaceBackgroundBrush");
+            _headerBorder.BorderBrush = ResolveBrush("ShellBorderBrush");
+            _pathText.Foreground = ResolveBrush("ShellTextPrimaryBrush");
+            _summaryText.Foreground = ResolveBrush("ShellTextTertiaryBrush");
             _scrollViewer.Background = ResolveBrush("ShellMutedSurfaceBrush");
+            RenderDiff(_currentDiff);
         }
 
         public void FocusPane()

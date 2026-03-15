@@ -100,6 +100,7 @@ namespace SelfContainedDeployment
             UpdateSidebarActions();
             UpdateHeader();
             ApplyThemeToAllTerminals(ResolveTheme(theme));
+            ApplyGitSnapshotToUi();
             LogAutomationEvent("shell", "theme.changed", $"Theme set to {ResolveTheme(theme).ToString().ToLowerInvariant()}", new Dictionary<string, string>
             {
                 ["theme"] = ResolveTheme(theme).ToString().ToLowerInvariant(),
@@ -3482,9 +3483,7 @@ namespace SelfContainedDeployment
                 : _activeGitSnapshot.BranchName;
             DiffWorktreeText.Text = _activeGitSnapshot.WorktreePath ?? string.Empty;
             DiffSummaryText.Text = string.IsNullOrWhiteSpace(_activeGitSnapshot.Error)
-                ? (string.IsNullOrWhiteSpace(_activeGitSnapshot.DiffSummary)
-                    ? FormatGitSummary(_activeGitSnapshot.StatusSummary, totalAddedLines, totalRemovedLines)
-                    : $"{FormatGitSummary(_activeGitSnapshot.StatusSummary, totalAddedLines, totalRemovedLines)}\n{_activeGitSnapshot.DiffSummary}")
+                ? FormatGitSummary(_activeGitSnapshot.StatusSummary, totalAddedLines, totalRemovedLines)
                 : _activeGitSnapshot.Error;
             PopulateDiffFileList(_activeGitSnapshot.ChangedFiles, _activeGitSnapshot.SelectedPath);
 
@@ -3524,8 +3523,8 @@ namespace SelfContainedDeployment
                 Tag = changedFile,
                 HorizontalAlignment = HorizontalAlignment.Stretch,
                 HorizontalContentAlignment = HorizontalAlignment.Stretch,
-                Padding = new Thickness(8, 6, 8, 6),
-                MinHeight = 40,
+                Padding = new Thickness(8, 4, 8, 4),
+                MinHeight = 34,
             };
             button.Click += OnDiffFileButtonClicked;
             AutomationProperties.SetName(button, changedFile.DisplayName);

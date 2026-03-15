@@ -272,19 +272,13 @@
                                                    Style="{StaticResource ShellHintTextStyle}"
                                                    Text="No working tree changes"
                                                    TextWrapping="WrapWholeWords" />
-                                        <Border Background="{ThemeResource ShellMutedSurfaceBrush}"
-                                                BorderBrush="{ThemeResource ShellBorderBrush}"
-                                                BorderThickness="1"
-                                                CornerRadius="4">
-                                            <ScrollViewer MaxHeight="244"
-                                                          VerticalScrollBarVisibility="Auto"
-                                                          HorizontalScrollBarVisibility="Disabled">
-                                                <StackPanel x:Name="DiffFileListPanel"
-                                                            AutomationProperties.AutomationId="shell-diff-file-list"
-                                                            Padding="4"
-                                                            Spacing="2" />
-                                            </ScrollViewer>
-                                        </Border>
+                                        <ScrollViewer MaxHeight="244"
+                                                      VerticalScrollBarVisibility="Auto"
+                                                      HorizontalScrollBarVisibility="Disabled">
+                                            <StackPanel x:Name="DiffFileListPanel"
+                                                        AutomationProperties.AutomationId="shell-diff-file-list"
+                                                        Spacing="2" />
+                                        </ScrollViewer>
                                         <TextBlock x:Name="DiffEmptyText"
                                                    Style="{StaticResource ShellHintTextStyle}"
                                                    Text="No changed files in this thread."
