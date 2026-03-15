@@ -230,6 +230,30 @@ try {
     Assert-True (($resizeEndLeadingBlanks - $resizeStartLeadingBlanks) -le 1) "Terminal pane added too many leading blank lines after resize."
     Add-Check "pane-split-resize" "$($resizeStartCols)x$($resizeStartRows) -> $($resizedSnapshot.cols)x$($resizedSnapshot.rows), leading blanks $resizeStartLeadingBlanks -> $resizeEndLeadingBlanks"
 
+    if (-not [string]::IsNullOrWhiteSpace($state.selectedDiffPath)) {
+        $openDiffPane = Invoke-AutomationPost "/action" @{
+            action = "selectDiffFile"
+            value = $state.selectedDiffPath
+        }
+        Assert-True ($openDiffPane.ok -eq $true) "selectDiffFile action failed."
+
+        $state = Wait-Until -FailureMessage "Diff pane did not become the active pane." -Condition {
+            $latestState = Invoke-AutomationGet "/state"
+            $latestProject = Get-ProjectById -State $latestState -ProjectId $latestState.projectId
+            $latestThread = Get-ThreadById -Project $latestProject -ThreadId $latestState.activeThreadId
+            $activePane = @($latestThread.panes) | Where-Object { $_.id -eq $latestState.activeTabId } | Select-Object -First 1
+            if ($null -ne $activePane -and $activePane.kind -eq "diff" -and $latestThread.layout -eq "dual") {
+                return $latestState
+            }
+
+            return $null
+        }
+        Add-Check "diff-pane" "diff pane opened for '$($state.selectedDiffPath)' in dual layout"
+    }
+
+    $activeProject = Get-ProjectById -State $state -ProjectId $state.projectId
+    $activeThread = Get-ThreadById -Project $activeProject -ThreadId $state.activeThreadId
+
     $browserTabCountBefore = @($activeThread.tabs).Count
     $newBrowserPaneResponse = Invoke-AutomationPost "/action" @{ action = "newBrowserPane" }
     Assert-True ($newBrowserPaneResponse.ok -eq $true) "newBrowserPane action failed."

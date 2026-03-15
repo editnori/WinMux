@@ -580,6 +580,7 @@ namespace SelfContainedDeployment
                         break;
                     case "selectdifffile":
                         RefreshActiveThreadGitState(request.Value);
+                        AddOrSelectDiffPane(_activeProject, _activeThread, request.Value, _activeGitSnapshot?.SelectedDiff);
                         ShowTerminalShell();
                         break;
                     case "closetab":
@@ -880,17 +881,6 @@ namespace SelfContainedDeployment
         private void OnRefreshDiffClicked(object sender, RoutedEventArgs e)
         {
             QueueActiveThreadGitRefresh();
-        }
-
-        private void OnDiffFileSelectionChanged(object sender, SelectionChangedEventArgs e)
-        {
-            GitChangedFile changedFile = ResolveSelectedDiffFile(sender is ListView view ? view.SelectedItem : null);
-            if (_activeGitSnapshot is null || changedFile is null)
-            {
-                return;
-            }
-
-            QueueActiveThreadGitRefresh(changedFile.Path);
         }
 
         private void OnDiffFileButtonClicked(object sender, RoutedEventArgs e)
@@ -1366,10 +1356,7 @@ namespace SelfContainedDeployment
             thread.SelectedPaneId = pane.Id;
             project.SelectedThreadId = thread.Id;
 
-            if (thread.LayoutPreset == WorkspaceLayoutPreset.Solo)
-            {
-                thread.LayoutPreset = WorkspaceLayoutPreset.Dual;
-            }
+            thread.LayoutPreset = WorkspaceLayoutPreset.Dual;
 
             if (thread == _activeThread)
             {
@@ -4959,7 +4946,7 @@ namespace SelfContainedDeployment
         {
             if (string.IsNullOrWhiteSpace(diffPath))
             {
-                return "Diff";
+                return "Patch";
             }
 
             string trimmed = diffPath.Replace('\\', '/').TrimEnd('/');
@@ -4967,7 +4954,7 @@ namespace SelfContainedDeployment
             string fileName = slashIndex >= 0 && slashIndex < trimmed.Length - 1
                 ? trimmed[(slashIndex + 1)..]
                 : trimmed;
-            return $"Diff {fileName}";
+            return fileName;
         }
 
         private static string FormatTabHeader(string title, WorkspacePaneKind kind = WorkspacePaneKind.Terminal, bool exited = false)

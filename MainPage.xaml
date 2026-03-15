@@ -265,9 +265,7 @@
                                                    TextWrapping="WrapWholeWords" />
                                     </StackPanel>
 
-                                    <StackPanel Spacing="4">
-                                        <TextBlock Text="CHANGES"
-                                                   Style="{StaticResource ShellInspectorLabelTextStyle}" />
+                                    <StackPanel Spacing="6">
                                         <TextBlock x:Name="DiffSummaryText"
                                                    AutomationProperties.AutomationId="shell-diff-summary"
                                                    Style="{StaticResource ShellHintTextStyle}"
