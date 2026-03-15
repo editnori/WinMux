@@ -245,12 +245,33 @@ namespace SelfContainedDeployment.Shell
         private static string BuildWslLaunchCommand(string projectPath)
         {
             string normalizedPath = NormalizeProjectPath(projectPath);
-            if (TryParseWslSharePath(normalizedPath, out WslSharePath wslSharePath))
+            string automationPort = Environment.GetEnvironmentVariable("NATIVE_TERMINAL_AUTOMATION_PORT");
+            if (string.IsNullOrWhiteSpace(automationPort))
             {
-                return $"wsl.exe --distribution {wslSharePath.DistroName} --cd \"{wslSharePath.LinuxPath}\"";
+                automationPort = "9331";
             }
 
-            return $"wsl.exe --cd \"{ResolveDisplayPath(normalizedPath, ShellProfileIds.Wsl)}\"";
+            string repoRoot = NormalizeProjectPath(Environment.CurrentDirectory);
+            string repoRootWsl = ResolveDisplayPath(repoRoot, ShellProfileIds.Wsl);
+            string bootstrapScript =
+                $"export WINMUX_BROWSER_PROFILE_MODE=shared; " +
+                $"export WINMUX_AUTOMATION_PORT={automationPort}; " +
+                $"export WINMUX_REPO_ROOT=\"{repoRootWsl}\"; " +
+                "export WINMUX_BROWSER_BRIDGE=\"$WINMUX_REPO_ROOT/tools/winmux_browser_bridge.py\"; " +
+                "winmux_host=$(awk \"/nameserver/{print \\$2; exit}\" /etc/resolv.conf); " +
+                "[ -n \"$winmux_host\" ] || winmux_host=127.0.0.1; " +
+                "export WINMUX_AUTOMATION_URL=\"http://$winmux_host:$WINMUX_AUTOMATION_PORT\"; " +
+                "export WINMUX_BROWSER_STATE_URL=\"$WINMUX_AUTOMATION_URL/browser-state\"; " +
+                "export WINMUX_BROWSER_EVAL_URL=\"$WINMUX_AUTOMATION_URL/browser-eval\"; " +
+                "export WINMUX_BROWSER_SCREENSHOT_URL=\"$WINMUX_AUTOMATION_URL/browser-screenshot\"; " +
+                "exec \"${SHELL:-bash}\" -l";
+
+            if (TryParseWslSharePath(normalizedPath, out WslSharePath wslSharePath))
+            {
+                return $"wsl.exe --distribution {wslSharePath.DistroName} --cd \"{wslSharePath.LinuxPath}\" sh -lc '{bootstrapScript}'";
+            }
+
+            return $"wsl.exe --cd \"{ResolveDisplayPath(normalizedPath, ShellProfileIds.Wsl)}\" sh -lc '{bootstrapScript}'";
         }
 
         private static bool TryParseWslSharePath(string path, out WslSharePath wslSharePath)

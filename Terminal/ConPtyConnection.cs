@@ -175,6 +175,49 @@ namespace SelfContainedDeployment.Terminal
             Environment.SetEnvironmentVariable("TERM_PROGRAM_VERSION", "0.1");
             Environment.SetEnvironmentVariable("COLORTERM", "truecolor");
             Environment.SetEnvironmentVariable("TERM", "xterm-256color");
+
+            string automationPort = Environment.GetEnvironmentVariable("NATIVE_TERMINAL_AUTOMATION_PORT");
+            if (!string.IsNullOrWhiteSpace(automationPort))
+            {
+                string baseUrl = $"http://127.0.0.1:{automationPort}";
+                Environment.SetEnvironmentVariable("WINMUX_AUTOMATION_URL", baseUrl);
+                Environment.SetEnvironmentVariable("WINMUX_BROWSER_STATE_URL", $"{baseUrl}/browser-state");
+                Environment.SetEnvironmentVariable("WINMUX_BROWSER_EVAL_URL", $"{baseUrl}/browser-eval");
+                Environment.SetEnvironmentVariable("WINMUX_BROWSER_SCREENSHOT_URL", $"{baseUrl}/browser-screenshot");
+            }
+
+            Environment.SetEnvironmentVariable("WINMUX_BROWSER_PROFILE_MODE", "shared");
+            Environment.SetEnvironmentVariable("WINMUX_REPO_ROOT", Environment.CurrentDirectory);
+            IncludeWslEnvironmentVariable("WINMUX_BROWSER_PROFILE_MODE/u");
+            IncludeWslEnvironmentVariable("WINMUX_AUTOMATION_URL/u");
+            IncludeWslEnvironmentVariable("WINMUX_BROWSER_STATE_URL/u");
+            IncludeWslEnvironmentVariable("WINMUX_BROWSER_EVAL_URL/u");
+            IncludeWslEnvironmentVariable("WINMUX_BROWSER_SCREENSHOT_URL/u");
+            IncludeWslEnvironmentVariable("WINMUX_REPO_ROOT/p");
+        }
+
+        private static void IncludeWslEnvironmentVariable(string entry)
+        {
+            if (string.IsNullOrWhiteSpace(entry))
+            {
+                return;
+            }
+
+            string existing = Environment.GetEnvironmentVariable("WSLENV");
+            string[] entries = string.IsNullOrWhiteSpace(existing)
+                ? Array.Empty<string>()
+                : existing.Split(':', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+            if (Array.Exists(entries, candidate => string.Equals(candidate, entry, StringComparison.OrdinalIgnoreCase)))
+            {
+                return;
+            }
+
+            string nextValue = entries.Length == 0
+                ? entry
+                : $"{existing}:{entry}";
+
+            Environment.SetEnvironmentVariable("WSLENV", nextValue);
         }
 
         public void WriteInput(string text)

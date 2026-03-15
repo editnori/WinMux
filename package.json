@@ -35,7 +35,8 @@
     "native:demo-recording:cinematic": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-demo-recording.ps1\")\" -Mode cinematic",
     "native:new-project-recording": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-new-project-recording.ps1\")\" -KeepFrames",
     "native:tab-switch-recording": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-tab-switch-recording.ps1\")\"",
-    "native:new-tab-recording": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-new-tab-recording.ps1\")\""
+    "native:new-tab-recording": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-new-tab-recording.ps1\")\"",
+    "native:agent-browser-smoke": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-terminal-browser-smoke.ps1\")\""
   },
   "devDependencies": {
     "playwright": "^1.58.2"

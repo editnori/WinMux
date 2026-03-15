@@ -19,6 +19,9 @@ namespace SelfContainedDeployment.Panes
 {
     public sealed partial class BrowserPaneControl : UserControl
     {
+        private const string SharedBrowserProfileFolderName = "browser-profile-shared";
+        private const string LegacyBrowserProfilesFolderName = "browser-profiles";
+
         private static readonly string[] PreferredChromiumExtensionIds =
         {
             "cjpalhdlnbpafiamejdnhcphjbkeiagm", // uBlock Origin
@@ -90,7 +93,7 @@ namespace SelfContainedDeployment.Panes
         private string _currentUri;
         private string _currentTitle = "Preview";
         private ElementTheme _themePreference = ElementTheme.Default;
-        private string _profileSeedStatus = "Project-scoped browser profile";
+        private string _profileSeedStatus = "Shared WinMux browser profile";
         private string _extensionImportStatus = "No browser extensions imported yet.";
         private readonly List<BrowserExtensionSnapshot> _installedExtensions = new();
 
@@ -244,11 +247,11 @@ namespace SelfContainedDeployment.Panes
             {
                 CoreWebView2Environment environment = await GetEnvironmentAsync();
                 await BrowserView.EnsureCoreWebView2Async(environment);
-                LogBrowserEvent("webview.ready", "Browser WebView2 initialized with project-scoped profile");
+                LogBrowserEvent("webview.ready", "Browser WebView2 initialized with shared browser profile");
             }
             catch (Exception ex)
             {
-                LogBrowserEvent("webview.profile_failed", $"Project-scoped browser profile failed: {ex.Message}", new Dictionary<string, string>
+                LogBrowserEvent("webview.profile_failed", $"Shared browser profile failed: {ex.Message}", new Dictionary<string, string>
                 {
                     ["error"] = ex.Message,
                 });
@@ -485,7 +488,7 @@ namespace SelfContainedDeployment.Panes
             {
                 flyout.Items.Add(new MenuFlyoutItem
                 {
-                    Text = "No preferred extensions are available in this pane.",
+                    Text = "No preferred shared-profile extensions are available in this pane.",
                     IsEnabled = false,
                 });
             }
@@ -631,15 +634,10 @@ namespace SelfContainedDeployment.Panes
 
         private string ResolveProfileRoot()
         {
-            string profileSource = string.IsNullOrWhiteSpace(ProjectRootPath)
-                ? (string.IsNullOrWhiteSpace(ProjectPath) ? ProjectId : ProjectPath)
-                : ProjectRootPath;
-            string profileSegment = string.IsNullOrWhiteSpace(profileSource) ? "default" : BuildStableProfileKey(profileSource);
             string root = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "WinMux",
-                "browser-profiles",
-                profileSegment);
+                SharedBrowserProfileFolderName);
 
             Directory.CreateDirectory(root);
             TrySeedProfileRootFromChromium(root);
@@ -654,6 +652,11 @@ namespace SelfContainedDeployment.Panes
 
         private void TrySeedProfileRootFromChromium(string targetRoot)
         {
+            if (TryMigrateLegacyWinMuxProfile(targetRoot))
+            {
+                return;
+            }
+
             string sourceRoot = ResolveChromiumUserDataRoot();
             if (string.IsNullOrWhiteSpace(sourceRoot))
             {
@@ -672,17 +675,17 @@ namespace SelfContainedDeployment.Panes
                 {
                     eventName = summary.SkippedFiles > 0 ? "profile.seeded_partial" : "profile.seeded";
                     _profileSeedStatus = summary.SkippedFiles > 0
-                        ? $"Partially seeded from Chrome ({summary.CopiedFiles} copied, {summary.SkippedFiles} skipped)"
-                        : $"Seeded from Chrome ({summary.CopiedFiles} files copied)";
+                        ? $"Partially seeded shared browser profile from Chrome ({summary.CopiedFiles} copied, {summary.SkippedFiles} skipped)"
+                        : $"Seeded shared browser profile from Chrome ({summary.CopiedFiles} files copied)";
                 }
                 else if (summary.CopiedFiles > 0)
                 {
                     eventName = "profile.seed_repaired";
-                    _profileSeedStatus = $"Completed Chrome seed for this project ({summary.CopiedFiles} copied)";
+                    _profileSeedStatus = $"Completed Chrome seed for shared browser profile ({summary.CopiedFiles} copied)";
                 }
                 else
                 {
-                    _profileSeedStatus = "Reusing existing project browser profile";
+                    _profileSeedStatus = "Reusing shared browser profile";
                     return;
                 }
 
@@ -703,6 +706,75 @@ namespace SelfContainedDeployment.Panes
                     ["targetRoot"] = targetRoot,
                     ["error"] = ex.Message,
                 });
+            }
+        }
+
+        private bool TryMigrateLegacyWinMuxProfile(string targetRoot)
+        {
+            using IEnumerator<string> targetEntries = Directory.EnumerateFileSystemEntries(targetRoot).GetEnumerator();
+            if (targetEntries.MoveNext())
+            {
+                return false;
+            }
+
+            string legacyRoot = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "WinMux",
+                LegacyBrowserProfilesFolderName);
+
+            if (!Directory.Exists(legacyRoot))
+            {
+                return false;
+            }
+
+            string sourceProfile = Directory.GetDirectories(legacyRoot)
+                .Where(candidate => !string.Equals(Path.GetFileName(candidate), SharedBrowserProfileFolderName, StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(GetLastWriteTimeSafeUtc)
+                .FirstOrDefault(candidate => Directory.EnumerateFileSystemEntries(candidate).Any());
+
+            if (string.IsNullOrWhiteSpace(sourceProfile))
+            {
+                return false;
+            }
+
+            try
+            {
+                SeedCopySummary summary = default;
+                CopyDirectory(sourceProfile, targetRoot, ref summary, overwriteExisting: false);
+                _profileSeedStatus = summary.CopiedFiles > 0
+                    ? $"Migrated shared browser profile from legacy WinMux data ({summary.CopiedFiles} copied)"
+                    : "Reusing shared browser profile";
+
+                LogBrowserEvent("profile.migrated", $"Migrated shared browser profile from {sourceProfile}", new Dictionary<string, string>
+                {
+                    ["sourceRoot"] = sourceProfile,
+                    ["targetRoot"] = targetRoot,
+                    ["copiedFiles"] = summary.CopiedFiles.ToString(),
+                    ["skippedFiles"] = summary.SkippedFiles.ToString(),
+                });
+                return summary.CopiedFiles > 0;
+            }
+            catch (Exception ex)
+            {
+                LogBrowserEvent("profile.migration_failed", $"Failed to migrate shared browser profile from {sourceProfile}: {ex.Message}", new Dictionary<string, string>
+                {
+                    ["sourceRoot"] = sourceProfile,
+                    ["targetRoot"] = targetRoot,
+                    ["error"] = ex.Message,
+                });
+                return false;
+            }
+        }
+
+        private static DateTime GetLastWriteTimeSafeUtc(string path)
+        {
+            try
+            {
+                return Directory.GetLastWriteTimeUtc(path);
+            }
+            catch
+            {
+                return DateTime.MinValue;
             }
         }
 
@@ -1024,7 +1096,7 @@ namespace SelfContainedDeployment.Panes
   <div class="wrap">
     <div class="hero">
       <h1>{{projectName}}</h1>
-      <p>Project-scoped preview pane. Type any URL above, or open a common local dev server below.</p>
+      <p>Shared-browser preview pane. Type any URL above, or open a common local dev server below.</p>
     </div>
     <div>
       <p>Project path</p>

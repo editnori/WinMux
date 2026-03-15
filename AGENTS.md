@@ -26,7 +26,7 @@ What exists now:
 - fixed native shell layout with a dense inline sidebar and a top pane strip
 - multiple projects, each with nested threads and per-thread pane workspaces
 - terminal panes backed by `TerminalControl`
-- browser preview panes backed by `WebView2` with a built-in start page and project-aware intent
+- browser preview panes backed by `WebView2` with a built-in start page and a shared WinMux browser profile
 - editor panes backed by `TerminalControl` launching `nvim .`
 - ConPTY process bridge in C#
 - shared renderer under `Web/` hosted inside `WebView2`
@@ -38,7 +38,7 @@ What does not exist yet:
 
 - thread overview / niri-style vertical workspace navigation
 - durable workspace/session persistence
-- richer browser profile isolation beyond the current fallback path
+- true live Chrome-profile reuse and Google account sync parity inside the shared browser
 - custom pane-strip visuals and overview polish
 
 ## Important files
@@ -86,11 +86,13 @@ What does not exist yet:
 - [bun.lock](/mnt/c/Users/lqassem/native-terminal-starter/bun.lock)
 - [scripts/start-webview2-debug.ps1](/mnt/c/Users/lqassem/native-terminal-starter/scripts/start-webview2-debug.ps1)
 - [scripts/run-native-automation.ps1](/mnt/c/Users/lqassem/native-terminal-starter/scripts/run-native-automation.ps1)
+- [scripts/run-terminal-browser-smoke.ps1](/mnt/c/Users/lqassem/native-terminal-starter/scripts/run-terminal-browser-smoke.ps1)
 - [scripts/run-desktop-uia.ps1](/mnt/c/Users/lqassem/native-terminal-starter/scripts/run-desktop-uia.ps1)
 - [tools/webview2-debug-utils.mjs](/mnt/c/Users/lqassem/native-terminal-starter/tools/webview2-debug-utils.mjs)
 - [tools/webview2-targets.mjs](/mnt/c/Users/lqassem/native-terminal-starter/tools/webview2-targets.mjs)
 - [tools/webview2-screenshot.mjs](/mnt/c/Users/lqassem/native-terminal-starter/tools/webview2-screenshot.mjs)
 - [tools/webview2-eval.mjs](/mnt/c/Users/lqassem/native-terminal-starter/tools/webview2-eval.mjs)
+- [tools/winmux_browser_bridge.py](/mnt/c/Users/lqassem/native-terminal-starter/tools/winmux_browser_bridge.py)
 - [WEBVIEW2_PLAYWRIGHT.md](/mnt/c/Users/lqassem/native-terminal-starter/WEBVIEW2_PLAYWRIGHT.md)
 - [FOUNDATION_TODO.md](/mnt/c/Users/lqassem/native-terminal-starter/FOUNDATION_TODO.md)
 
@@ -109,11 +111,11 @@ What does not exist yet:
 Responsibilities:
 
 - collapsible inline sidebar via `SplitView`
-- project -> thread -> tab workspace model with per-project root paths and shell profiles
+- project -> thread -> pane workspace model with per-project root paths and shell profiles
 - top-level `TabView`
 - settings view switching
-- creating and closing terminal tabs
-- focusing the selected terminal host
+- creating, selecting, and closing pane workspaces
+- focusing the selected pane host
 
 ### Terminal process model
 
@@ -127,6 +129,7 @@ Responsibilities:
 - write terminal input to the shell
 - resize the pseudo console
 - own child process lifetime
+- expose browser-automation bridge environment variables into Windows shells and WSL shells
 
 ### Terminal UI model
 
@@ -179,6 +182,7 @@ bun run native:terminal-state
 bun run native:browser-state
 bun run native:browser-eval -- "<pane-id>" "document.title"
 bun run native:browser-screenshot -- "<pane-id>"
+bun run native:agent-browser-smoke
 bun run native:render-trace
 bun run native:recording-start -- '{"fps":24,"maxDurationMs":5000,"keepFrames":false}'
 bun run native:recording-stop
@@ -258,6 +262,7 @@ What this is good for:
 - inspecting terminal scrollback, visible rows, selection, cursor, and shell metadata
 - inspecting the real renderer inside the native app
 - inspecting browser panes through native browser-state, browser-eval, and browser-screenshot routes
+- smoke-testing terminal-side WSL agents against the shared browser automation bridge
 - CSS and JS debugging
 - capturing screenshots
 - reading live DOM state
@@ -287,12 +292,11 @@ The biggest remaining visual gap is the stock `TabView`. It is the heaviest rema
 
 ## Known limitations
 
-- The tab strip is still mostly stock WinUI.
-- No split panes yet.
+- The pane strip is still mostly stock WinUI.
 - The native title bar and shell chrome are not yet unified into a tighter single system.
 - Theme propagation is simple and not deeply modeled yet.
 - The WebView2 debug helpers currently depend on the app being launched through the provided PowerShell script.
-- Browser panes keep project-scoped WebView2 profiles even in debug mode, so terminal panes show up on the shared CDP port while browser-pane inspection should go through the native browser automation routes.
+- Browser panes use one shared WinMux WebView2 profile. That improves persistence, but it still is not the same thing as reusing the live Chrome profile or full Google Sync.
 
 ## Guardrails for future agents
 
@@ -303,3 +307,4 @@ The biggest remaining visual gap is the stock `TabView`. It is the heaviest rema
 - Prefer space efficiency over decorative chrome.
 - If you need browser-style renderer debugging, use the existing WebView2 flow before inventing a new one.
 - Prefer the built-in native automation routes before reaching for external UI automation.
+- Prefer the shared browser profile and the terminal browser bridge over introducing another legacy browser-profile mode.

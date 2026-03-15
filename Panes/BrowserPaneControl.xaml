@@ -9,21 +9,25 @@
           AutomationProperties.AutomationId="browser-pane-root"
           Background="{ThemeResource ShellPageBackgroundBrush}">
         <Grid.RowDefinitions>
-            <RowDefinition Height="36" />
+            <RowDefinition Height="42" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
         <Border Grid.Row="0"
+                Canvas.ZIndex="2"
                 Background="{ThemeResource ShellSurfaceBackgroundBrush}"
                 BorderBrush="{ThemeResource ShellBorderBrush}"
                 BorderThickness="0,0,0,1"
-                Padding="8,4,8,4">
+                Padding="8,6,8,5">
             <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto"
-                  ColumnSpacing="8">
+                  ColumnSpacing="6">
                 <Button x:Name="BrowserHomeButton"
                         AutomationProperties.AutomationId="browser-pane-home"
                         Style="{StaticResource ShellChromeButtonStyle}"
                         Click="OnHomeClicked"
+                        Width="30"
+                        Height="30"
+                        VerticalAlignment="Center"
                         ToolTipService.ToolTip="Show browser start page">
                     <FontIcon FontSize="11" Glyph="&#xE80F;" />
                 </Button>
@@ -32,6 +36,8 @@
                          Grid.Column="1"
                          AutomationProperties.AutomationId="browser-pane-address"
                          Style="{StaticResource ShellInlineTextBoxStyle}"
+                         Height="30"
+                         VerticalAlignment="Center"
                          KeyDown="OnAddressBoxKeyDown"
                          PlaceholderText="Enter a URL or localhost preview" />
 
@@ -40,6 +46,9 @@
                         AutomationProperties.AutomationId="browser-pane-pages"
                         Style="{StaticResource ShellChromeButtonStyle}"
                         Click="OnPagesClicked"
+                        Width="30"
+                        Height="30"
+                        VerticalAlignment="Center"
                         ToolTipService.ToolTip="Show page details">
                     <FontIcon FontSize="11" Glyph="&#xE8A5;" />
                 </Button>
@@ -49,6 +58,9 @@
                         AutomationProperties.AutomationId="browser-pane-extensions"
                         Style="{StaticResource ShellChromeButtonStyle}"
                         Click="OnExtensionsClicked"
+                        Width="30"
+                        Height="30"
+                        VerticalAlignment="Center"
                         ToolTipService.ToolTip="Show imported extensions">
                     <FontIcon FontSize="11" Glyph="&#xE9CE;" />
                 </Button>
@@ -58,6 +70,9 @@
                         AutomationProperties.AutomationId="browser-pane-reload"
                         Style="{StaticResource ShellChromeButtonStyle}"
                         Click="OnReloadClicked"
+                        Width="30"
+                        Height="30"
+                        VerticalAlignment="Center"
                         ToolTipService.ToolTip="Reload page">
                     <FontIcon FontSize="11" Glyph="&#xE72C;" />
                 </Button>
@@ -66,6 +81,8 @@
 
         <WebView2 x:Name="BrowserView"
                   Grid.Row="1"
+                  Margin="0,1,0,0"
+                  Canvas.ZIndex="0"
                   AutomationProperties.AutomationId="browser-pane-webview" />
     </Grid>
 </UserControl>

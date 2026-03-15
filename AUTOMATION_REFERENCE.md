@@ -53,6 +53,7 @@ bun run native:terminal-state
 bun run native:browser-state
 bun run native:browser-eval -- "<pane-id>" "document.title"
 bun run native:browser-screenshot -- "<pane-id>"
+bun run native:agent-browser-smoke
 bun run native:recording-start -- '{"fps":24,"maxDurationMs":5000,"keepFrames":false}'
 bun run native:recording-stop
 bun run native:demo-recording
@@ -105,7 +106,7 @@ Relevant payload fields:
 Notes:
 
 - `newProject` on the semantic route creates a project directly from `value` without opening the dialog.
-- `newBrowserPane` adds a project-aware preview pane to the active thread.
+- `newBrowserPane` adds a preview pane to the active thread backed by the shared WinMux browser profile.
 - `newEditorPane` adds a terminal-backed editor pane that launches `nvim .`.
 - `setLayout` accepts `1|2|3|4` or `solo|dual|triple|quad`.
 - `navigateBrowser` sends a URL to the selected browser pane; an empty `value` returns it to the built-in start page.
@@ -143,9 +144,33 @@ Request fields:
 
 Notes:
 
-- browser panes keep project-scoped WebView2 profiles even in debug mode
+- browser panes share one WinMux WebView2 profile even in debug mode
 - this means browser inspection no longer depends on the shared CDP target list
 - the preferred extension set is currently Claude plus uBlock Origin when found in the local Chromium profile
+- the profile can be seeded or repaired from local Chromium data, but it still does not imply live Chrome-profile reuse or Google Sync parity
+
+### Terminal-side browser bridge
+
+WinMux also exposes browser automation into terminal panes and WSL shells through environment variables and a small helper script.
+
+Current pieces:
+
+- `WINMUX_AUTOMATION_URL`
+- `WINMUX_BROWSER_STATE_URL`
+- `WINMUX_BROWSER_EVAL_URL`
+- `WINMUX_BROWSER_SCREENSHOT_URL`
+- `WINMUX_BROWSER_PROFILE_MODE`
+- `WINMUX_REPO_ROOT`
+- `tools/winmux_browser_bridge.py`
+
+The bridge is currently verified by:
+
+- `bun run native:agent-browser-smoke`
+
+Notes:
+
+- WSL terminal agents should use the helper bridge instead of assuming direct CDP access to browser panes
+- the helper currently supports browser-state and browser-eval style queries against the live WinMux browser pane
 
 ### Generic UI actions
 

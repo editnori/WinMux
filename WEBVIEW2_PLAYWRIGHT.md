@@ -68,6 +68,7 @@ bun run native:terminal-state
 bun run native:browser-state
 bun run native:browser-eval -- "<pane-id>" "document.title"
 bun run native:browser-screenshot -- "<pane-id>"
+bun run native:agent-browser-smoke
 bun run native:recording-start -- '{"fps":24,"maxDurationMs":5000,"keepFrames":false}'
 bun run native:recording-stop
 bun run native:demo-recording
@@ -164,7 +165,14 @@ The native automation loop covers the shell-level gaps that CDP cannot:
 - terminal inspection
 - native window screenshots
 
-Browser panes now keep their own project-scoped WebView2 profiles in debug mode instead of borrowing the terminal's shared debug profile. The tradeoff is that `webview2:targets` is now best for the terminal renderer, while browser-pane inspection should go through `native:browser-state`, `native:browser-eval`, and `native:browser-screenshot`.
+Browser panes now use one shared WinMux WebView2 profile instead of per-project profiles. That improves persistence across projects, but it still is not the same thing as reusing the live Chrome profile or full Google Sync. `webview2:targets` remains best for the terminal renderer, while browser-pane inspection should go through `native:browser-state`, `native:browser-eval`, and `native:browser-screenshot`.
+
+Terminal-side WSL agents should not assume direct CDP access to the browser pane. Use the built-in bridge instead:
+
+```bash
+bun run native:agent-browser-smoke
+python3 "$WINMUX_BROWSER_BRIDGE" state
+```
 
 ## Setup
 

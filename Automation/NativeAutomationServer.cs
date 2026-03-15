@@ -1,6 +1,7 @@
 using Microsoft.UI.Dispatching;
 using System;
 using System.Collections.Generic;
+using System.Net;
 using System.IO;
 using System.Net.Sockets;
 using System.Text;
@@ -29,7 +30,7 @@ namespace SelfContainedDeployment.Automation
         {
             _window = window;
             _port = port;
-            _listener = TcpListener.Create(port);
+            _listener = new TcpListener(IPAddress.Any, port);
             _logPath = Path.Combine(Path.GetTempPath(), "native-terminal-automation.log");
         }
 
