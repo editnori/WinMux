@@ -1424,13 +1424,15 @@ namespace SelfContainedDeployment
                             Snapshot = CreateGitSnapshotSessionSnapshot(checkpoint.Snapshot),
                         }).ToList(),
                         Panes = thread.Panes
-                            .Where(pane => !pane.IsExited)
+                            .Where(ShouldPersistPane)
                             .Select(pane => new PaneSessionSnapshot
                             {
                                 Id = pane.Id,
                                 Kind = pane.Kind.ToString().ToLowerInvariant(),
                                 Title = pane.Title,
                                 HasCustomTitle = pane.HasCustomTitle,
+                                IsExited = pane.IsExited,
+                                ReplayRestoreFailed = pane.ReplayRestoreFailed,
                                 BrowserUri = pane is BrowserPaneRecord browserPane ? browserPane.Browser.CurrentUri : null,
                                 SelectedBrowserTabId = pane is BrowserPaneRecord browserPaneState ? browserPaneState.Browser.SelectedTabId : null,
                                 BrowserTabs = pane is BrowserPaneRecord browserPaneTabs
@@ -1450,6 +1452,11 @@ namespace SelfContainedDeployment
                     }).ToList(),
                 }).ToList(),
             };
+        }
+
+        private static bool ShouldPersistPane(WorkspacePaneRecord pane)
+        {
+            return pane is not null && (!pane.IsExited || pane.PersistExitedState);
         }
 
         private static GitSnapshotSessionSnapshot CreateGitSnapshotSessionSnapshot(GitThreadSnapshot snapshot)
@@ -1636,10 +1643,23 @@ namespace SelfContainedDeployment
 
                         foreach (PaneSessionSnapshot paneSnapshot in threadSnapshot.Panes ?? new List<PaneSessionSnapshot>())
                         {
-                            WorkspacePaneRecord pane = RestorePaneFromSnapshot(project, thread, paneSnapshot);
-                            if (pane is not null)
+                            try
                             {
-                                thread.Panes.Add(pane);
+                                WorkspacePaneRecord pane = RestorePaneFromSnapshot(project, thread, paneSnapshot);
+                                if (pane is not null)
+                                {
+                                    thread.Panes.Add(pane);
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                LogAutomationEvent("shell", "workspace.restore_pane_failed", $"Could not restore pane {paneSnapshot.Id}: {ex.Message}", new Dictionary<string, string>
+                                {
+                                    ["projectId"] = project.Id,
+                                    ["threadId"] = thread.Id,
+                                    ["paneId"] = paneSnapshot.Id ?? string.Empty,
+                                    ["paneKind"] = paneSnapshot.Kind ?? string.Empty,
+                                });
                             }
                         }
 
@@ -1681,6 +1701,7 @@ namespace SelfContainedDeployment
                 ShellSplitView.IsPaneOpen = snapshot.PaneOpen;
                 _inspectorOpen = snapshot.InspectorOpen;
                 _showingSettings = string.Equals(snapshot.ActiveView, "settings", StringComparison.OrdinalIgnoreCase);
+                _showingOverview = string.Equals(snapshot.ActiveView, "overview", StringComparison.OrdinalIgnoreCase);
                 RefreshProjectTree();
                 RefreshTabView();
                 UpdateInspectorVisibility();
@@ -2075,7 +2096,16 @@ namespace SelfContainedDeployment
             }
         }
 
-        private TerminalPaneRecord CreateTerminalPane(WorkspaceProject project, WorkspaceThread thread, WorkspacePaneKind kind, string startupInput, string initialTitle, string paneId = null)
+        private TerminalPaneRecord CreateTerminalPane(
+            WorkspaceProject project,
+            WorkspaceThread thread,
+            WorkspacePaneKind kind,
+            string startupInput,
+            string initialTitle,
+            string paneId = null,
+            string restoreReplayCommand = null,
+            bool autoStartSession = true,
+            string suspendedStatusText = null)
         {
             string threadRootPath = ResolveThreadRootPath(project, thread);
             TerminalControl terminal = new()
@@ -2086,6 +2116,9 @@ namespace SelfContainedDeployment
                 ShellCommand = ShellProfiles.BuildLaunchCommand(project.ShellProfileId, threadRootPath),
                 LaunchEnvironment = BuildTerminalLaunchEnvironment(project, thread, threadRootPath),
                 StartupInput = startupInput,
+                RestoreReplayCommand = restoreReplayCommand,
+                AutoStartSession = autoStartSession,
+                SuspendedStatusText = suspendedStatusText,
             };
 
             terminal.ApplyTheme(ResolveTheme(SampleConfig.CurrentTheme));
@@ -2119,15 +2152,36 @@ namespace SelfContainedDeployment
                 pane.ReplayCommand = terminal.ReplayCommand;
                 QueueSessionSave();
             };
+            terminal.ReplayRestoreStateChanged += (_, _) =>
+            {
+                pane.ReplayRestorePending = terminal.ReplayRestorePending;
+                pane.ReplayRestoreFailed = terminal.ReplayRestoreFailed;
+                pane.PersistExitedState = terminal.ReplayRestoreFailed;
+                if (!terminal.ReplayRestorePending && !terminal.ReplayRestoreFailed)
+                {
+                    pane.MarkReplayRestoreSucceeded();
+                }
+
+                UpdateTabViewItem(pane);
+                QueueSessionSave();
+            };
             terminal.SessionExited += (_, _) =>
             {
                 pane.MarkExited();
+                pane.ReplayRestorePending = false;
+                pane.ReplayRestoreFailed = terminal.ReplayRestoreFailed;
+                pane.PersistExitedState = terminal.ReplayRestoreFailed;
+                if (terminal.ReplayRestoreFailed)
+                {
+                    pane.MarkReplayRestoreFailed();
+                }
                 LogAutomationEvent("terminal", "session.exited", $"Terminal exited for pane {pane.Id}", new Dictionary<string, string>
                 {
                     ["paneId"] = pane.Id,
                     ["threadId"] = thread.Id,
                     ["projectId"] = project.Id,
                     ["paneKind"] = pane.Kind.ToString().ToLowerInvariant(),
+                    ["replayRestoreFailed"] = terminal.ReplayRestoreFailed.ToString(),
                 });
                 if (thread == _activeThread)
                 {
@@ -2179,13 +2233,35 @@ namespace SelfContainedDeployment
                 "browser" => CreateBrowserPane(project, thread, snapshot.BrowserUri, string.IsNullOrWhiteSpace(snapshot.Title) ? "Preview" : snapshot.Title, snapshot.Id),
                 "diff" => CreateDiffPane(project, thread, snapshot.DiffPath, diffText: null, string.IsNullOrWhiteSpace(snapshot.Title) ? BuildDiffPaneTitle(snapshot.DiffPath) : snapshot.Title, snapshot.Id),
                 "editor" => CreateTerminalPane(project, thread, WorkspacePaneKind.Editor, "nvim .\r", string.IsNullOrWhiteSpace(snapshot.Title) ? "Editor" : snapshot.Title, snapshot.Id),
-                _ => CreateTerminalPane(project, thread, WorkspacePaneKind.Terminal, BuildReplayStartupInput(snapshot), string.IsNullOrWhiteSpace(snapshot.Title) ? FormatThreadPath(project, thread) : snapshot.Title, snapshot.Id),
+                _ => CreateTerminalPane(
+                    project,
+                    thread,
+                    WorkspacePaneKind.Terminal,
+                    startupInput: null,
+                    initialTitle: string.IsNullOrWhiteSpace(snapshot.Title) ? FormatThreadPath(project, thread) : snapshot.Title,
+                    paneId: snapshot.Id,
+                    restoreReplayCommand: snapshot.IsExited ? null : snapshot.ReplayCommand,
+                    autoStartSession: !snapshot.IsExited,
+                    suspendedStatusText: snapshot.IsExited && snapshot.ReplayRestoreFailed
+                        ? "Replay restore failed last time. Close the tab or reopen the saved session manually."
+                        : null),
             };
 
             pane.HasCustomTitle = snapshot.HasCustomTitle;
             pane.ReplayTool = snapshot.ReplayTool;
             pane.ReplaySessionId = snapshot.ReplaySessionId;
             pane.ReplayCommand = snapshot.ReplayCommand;
+            pane.RestoredFromSession = true;
+            pane.ReplayRestoreFailed = snapshot.ReplayRestoreFailed;
+            pane.PersistExitedState = snapshot.IsExited && snapshot.ReplayRestoreFailed;
+            if (snapshot.IsExited && pane is TerminalPaneRecord exitedPane)
+            {
+                exitedPane.MarkExited();
+            }
+            else if (!string.IsNullOrWhiteSpace(snapshot.ReplayCommand) && pane is TerminalPaneRecord replayPane)
+            {
+                replayPane.MarkReplayRestorePending();
+            }
             if (pane is BrowserPaneRecord browserPane && snapshot.BrowserTabs?.Count > 0)
             {
                 browserPane.Browser.RestoreTabSession(
@@ -2215,18 +2291,6 @@ namespace SelfContainedDeployment
             DiffPaneRecord pane = CreateDiffPane(project, thread, thread.SelectedDiffPath, diffText: null, BuildDiffPaneTitle(thread.SelectedDiffPath));
             thread.Panes.Add(pane);
             PromoteLayoutForPaneCount(thread);
-        }
-
-        private static string BuildReplayStartupInput(PaneSessionSnapshot snapshot)
-        {
-            if (snapshot is null || string.IsNullOrWhiteSpace(snapshot.ReplayCommand))
-            {
-                return null;
-            }
-
-            return snapshot.ReplayCommand.EndsWith("\r", StringComparison.Ordinal)
-                ? snapshot.ReplayCommand
-                : snapshot.ReplayCommand + "\r";
         }
 
         private void AttachPaneInteraction(WorkspaceProject project, WorkspaceThread thread, WorkspacePaneRecord pane)

@@ -26,6 +26,7 @@ This is the current feature inventory for the native WinMux shell as it exists i
 - Editor pane mode backed by terminal launch of `nvim .`
 - Replay metadata capture for Codex and Claude resume commands
 - Session restore that can replay stored resume commands on relaunch
+- Failed restored replay panes stay in the workspace as ended tabs instead of disappearing on the next autosave
 
 ## Browser
 

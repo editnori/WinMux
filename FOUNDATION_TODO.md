@@ -29,3 +29,4 @@ This pass is about making the app operable and debuggable before more UI work la
 - [x] Add persistence so projects, threads, profiles, and selected tabs survive relaunch.
 - [x] Add thread baselines and manual checkpoints for diff review.
 - [x] Add a first-pass thread overview surface inside the shell workspace.
+- [x] Stop failed restored replay panes from being pruned out of saved sessions.

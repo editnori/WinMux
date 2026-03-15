@@ -37,6 +37,9 @@ namespace SelfContainedDeployment.Terminal
         private bool _started;
         private bool _disposed;
         private bool _startupInputSent;
+        private bool _replayRestoreInputSent;
+        private bool _replayRestorePending;
+        private bool _replayRestoreFailed;
         private int _cols = 120;
         private int _rows = 32;
         private int _lastLoggedResizeCols;
@@ -47,9 +50,11 @@ namespace SelfContainedDeployment.Terminal
         private readonly StringBuilder _inputLineBuffer = new();
         private readonly Dictionary<string, TaskCompletionSource<NativeAutomationTerminalSnapshot>> _inspectionRequests = new();
         private readonly DispatcherQueueTimer _fitTimer;
+        private readonly DispatcherQueueTimer _replayRestoreTimer;
         private string _replayTool;
         private string _replaySessionId;
         private string _replayCommand;
+        private string _restoreReplayCommand;
         private string _toolLaunchArguments;
 
         public event EventHandler<string> SessionTitleChanged;
@@ -57,6 +62,7 @@ namespace SelfContainedDeployment.Terminal
         public event EventHandler SessionExited;
         public event EventHandler InteractionRequested;
         public event EventHandler ReplayStateChanged;
+        public event EventHandler ReplayRestoreStateChanged;
 
         public TerminalControl()
         {
@@ -69,6 +75,10 @@ namespace SelfContainedDeployment.Terminal
             _fitTimer.IsRepeating = false;
             _fitTimer.Interval = TimeSpan.FromMilliseconds(45);
             _fitTimer.Tick += OnFitTimerTick;
+            _replayRestoreTimer = DispatcherQueue.CreateTimer();
+            _replayRestoreTimer.IsRepeating = false;
+            _replayRestoreTimer.Interval = TimeSpan.FromSeconds(4);
+            _replayRestoreTimer.Tick += OnReplayRestoreTimerTick;
             ApplyBackgroundColor();
             UpdateStartupMask();
         }
@@ -85,6 +95,16 @@ namespace SelfContainedDeployment.Terminal
 
         public string StartupInput { get; set; }
 
+        public string RestoreReplayCommand
+        {
+            get => _restoreReplayCommand;
+            set => _restoreReplayCommand = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+        }
+
+        public bool AutoStartSession { get; set; } = true;
+
+        public string SuspendedStatusText { get; set; }
+
         public string SessionTitle => _sessionTitle;
 
         public string InitialTitleHint => GetInitialTitle();
@@ -94,6 +114,10 @@ namespace SelfContainedDeployment.Terminal
         public string ReplaySessionId => _replaySessionId;
 
         public string ReplayCommand => _replayCommand;
+
+        public bool ReplayRestorePending => _replayRestorePending;
+
+        public bool ReplayRestoreFailed => _replayRestoreFailed;
 
         private void LogTerminalEvent(string name, string message = null, IReadOnlyDictionary<string, string> data = null)
         {
@@ -238,7 +262,14 @@ namespace SelfContainedDeployment.Terminal
                     ApplyBackgroundColor();
                     PostCurrentTheme();
                     RendererReady?.Invoke(this, EventArgs.Empty);
-                    EnsureStarted();
+                    if (AutoStartSession)
+                    {
+                        EnsureStarted();
+                    }
+                    else
+                    {
+                        ShowSuspendedState();
+                    }
                     break;
                 case "resize":
                     _cols = Math.Max(1, message.Cols);
@@ -268,7 +299,10 @@ namespace SelfContainedDeployment.Terminal
                     }
                     else
                     {
-                        EnsureStarted();
+                        if (AutoStartSession)
+                        {
+                            EnsureStarted();
+                        }
                     }
 
                     break;
@@ -307,7 +341,7 @@ namespace SelfContainedDeployment.Terminal
 
         private void EnsureStarted()
         {
-            if (_started || !_rendererReady || _disposed)
+            if (_started || !_rendererReady || _disposed || !AutoStartSession)
             {
                 return;
             }
@@ -334,6 +368,7 @@ namespace SelfContainedDeployment.Terminal
                 PostMessage(new HostMessage { Type = "setTitle", Title = initialTitle });
                 PostMessage(new HostMessage { Type = "focus" });
                 TrySendStartupInput();
+                TrySendReplayRestoreCommand();
             }
             catch (Exception ex)
             {
@@ -358,6 +393,13 @@ namespace SelfContainedDeployment.Terminal
                 {
                     HideStartupMask();
                 }
+
+                 if (_replayRestorePending && _connection?.IsRunning == true)
+                 {
+                     _replayRestoreTimer.Stop();
+                     _replayRestoreTimer.Start();
+                 }
+
                 PostMessage(new HostMessage { Type = "output", Data = text });
                 HideStatus();
             });
@@ -373,7 +415,23 @@ namespace SelfContainedDeployment.Terminal
                 }
 
                 PostMessage(new HostMessage { Type = "exit", Text = "Shell exited. Close the tab or open a new one." });
-                ShowStatus("Shell exited", keepVisible: true);
+                if (_replayRestorePending)
+                {
+                    _replayRestorePending = false;
+                    _replayRestoreFailed = true;
+                    _replayRestoreTimer.Stop();
+                    ReplayRestoreStateChanged?.Invoke(this, EventArgs.Empty);
+                    ShowStatus("Replay restore failed. Close the tab or relaunch the saved session.", keepVisible: true);
+                    LogTerminalEvent("replay.restore_failed", "Saved replay command exited before the restore could settle", new Dictionary<string, string>
+                    {
+                        ["replayCommand"] = _restoreReplayCommand ?? string.Empty,
+                    });
+                }
+                else
+                {
+                    ShowStatus("Shell exited", keepVisible: true);
+                }
+
                 LogTerminalEvent("session.exited", "ConPTY session exited");
                 SessionExited?.Invoke(this, EventArgs.Empty);
             });
@@ -428,6 +486,57 @@ namespace SelfContainedDeployment.Terminal
             {
                 ["length"] = StartupInput.Length.ToString(),
             });
+        }
+
+        private void TrySendReplayRestoreCommand()
+        {
+            if (_replayRestoreInputSent || string.IsNullOrWhiteSpace(_restoreReplayCommand))
+            {
+                return;
+            }
+
+            string command = _restoreReplayCommand.EndsWith("\r", StringComparison.Ordinal)
+                ? _restoreReplayCommand
+                : _restoreReplayCommand + "\r";
+            _connection?.WriteInput(command);
+            TrackInput(command);
+            _replayRestoreInputSent = true;
+            _replayRestorePending = true;
+            _replayRestoreFailed = false;
+            _replayRestoreTimer.Stop();
+            _replayRestoreTimer.Start();
+            ReplayRestoreStateChanged?.Invoke(this, EventArgs.Empty);
+            LogTerminalEvent("replay.restore_started", "Sent saved replay command to restored terminal", new Dictionary<string, string>
+            {
+                ["replayCommand"] = _restoreReplayCommand,
+            });
+        }
+
+        private void OnReplayRestoreTimerTick(DispatcherQueueTimer sender, object args)
+        {
+            _replayRestoreTimer.Stop();
+            if (!_replayRestorePending)
+            {
+                return;
+            }
+
+            _replayRestorePending = false;
+            _replayRestoreFailed = false;
+            ReplayRestoreStateChanged?.Invoke(this, EventArgs.Empty);
+            LogTerminalEvent("replay.restore_confirmed", "Saved replay command survived the restore grace window", new Dictionary<string, string>
+            {
+                ["replayCommand"] = _restoreReplayCommand ?? string.Empty,
+            });
+        }
+
+        private void ShowSuspendedState()
+        {
+            UpdateStartupMask();
+            ShowStatus(string.IsNullOrWhiteSpace(SuspendedStatusText) ? "Session ended" : SuspendedStatusText, keepVisible: true);
+            if (StartupMask is not null)
+            {
+                StartupMask.Visibility = Visibility.Visible;
+            }
         }
 
         private static void CopySelectionToClipboard(string text)
@@ -519,6 +628,8 @@ namespace SelfContainedDeployment.Terminal
             }
 
             _disposed = true;
+            _replayRestoreTimer.Stop();
+            _fitTimer.Stop();
 
             try
             {
@@ -983,12 +1094,22 @@ namespace SelfContainedDeployment.Terminal
                     detail = "Preparing terminal host…";
                 }
 
+                if (!AutoStartSession && !string.IsNullOrWhiteSpace(SuspendedStatusText))
+                {
+                    detail = SuspendedStatusText;
+                }
+
                 StartupDetailText.Text = detail;
             }
         }
 
         private string ResolveStartupTitle()
         {
+            if (!AutoStartSession)
+            {
+                return "Session ended";
+            }
+
             string command = ShellCommand ?? string.Empty;
             if (command.Contains("wsl.exe", StringComparison.OrdinalIgnoreCase))
             {

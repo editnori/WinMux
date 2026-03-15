@@ -30,6 +30,7 @@ What exists now:
 - a first-pass vertical thread overview surface for the active project
 - the left project rail now expands only the active project's thread list to keep large workspaces responsive
 - autosaved workspace/session replay across app relaunches
+- restored terminal replay now uses an explicit replay-restore path and preserves failed restored panes instead of silently dropping them from the next save
 - terminal panes backed by `TerminalControl`
 - browser panes backed by `WebView2` with a built-in start page, lightweight in-pane tabs, and a shared WinMux browser profile
 - imported browser-password CSV support backed by a WinMux-encrypted credential store

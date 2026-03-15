@@ -135,6 +135,10 @@ namespace SelfContainedDeployment.Persistence
 
         public bool HasCustomTitle { get; set; }
 
+        public bool IsExited { get; set; }
+
+        public bool ReplayRestoreFailed { get; set; }
+
         public string BrowserUri { get; set; }
 
         public string SelectedBrowserTabId { get; set; }
@@ -175,13 +179,14 @@ namespace SelfContainedDeployment.Persistence
         {
             try
             {
-                if (!File.Exists(SessionPath))
+                string loadPath = ResolveLoadPath();
+                if (!File.Exists(loadPath))
                 {
                     error = null;
                     return null;
                 }
 
-                string json = File.ReadAllText(SessionPath);
+                string json = File.ReadAllText(loadPath);
                 error = null;
                 return JsonSerializer.Deserialize<WorkspaceSessionSnapshot>(json, JsonOptions);
             }
@@ -201,13 +206,14 @@ namespace SelfContainedDeployment.Persistence
 
             Directory.CreateDirectory(SessionDirectory);
             string tempPath = SessionPath + ".tmp";
+            string backupPath = SessionPath + ".bak";
             string json = JsonSerializer.Serialize(snapshot, JsonOptions);
             File.WriteAllText(tempPath, json);
 
             if (File.Exists(SessionPath))
             {
-                File.Copy(tempPath, SessionPath, overwrite: true);
-                File.Delete(tempPath);
+                File.Copy(SessionPath, backupPath, overwrite: true);
+                File.Replace(tempPath, SessionPath, backupPath, ignoreMetadataErrors: true);
             }
             else
             {
@@ -216,6 +222,17 @@ namespace SelfContainedDeployment.Persistence
         }
 
         public static string GetSessionPath() => SessionPath;
+
+        private static string ResolveLoadPath()
+        {
+            if (File.Exists(SessionPath))
+            {
+                return SessionPath;
+            }
+
+            string backupPath = SessionPath + ".bak";
+            return File.Exists(backupPath) ? backupPath : SessionPath;
+        }
 
         private static string ResolveSessionDirectory()
         {

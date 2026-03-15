@@ -473,6 +473,14 @@ namespace SelfContainedDeployment.Shell
 
         public string ReplayCommand { get; set; }
 
+        public bool RestoredFromSession { get; set; }
+
+        public bool ReplayRestorePending { get; set; }
+
+        public bool ReplayRestoreFailed { get; set; }
+
+        public bool PersistExitedState { get; set; }
+
         public WorkspacePaneKind Kind { get; }
 
         public virtual bool IsExited { get; protected set; }
@@ -511,6 +519,27 @@ namespace SelfContainedDeployment.Shell
         public void MarkExited()
         {
             IsExited = true;
+        }
+
+        public void MarkReplayRestorePending()
+        {
+            ReplayRestorePending = true;
+            ReplayRestoreFailed = false;
+            PersistExitedState = false;
+        }
+
+        public void MarkReplayRestoreSucceeded()
+        {
+            ReplayRestorePending = false;
+            ReplayRestoreFailed = false;
+            PersistExitedState = false;
+        }
+
+        public void MarkReplayRestoreFailed()
+        {
+            ReplayRestorePending = false;
+            ReplayRestoreFailed = true;
+            PersistExitedState = true;
         }
     }
 

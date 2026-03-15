@@ -355,7 +355,11 @@ namespace SelfContainedDeployment.Terminal
 
                     if (!_process.HasExited)
                     {
-                        _process.Kill(entireProcessTree: true);
+                        TryRequestGracefulExit();
+                        if (!_process.WaitForExit(400))
+                        {
+                            _process.Kill(entireProcessTree: true);
+                        }
                     }
 
                     _process.Dispose();
@@ -370,6 +374,23 @@ namespace SelfContainedDeployment.Terminal
             }
 
             RaiseProcessExited();
+        }
+
+        private void TryRequestGracefulExit()
+        {
+            if (_disposed || _inputWriter is null)
+            {
+                return;
+            }
+
+            try
+            {
+                _inputWriter.Write("exit\r");
+                _inputWriter.Flush();
+            }
+            catch
+            {
+            }
         }
 
         private async Task ReadOutputLoop(CancellationToken cancellationToken)
