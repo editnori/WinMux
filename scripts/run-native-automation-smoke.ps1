@@ -429,7 +429,7 @@ try {
 
     $events = Invoke-AutomationGet "/events"
     $eventNames = @($events.events | ForEach-Object { $_.name })
-    Assert-True (@($eventNames | Where-Object { $_ -eq "tab.created" }).Count -gt 0) "Expected tab.created event."
+    Assert-True (@($eventNames | Where-Object { $_ -eq "pane.created" }).Count -gt 0) "Expected pane.created event."
     Assert-True (@($eventNames | Where-Object { $_ -eq "thread.renamed" }).Count -gt 0) "Expected thread.renamed event."
     Assert-True (@($eventNames | Where-Object { $_ -eq "thread.deleted" }).Count -gt 0) "Expected thread.deleted event."
     Add-Check "event-log" "$(@($events.events).Count) event(s) captured"

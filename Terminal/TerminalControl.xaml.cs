@@ -1,5 +1,6 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.Web.WebView2.Core;
 using SelfContainedDeployment.Automation;
 using System;
 using System.Collections.Generic;
@@ -18,6 +19,8 @@ namespace SelfContainedDeployment.Terminal
         {
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         };
+        private static readonly object EnvironmentSync = new();
+        private static Task<CoreWebView2Environment> SharedEnvironmentTask;
 
         private ConPtyConnection _connection;
         private bool _rendererReady;
@@ -80,7 +83,8 @@ namespace SelfContainedDeployment.Terminal
 
             try
             {
-                await TerminalView.EnsureCoreWebView2Async();
+                CoreWebView2Environment environment = await GetEnvironmentAsync();
+                await TerminalView.EnsureCoreWebView2Async(environment);
                 TerminalView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
                 TerminalView.CoreWebView2.Settings.IsStatusBarEnabled = false;
                 TerminalView.CoreWebView2.Settings.AreDevToolsEnabled = true;
@@ -683,6 +687,33 @@ namespace SelfContainedDeployment.Terminal
             }
 
             return Path.Combine(AppContext.BaseDirectory, "Web", "terminal-host.html");
+        }
+
+        private static Task<CoreWebView2Environment> GetEnvironmentAsync()
+        {
+            lock (EnvironmentSync)
+            {
+                SharedEnvironmentTask ??= CreateEnvironmentAsync();
+                return SharedEnvironmentTask;
+            }
+        }
+
+        private static async Task<CoreWebView2Environment> CreateEnvironmentAsync()
+        {
+            string userDataFolder = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "WinMux",
+                "terminal-webview");
+            Directory.CreateDirectory(userDataFolder);
+
+            CoreWebView2EnvironmentOptions options = new();
+            string additionalArguments = Environment.GetEnvironmentVariable("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS");
+            if (!string.IsNullOrWhiteSpace(additionalArguments))
+            {
+                options.AdditionalBrowserArguments = additionalArguments;
+            }
+
+            return await CoreWebView2Environment.CreateWithOptionsAsync(null, userDataFolder, options);
         }
 
         private void PostMessage(HostMessage message)

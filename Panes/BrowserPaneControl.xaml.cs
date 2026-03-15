@@ -6,12 +6,10 @@ using SelfContainedDeployment.Automation;
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Net;
-using System.Reflection;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
-using Windows.Foundation;
 using Windows.System;
 
 namespace SelfContainedDeployment.Panes
@@ -20,6 +18,7 @@ namespace SelfContainedDeployment.Panes
     {
         private static readonly Dictionary<string, Task<CoreWebView2Environment>> EnvironmentTasks = new(StringComparer.OrdinalIgnoreCase);
         private static readonly object EnvironmentSync = new();
+        private Task _initializationTask;
         private bool _initialized;
         private bool _disposed;
         private string _currentUri;
@@ -39,6 +38,8 @@ namespace SelfContainedDeployment.Panes
         public string ProjectName { get; set; }
 
         public string ProjectPath { get; set; }
+
+        public string ProjectRootPath { get; set; }
 
         public string InitialUri { get; set; }
 
@@ -127,6 +128,30 @@ namespace SelfContainedDeployment.Panes
                 return;
             }
 
+            Task initializationTask = _initializationTask;
+            if (initializationTask is null)
+            {
+                initializationTask = InitializeBrowserAsync();
+                _initializationTask = initializationTask;
+            }
+
+            try
+            {
+                await initializationTask.ConfigureAwait(true);
+            }
+            catch
+            {
+                if (ReferenceEquals(_initializationTask, initializationTask))
+                {
+                    _initializationTask = null;
+                }
+
+                throw;
+            }
+        }
+
+        private async Task InitializeBrowserAsync()
+        {
             try
             {
                 CoreWebView2Environment environment = await GetEnvironmentAsync();
@@ -144,27 +169,98 @@ namespace SelfContainedDeployment.Panes
                 LogBrowserEvent("webview.ready", "Browser WebView2 initialized with default profile");
             }
 
-            BrowserView.CoreWebView2.Settings.AreDevToolsEnabled = true;
-            BrowserView.CoreWebView2.Settings.AreBrowserAcceleratorKeysEnabled = true;
-            BrowserView.CoreWebView2.Settings.IsStatusBarEnabled = false;
-            BrowserView.CoreWebView2.DocumentTitleChanged += OnDocumentTitleChanged;
-            BrowserView.CoreWebView2.NavigationCompleted += OnNavigationCompleted;
-            BrowserView.CoreWebView2.SourceChanged += OnSourceChanged;
-            _initialized = true;
+            await ConfigureInitializedBrowserAsync(await WaitForCoreWebView2Async().ConfigureAwait(true));
+        }
 
-            ApplyTheme(_themePreference == ElementTheme.Default ? ActualTheme : _themePreference);
+        private async Task ConfigureInitializedBrowserAsync(CoreWebView2 core)
+        {
+            try
+            {
+                if (core is null)
+                {
+                    throw new InvalidOperationException("Browser CoreWebView2 was null after initialization.");
+                }
 
-            if (string.IsNullOrWhiteSpace(InitialUri))
-            {
-                await NavigateToStartPageAsync();
+                LogBrowserEvent("webview.configure", "Configuring browser pane settings", new Dictionary<string, string>
+                {
+                    ["step"] = "settings.begin",
+                });
+                core.Settings.AreDevToolsEnabled = true;
+                core.Settings.AreBrowserAcceleratorKeysEnabled = true;
+                core.Settings.IsStatusBarEnabled = false;
+                LogBrowserEvent("webview.configure", "Configured basic browser settings", new Dictionary<string, string>
+                {
+                    ["step"] = "settings.basic",
+                });
+                core.Settings.IsPasswordAutosaveEnabled = true;
+                LogBrowserEvent("webview.configure", "Enabled browser password autosave", new Dictionary<string, string>
+                {
+                    ["step"] = "settings.passwordAutosave",
+                });
+                core.Settings.IsGeneralAutofillEnabled = true;
+                LogBrowserEvent("webview.configure", "Enabled browser general autofill", new Dictionary<string, string>
+                {
+                    ["step"] = "settings.generalAutofill",
+                });
+                core.DocumentTitleChanged += OnDocumentTitleChanged;
+                core.NavigationCompleted += OnNavigationCompleted;
+                core.SourceChanged += OnSourceChanged;
+                _initialized = true;
+                LogBrowserEvent("webview.configure", "Attached browser event handlers", new Dictionary<string, string>
+                {
+                    ["step"] = "events.attached",
+                });
+
+                ApplyTheme(_themePreference == ElementTheme.Default ? ActualTheme : _themePreference);
+                LogBrowserEvent("webview.configure", "Applied browser theme", new Dictionary<string, string>
+                {
+                    ["step"] = "theme.applied",
+                });
+
+                if (string.IsNullOrWhiteSpace(InitialUri))
+                {
+                    LogBrowserEvent("webview.configure", "Navigating to browser start page", new Dictionary<string, string>
+                    {
+                        ["step"] = "navigate.startPage",
+                    });
+                    await NavigateToStartPageAsync();
+                }
+                else
+                {
+                    string initialUri = NormalizeUri(InitialUri);
+                    AddressBox.Text = initialUri;
+                    LogBrowserEvent("webview.configure", $"Navigating browser pane to {initialUri}", new Dictionary<string, string>
+                    {
+                        ["step"] = "navigate.initialUri",
+                        ["uri"] = initialUri,
+                    });
+                    core.Navigate(initialUri);
+                    LogBrowserEvent("navigate.requested", $"Navigating browser pane to {initialUri}");
+                }
             }
-            else
+            catch (Exception ex)
             {
-                string initialUri = NormalizeUri(InitialUri);
-                AddressBox.Text = initialUri;
-                BrowserView.CoreWebView2.Navigate(initialUri);
-                LogBrowserEvent("navigate.requested", $"Navigating browser pane to {initialUri}");
+                LogBrowserEvent("webview.init_failed", $"Browser pane post-init failed: {ex.Message}", new Dictionary<string, string>
+                {
+                    ["error"] = ex.ToString(),
+                });
+                throw;
             }
+        }
+
+        private async Task<CoreWebView2> WaitForCoreWebView2Async()
+        {
+            for (int attempt = 0; attempt < 20; attempt++)
+            {
+                if (BrowserView.CoreWebView2 is not null)
+                {
+                    return BrowserView.CoreWebView2;
+                }
+
+                await Task.Delay(50).ConfigureAwait(true);
+            }
+
+            throw new InvalidOperationException("Browser CoreWebView2 was null after initialization.");
         }
 
         private async void OnLoaded(object sender, RoutedEventArgs e)
@@ -304,38 +400,22 @@ namespace SelfContainedDeployment.Panes
 
         private static async Task<CoreWebView2Environment> CreateEnvironmentAsync(string userDataFolder)
         {
-            MethodInfo createAsync = typeof(CoreWebView2Environment).GetMethods(BindingFlags.Public | BindingFlags.Static)
-                .First(method => string.Equals(method.Name, "CreateAsync", StringComparison.Ordinal));
-
-            ParameterInfo[] parameters = createAsync.GetParameters();
-            object[] arguments = parameters.Length switch
+            CoreWebView2EnvironmentOptions options = new();
+            string additionalArguments = Environment.GetEnvironmentVariable("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS");
+            if (!string.IsNullOrWhiteSpace(additionalArguments))
             {
-                3 => new object[] { null, userDataFolder, null },
-                2 => new object[] { null, userDataFolder },
-                1 => new object[] { userDataFolder },
-                _ => Array.Empty<object>(),
-            };
-
-            object taskObject = createAsync.Invoke(null, arguments);
-            if (taskObject is Task<CoreWebView2Environment> directTask)
-            {
-                return await directTask.ConfigureAwait(true);
+                options.AdditionalBrowserArguments = additionalArguments;
             }
 
-            if (taskObject is IAsyncOperation<CoreWebView2Environment> winRtOperation)
-            {
-                return await winRtOperation;
-            }
-
-            Task task = (Task)taskObject;
-            await task.ConfigureAwait(true);
-            PropertyInfo resultProperty = task.GetType().GetProperty("Result");
-            return (CoreWebView2Environment)resultProperty.GetValue(task);
+            return await CoreWebView2Environment.CreateWithOptionsAsync(null, userDataFolder, options);
         }
 
         private string ResolveProfileRoot()
         {
-            string profileSegment = string.IsNullOrWhiteSpace(ProjectId) ? "default" : ProjectId;
+            string profileSource = string.IsNullOrWhiteSpace(ProjectRootPath)
+                ? (string.IsNullOrWhiteSpace(ProjectPath) ? ProjectId : ProjectPath)
+                : ProjectRootPath;
+            string profileSegment = string.IsNullOrWhiteSpace(profileSource) ? "default" : BuildStableProfileKey(profileSource);
             string root = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "WinMux",
@@ -344,6 +424,12 @@ namespace SelfContainedDeployment.Panes
 
             Directory.CreateDirectory(root);
             return root;
+        }
+
+        private static string BuildStableProfileKey(string value)
+        {
+            byte[] bytes = SHA256.HashData(Encoding.UTF8.GetBytes(value.Trim().ToLowerInvariant()));
+            return Convert.ToHexString(bytes[..16]).ToLowerInvariant();
         }
 
         private string BuildStartPageHtml()

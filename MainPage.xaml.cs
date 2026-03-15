@@ -726,6 +726,7 @@ namespace SelfContainedDeployment
                 ProjectId = project.Id,
                 ProjectName = project.Name,
                 ProjectPath = FormatProjectPath(project),
+                ProjectRootPath = project.RootPath,
                 InitialUri = initialUri,
             };
             browser.ApplyTheme(ResolveTheme(SampleConfig.CurrentTheme));
