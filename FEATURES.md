@@ -22,6 +22,7 @@ This is the current feature inventory for the native WinMux shell as it exists i
 - WSL, PowerShell, and Command Prompt shell profile support
 - Per-pane terminal launch environment overrides for thread/project context
 - WebView2-hosted terminal renderer using the shared `Web/terminal-host.*` frontend
+- Hardened renderer startup handshake so fresh WSL tabs cannot miss the initial renderer `ready` signal
 - Theme propagation into the terminal renderer
 - Editor pane mode backed by terminal launch of `nvim .`
 - Replay metadata capture for Codex and Claude resume commands
@@ -60,11 +61,12 @@ This is the current feature inventory for the native WinMux shell as it exists i
 ## Automation and QA
 
 - Native automation server with shell state, UI tree, UI actions, desktop actions, terminal state, browser state, diff state, screenshots, render traces, recordings, and event logs
+- Terminal-state snapshots expose live/exited/startup/status metadata so smoke scripts can distinguish live shells from ended panes
 - Annotated native screenshots with element refs
 - Desktop window control and external UIA helper flows
 - Bun wrappers for all core automation routes
 - Native smoke script for shell regression coverage
-- Terminal-to-browser bridge for WSL/agent workflows
+- Terminal-to-browser bridge for WSL/agent workflows, including UTF-8-safe PowerShell bridge fallback from WSL
 - Patch-review capture script with optional retained frame output
 
 ## Persistence and recovery

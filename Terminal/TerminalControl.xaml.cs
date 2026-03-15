@@ -33,8 +33,11 @@ namespace SelfContainedDeployment.Terminal
         private ConPtyConnection _connection;
         private Task _initializationTask;
         private bool _rendererReady;
+        private bool _rendererReadyProbePending;
         private bool _webViewInitialized;
         private bool _started;
+        private bool _sessionExited;
+        private bool _hasDisplayOutput;
         private bool _disposed;
         private bool _startupInputSent;
         private bool _replayRestoreInputSent;
@@ -168,6 +171,7 @@ namespace SelfContainedDeployment.Terminal
         {
             try
             {
+                CoreWebView2 core;
                 try
                 {
                     CoreWebView2Environment environment = await GetEnvironmentAsync().ConfigureAwait(true);
@@ -177,6 +181,7 @@ namespace SelfContainedDeployment.Terminal
                     }
 
                     await TerminalView.EnsureCoreWebView2Async(environment).AsTask().ConfigureAwait(true);
+                    core = await WaitForCoreWebView2Async().ConfigureAwait(true);
                 }
                 catch (Exception ex)
                 {
@@ -186,6 +191,7 @@ namespace SelfContainedDeployment.Terminal
                         ["message"] = ex.Message ?? string.Empty,
                     });
                     await TerminalView.EnsureCoreWebView2Async().AsTask().ConfigureAwait(true);
+                    core = await WaitForCoreWebView2Async().ConfigureAwait(true);
                 }
 
                 if (_disposed)
@@ -193,21 +199,11 @@ namespace SelfContainedDeployment.Terminal
                     return;
                 }
 
+                ConfigureInitializedTerminal(core);
                 string rendererPath = ResolveRendererPath();
+                _rendererReady = false;
+                _rendererReadyProbePending = false;
                 TerminalView.Source = new Uri(rendererPath);
-
-                CoreWebView2 core = await WaitForCoreWebView2Async().ConfigureAwait(true);
-                CoreWebView2Settings settings = core.Settings;
-                if (settings is not null)
-                {
-                    settings.AreDefaultContextMenusEnabled = false;
-                    settings.IsStatusBarEnabled = false;
-                    settings.AreDevToolsEnabled = true;
-                    settings.AreBrowserAcceleratorKeysEnabled = true;
-                }
-
-                core.WebMessageReceived -= OnWebMessageReceived;
-                core.WebMessageReceived += OnWebMessageReceived;
 
                 _webViewInitialized = true;
                 LogTerminalEvent("webview.initialized", "Terminal WebView2 initialized", new Dictionary<string, string>
@@ -258,9 +254,12 @@ namespace SelfContainedDeployment.Terminal
             {
                 case "ready":
                     _rendererReady = true;
+                    _rendererReadyProbePending = false;
                     LogTerminalEvent("renderer.ready", "Terminal renderer reported ready");
                     ApplyBackgroundColor();
                     PostCurrentTheme();
+                    RequestFit();
+                    HideStatus();
                     RendererReady?.Invoke(this, EventArgs.Empty);
                     if (AutoStartSession)
                     {
@@ -329,6 +328,27 @@ namespace SelfContainedDeployment.Terminal
             }
         }
 
+        private async void OnNavigationCompleted(CoreWebView2 sender, CoreWebView2NavigationCompletedEventArgs args)
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            if (!args.IsSuccess)
+            {
+                LogTerminalEvent("renderer.navigation_failed", "Terminal renderer navigation failed", new Dictionary<string, string>
+                {
+                    ["status"] = args.WebErrorStatus.ToString(),
+                });
+                ShowStatus($"Terminal renderer failed to load: {args.WebErrorStatus}", keepVisible: true);
+                return;
+            }
+
+            LogTerminalEvent("renderer.navigation_completed", "Terminal renderer navigation completed");
+            await EnsureRendererReadyAsync().ConfigureAwait(true);
+        }
+
         private void OnInteractionRequested(object sender, RoutedEventArgs e)
         {
             RaiseInteractionRequested();
@@ -347,6 +367,8 @@ namespace SelfContainedDeployment.Terminal
             }
 
             _started = true;
+            _sessionExited = false;
+            _hasDisplayOutput = false;
             UpdateStartupMask();
 
             try
@@ -391,6 +413,7 @@ namespace SelfContainedDeployment.Terminal
                 UpdateReplayCommandFromOutput();
                 if (ContainsDisplayText(text))
                 {
+                    _hasDisplayOutput = true;
                     HideStartupMask();
                 }
 
@@ -414,6 +437,9 @@ namespace SelfContainedDeployment.Terminal
                     return;
                 }
 
+                _started = false;
+                _sessionExited = true;
+                HideStartupMask();
                 PostMessage(new HostMessage { Type = "exit", Text = "Shell exited. Close the tab or open a new one." });
                 if (_replayRestorePending)
                 {
@@ -531,6 +557,8 @@ namespace SelfContainedDeployment.Terminal
 
         private void ShowSuspendedState()
         {
+            _started = false;
+            _sessionExited = true;
             UpdateStartupMask();
             ShowStatus(string.IsNullOrWhiteSpace(SuspendedStatusText) ? "Session ended" : SuspendedStatusText, keepVisible: true);
             if (StartupMask is not null)
@@ -610,6 +638,14 @@ namespace SelfContainedDeployment.Terminal
                 snapshot.ShellCommand ??= ShellCommand;
                 snapshot.RendererReady = _rendererReady;
                 snapshot.Started = _started;
+                snapshot.Exited = IsSessionExited();
+                snapshot.AutoStartSession = AutoStartSession;
+                snapshot.ReplayRestorePending = _replayRestorePending;
+                snapshot.ReplayRestoreFailed = _replayRestoreFailed;
+                snapshot.StartupVisible = StartupMask?.Visibility == Visibility.Visible;
+                snapshot.StatusVisible = StatusBadge?.Visibility == Visibility.Visible;
+                snapshot.StatusText = StatusText?.Text;
+                snapshot.HasDisplayOutput = _hasDisplayOutput;
                 snapshot.BufferTail ??= BuildFallbackTerminalSnapshot().BufferTail;
                 return snapshot;
             }
@@ -636,6 +672,7 @@ namespace SelfContainedDeployment.Terminal
                 if (TerminalView.CoreWebView2 is not null)
                 {
                     TerminalView.CoreWebView2.WebMessageReceived -= OnWebMessageReceived;
+                    TerminalView.CoreWebView2.NavigationCompleted -= OnNavigationCompleted;
                 }
             }
             catch
@@ -973,6 +1010,14 @@ namespace SelfContainedDeployment.Terminal
                 ShellCommand = ShellCommand,
                 RendererReady = _rendererReady,
                 Started = _started,
+                Exited = IsSessionExited(),
+                AutoStartSession = AutoStartSession,
+                ReplayRestorePending = _replayRestorePending,
+                ReplayRestoreFailed = _replayRestoreFailed,
+                StartupVisible = StartupMask?.Visibility == Visibility.Visible,
+                StatusVisible = StatusBadge?.Visibility == Visibility.Visible,
+                StatusText = StatusText?.Text,
+                HasDisplayOutput = _hasDisplayOutput,
                 Cols = _cols,
                 Rows = _rows,
                 ViewportY = 0,
@@ -1005,6 +1050,14 @@ namespace SelfContainedDeployment.Terminal
                 ShellCommand = ShellCommand,
                 RendererReady = _rendererReady,
                 Started = _started,
+                Exited = IsSessionExited(),
+                AutoStartSession = AutoStartSession,
+                ReplayRestorePending = _replayRestorePending,
+                ReplayRestoreFailed = _replayRestoreFailed,
+                StartupVisible = StartupMask?.Visibility == Visibility.Visible,
+                StatusVisible = StatusBadge?.Visibility == Visibility.Visible,
+                StatusText = StatusText?.Text,
+                HasDisplayOutput = _hasDisplayOutput,
                 Cols = Math.Max(1, message.Cols),
                 Rows = Math.Max(1, message.Rows),
                 CursorX = message.CursorX,
@@ -1027,6 +1080,11 @@ namespace SelfContainedDeployment.Terminal
             {
                 PostCurrentTheme();
             }
+        }
+
+        private bool IsSessionExited()
+        {
+            return _sessionExited || !AutoStartSession;
         }
 
         private void PostCurrentTheme()
@@ -1200,6 +1258,28 @@ namespace SelfContainedDeployment.Terminal
             return await CoreWebView2Environment.CreateWithOptionsAsync(null, userDataFolder, options);
         }
 
+        private void ConfigureInitializedTerminal(CoreWebView2 core)
+        {
+            if (core is null)
+            {
+                throw new InvalidOperationException("Terminal CoreWebView2 was null after initialization.");
+            }
+
+            CoreWebView2Settings settings = core.Settings;
+            if (settings is not null)
+            {
+                settings.AreDefaultContextMenusEnabled = false;
+                settings.IsStatusBarEnabled = false;
+                settings.AreDevToolsEnabled = true;
+                settings.AreBrowserAcceleratorKeysEnabled = true;
+            }
+
+            core.WebMessageReceived -= OnWebMessageReceived;
+            core.NavigationCompleted -= OnNavigationCompleted;
+            core.WebMessageReceived += OnWebMessageReceived;
+            core.NavigationCompleted += OnNavigationCompleted;
+        }
+
         private async Task<CoreWebView2> WaitForCoreWebView2Async()
         {
             for (int attempt = 0; attempt < 20; attempt++)
@@ -1213,6 +1293,65 @@ namespace SelfContainedDeployment.Terminal
             }
 
             throw new InvalidOperationException("Terminal WebView2 core was not created.");
+        }
+
+        private async Task EnsureRendererReadyAsync()
+        {
+            if (_disposed || _rendererReady || !_webViewInitialized || TerminalView.CoreWebView2 is null || _rendererReadyProbePending)
+            {
+                return;
+            }
+
+            _rendererReadyProbePending = true;
+
+            try
+            {
+                await Task.Delay(50).ConfigureAwait(true);
+                if (_disposed || _rendererReady || TerminalView.CoreWebView2 is null)
+                {
+                    return;
+                }
+
+                string script = """
+                    (() => {
+                        try {
+                            if (window.__winmuxTerminalHost && typeof window.__winmuxTerminalHost.forceReady === "function") {
+                                window.__winmuxTerminalHost.forceReady();
+                                return JSON.stringify({ status: "forced", readyState: document.readyState });
+                            }
+
+                            return JSON.stringify({
+                                status: "missing",
+                                readyState: document.readyState,
+                                hasBridge: !!(window.chrome && window.chrome.webview),
+                            });
+                        } catch (error) {
+                            return JSON.stringify({
+                                status: "error",
+                                message: String(error),
+                            });
+                        }
+                    })();
+                    """;
+
+                string result = await TerminalView.CoreWebView2.ExecuteScriptAsync(script).AsTask().ConfigureAwait(true);
+                LogTerminalEvent("renderer.ready_probe", "Probed terminal renderer readiness after navigation", new Dictionary<string, string>
+                {
+                    ["result"] = result ?? string.Empty,
+                });
+            }
+            catch (Exception ex)
+            {
+                LogTerminalEvent("renderer.ready_probe_failed", "Terminal renderer readiness probe failed", new Dictionary<string, string>
+                {
+                    ["exceptionType"] = ex.GetType().FullName ?? string.Empty,
+                    ["message"] = ex.Message ?? string.Empty,
+                });
+            }
+            finally
+            {
+                _rendererReadyProbePending = false;
+            }
         }
 
         private void PostMessage(HostMessage message)

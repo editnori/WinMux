@@ -102,6 +102,37 @@ function Get-LeadingBlankLineCount {
     return $count
 }
 
+function Test-TerminalReadySnapshot {
+    param([object]$Snapshot)
+
+    if ($null -eq $Snapshot) {
+        return $false
+    }
+
+    $visibleText = Get-TerminalPrintableText $Snapshot.visibleText
+    $bufferTail = Get-TerminalPrintableText $Snapshot.bufferTail
+
+    return $Snapshot.rendererReady -eq $true -and
+        $Snapshot.started -eq $true -and
+        $Snapshot.exited -ne $true -and
+        (-not [string]::IsNullOrWhiteSpace($visibleText) -or -not [string]::IsNullOrWhiteSpace($bufferTail))
+}
+
+function Get-TerminalPrintableText {
+    param([string]$Text)
+
+    if ([string]::IsNullOrEmpty($Text)) {
+        return ""
+    }
+
+    $escape = [string][char]27
+    $clean = $Text `
+        -replace ([regex]::Escape($escape) + "\[[0-9;?]*[ -/]*[@-~]"), "" `
+        -replace ([regex]::Escape($escape) + "\][^\u0007]*\u0007"), ""
+    $clean = [regex]::Replace($clean, "[\u0000-\u0008\u000B\u000C\u000E-\u001F]", "")
+    return $clean.Trim()
+}
+
 function Get-ProjectById {
     param(
         [object]$State,
@@ -237,7 +268,7 @@ try {
         foreach ($terminalTab in $terminalTabs) {
             $terminalState = Invoke-AutomationPost "/terminal-state" @{ tabId = $terminalTab.id }
             $snapshot = @($terminalState.tabs) | Where-Object { $_.tabId -eq $terminalTab.id } | Select-Object -First 1
-            if ($null -ne $snapshot -and $snapshot.rendererReady -eq $true -and $snapshot.started -eq $true) {
+            if (Test-TerminalReadySnapshot $snapshot) {
                 return [pscustomobject]@{
                     state = $latestState
                     tabId = $terminalTab.id
@@ -546,6 +577,22 @@ try {
     }
     $tempProjectId = $state.projectId
     Add-Check "new-project-dialog" "new project added at $tempProjectPath"
+
+    $tempProject = Get-ProjectById -State $state -ProjectId $tempProjectId
+    $tempThread = Get-ThreadById -Project $tempProject -ThreadId $state.activeThreadId
+    $tempTerminalTab = @($tempThread.tabs) | Where-Object { $_.kind -eq "terminal" } | Select-Object -First 1
+    Assert-True ($null -ne $tempTerminalTab) "Temporary project did not create an initial terminal tab."
+
+    $tempTerminalReady = Wait-Until -FailureMessage "Temporary project terminal did not become ready with shell output." -Condition {
+        $terminalState = Invoke-AutomationPost "/terminal-state" @{ tabId = $tempTerminalTab.id }
+        $snapshot = @($terminalState.tabs) | Where-Object { $_.tabId -eq $tempTerminalTab.id } | Select-Object -First 1
+        if (Test-TerminalReadySnapshot $snapshot) {
+            return $snapshot
+        }
+
+        return $null
+    } -Attempts 80 -DelayMilliseconds 250
+    Add-Check "new-project-terminal-state" "$($tempTerminalReady.cols)x$($tempTerminalReady.rows) shell output visible for new WSL project"
 
     $refreshTempDiff = Invoke-AutomationPost "/action" @{
         action = "refreshDiff"

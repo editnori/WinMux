@@ -477,6 +477,14 @@ Each tab snapshot includes:
 - `shellCommand`
 - `rendererReady`
 - `started`
+- `exited`
+- `autoStartSession`
+- `replayRestorePending`
+- `replayRestoreFailed`
+- `startupVisible`
+- `statusVisible`
+- `statusText`
+- `hasDisplayOutput`
 - `cols`
 - `rows`
 - `cursorX`
@@ -488,7 +496,8 @@ Each tab snapshot includes:
 This is enough for:
 
 - checking which tab is active
-- confirming terminal startup completed
+- confirming terminal startup completed with visible shell output instead of a dead pane
+- distinguishing live terminals from suspended or exited replay panes
 - reading the current visible rows
 - reading tail scrollback
 - checking cursor movement

@@ -13,6 +13,7 @@
     let lastMeasuredHeight = 0;
     let lastPostedCols = 0;
     let lastPostedRows = 0;
+    let readyPosted = false;
     const darkTheme = {
         background: "#09090b",
         foreground: "#f4f4f5",
@@ -121,6 +122,16 @@
         if (bridge) {
             bridge.postMessage(message);
         }
+    }
+
+    function postReady() {
+        if (!bridge || readyPosted) {
+            return false;
+        }
+
+        readyPosted = true;
+        post({ type: "ready" });
+        return true;
     }
 
     function fitTerminal(force = false) {
@@ -336,6 +347,15 @@
         }
     }
 
+    window.__winmuxTerminalHost = {
+        forceReady() {
+            return postReady();
+        },
+        get readyPosted() {
+            return readyPosted;
+        },
+    };
+
     async function copySelectionToClipboard() {
         const selection = term.getSelection();
         if (!selection) {
@@ -495,7 +515,7 @@
 
         if (bridge) {
             bridge.addEventListener("message", (event) => handleHostMessage(event.data));
-            post({ type: "ready" });
+            postReady();
         }
         else {
             bootDemoShell();

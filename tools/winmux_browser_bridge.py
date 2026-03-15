@@ -32,6 +32,8 @@ def post_json_via_powershell(path: str, payload: dict) -> dict:
     uri = f"http://127.0.0.1:{automation_port}{path}"
     payload_text = json.dumps(payload)
     command = (
+        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; "
+        "$OutputEncoding = [System.Text.Encoding]::UTF8; "
         "$json = @'\n"
         f"{payload_text}\n"
         "'@; "
@@ -42,7 +44,8 @@ def post_json_via_powershell(path: str, payload: dict) -> dict:
         ["powershell.exe", "-NoProfile", "-Command", command],
         check=True,
         capture_output=True,
-        text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     return json.loads(result.stdout)
 
@@ -79,7 +82,7 @@ def main() -> int:
             path = "/browser-screenshot"
         try:
             result = post_json_via_powershell(path, payload)
-        except (FileNotFoundError, subprocess.CalledProcessError, json.JSONDecodeError):
+        except (FileNotFoundError, subprocess.CalledProcessError, json.JSONDecodeError, UnicodeDecodeError):
             result = post_json(url, payload)
     except (urllib.error.URLError, TimeoutError, subprocess.CalledProcessError) as exc:
         print(json.dumps({"ok": False, "error": str(exc)}))

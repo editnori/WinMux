@@ -125,23 +125,33 @@ function Wait-ForTerminalReady {
     return Wait-Until -FailureMessage "Terminal tab '$TabId' was not ready." -Condition {
         $terminalState = Invoke-AutomationPost "/terminal-state" @{ tabId = $TabId }
         $snapshot = @($terminalState.tabs) | Where-Object { $_.tabId -eq $TabId } | Select-Object -First 1
-        $visibleText = if ($null -eq $snapshot) { "" } else { [string]$snapshot.visibleText }
-        $bufferTail = if ($null -eq $snapshot) { "" } else { [string]$snapshot.bufferTail }
-        $escape = [string][char]27
-        $hasVisibleContent = -not [string]::IsNullOrWhiteSpace($visibleText)
-        $cleanBufferTail = $bufferTail `
-            -replace ([regex]::Escape($escape) + "\[[0-9;?]*[A-Za-z]"), "" `
-            -replace ([regex]::Escape($escape) + "\][^\u0007]*\u0007"), ""
-        $hasBufferContent = -not [string]::IsNullOrWhiteSpace($cleanBufferTail.Trim())
+        $visibleText = Get-TerminalPrintableText $(if ($null -eq $snapshot) { "" } else { [string]$snapshot.visibleText })
+        $bufferTail = Get-TerminalPrintableText $(if ($null -eq $snapshot) { "" } else { [string]$snapshot.bufferTail })
         if ($null -ne $snapshot -and
             $snapshot.rendererReady -eq $true -and
             $snapshot.started -eq $true -and
-            ($hasVisibleContent -or $hasBufferContent)) {
+            $snapshot.exited -ne $true -and
+            (-not [string]::IsNullOrWhiteSpace($visibleText) -or -not [string]::IsNullOrWhiteSpace($bufferTail))) {
             return $snapshot
         }
 
         return $null
     } -Attempts 40 -DelayMilliseconds 250
+}
+
+function Get-TerminalPrintableText {
+    param([string]$Text)
+
+    if ([string]::IsNullOrEmpty($Text)) {
+        return ""
+    }
+
+    $escape = [string][char]27
+    $clean = $Text `
+        -replace ([regex]::Escape($escape) + "\[[0-9;?]*[ -/]*[@-~]"), "" `
+        -replace ([regex]::Escape($escape) + "\][^\u0007]*\u0007"), ""
+    $clean = [regex]::Replace($clean, "[\u0000-\u0008\u000B\u000C\u000E-\u001F]", "")
+    return $clean.Trim()
 }
 
 function Show-ContextMenu {

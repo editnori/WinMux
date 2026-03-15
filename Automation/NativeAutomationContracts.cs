@@ -282,6 +282,22 @@ namespace SelfContainedDeployment.Automation
 
         public bool Started { get; set; }
 
+        public bool Exited { get; set; }
+
+        public bool AutoStartSession { get; set; }
+
+        public bool ReplayRestorePending { get; set; }
+
+        public bool ReplayRestoreFailed { get; set; }
+
+        public bool StartupVisible { get; set; }
+
+        public bool StatusVisible { get; set; }
+
+        public bool HasDisplayOutput { get; set; }
+
+        public string StatusText { get; set; }
+
         public int Cols { get; set; }
 
         public int Rows { get; set; }

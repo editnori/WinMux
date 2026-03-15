@@ -87,6 +87,52 @@ function Get-TextValue {
     return [string]$Value
 }
 
+function Get-TerminalPrintableText {
+    param([string]$Text)
+
+    if ([string]::IsNullOrEmpty($Text)) {
+        return ""
+    }
+
+    $escape = [string][char]27
+    $clean = $Text `
+        -replace ([regex]::Escape($escape) + "\[[0-9;?]*[ -/]*[@-~]"), "" `
+        -replace ([regex]::Escape($escape) + "\][^\u0007]*\u0007"), ""
+    $clean = [regex]::Replace($clean, "[\u0000-\u0008\u000B\u000C\u000E-\u001F]", "")
+    return $clean.Trim()
+}
+
+function Test-TerminalReadySnapshot {
+    param([object]$Snapshot)
+
+    if ($null -eq $Snapshot) {
+        return $false
+    }
+
+    $visibleText = Get-TerminalPrintableText (Get-TextValue $Snapshot.visibleText)
+    $bufferTail = Get-TerminalPrintableText (Get-TextValue $Snapshot.bufferTail)
+
+    return $Snapshot.rendererReady -eq $true -and
+        $Snapshot.started -eq $true -and
+        $Snapshot.exited -ne $true -and
+        (-not [string]::IsNullOrWhiteSpace($visibleText) -or -not [string]::IsNullOrWhiteSpace($bufferTail))
+}
+
+function Get-TerminalSearchText {
+    param([object]$Snapshot)
+
+    if ($null -eq $Snapshot) {
+        return ""
+    }
+
+    $combined = @(
+        Get-TerminalPrintableText (Get-TextValue $Snapshot.visibleText)
+        Get-TerminalPrintableText (Get-TextValue $Snapshot.bufferTail)
+    ) -join " "
+
+    return ([regex]::Replace($combined, "\s+", " ")).Trim()
+}
+
 function Send-TerminalInput {
     param([string]$Text)
 
@@ -120,7 +166,7 @@ try {
 
     $null = Wait-Until -FailureMessage "Selected terminal did not become ready." -Condition {
         $snapshot = Get-TerminalSnapshot -TabId $terminalPane.id
-        if ($null -ne $snapshot -and $snapshot.rendererReady -eq $true -and $snapshot.started -eq $true) {
+        if (Test-TerminalReadySnapshot $snapshot) {
             return $snapshot
         }
 
@@ -130,8 +176,8 @@ try {
     Send-TerminalLine "printenv WINMUX_BROWSER_PROFILE_MODE; printenv WINMUX_BROWSER_EVAL_URL; printenv WINMUX_BROWSER_STATE_URL; printenv WINMUX_BROWSER_BRIDGE"
     $envSnapshot = Wait-Until -FailureMessage "Terminal did not report WinMux browser environment variables." -Condition {
         $snapshot = Get-TerminalSnapshot -TabId $terminalPane.id
-        $bufferTail = Get-TextValue $snapshot.bufferTail
-        if ($null -ne $snapshot -and ($bufferTail -match 'shared' -and $bufferTail -match 'browser-eval' -and $bufferTail -match 'browser-state' -and $bufferTail -match 'winmux_browser_bridge.py')) {
+        $searchText = Get-TerminalSearchText $snapshot
+        if ($null -ne $snapshot -and ($searchText -match 'shared' -and $searchText -match 'browser-eval' -and $searchText -match 'browser-state' -and $searchText -match 'winmux_browser_.*bridge\.py')) {
             return $snapshot
         }
 
@@ -142,14 +188,14 @@ try {
     Send-TerminalLine "command -v claude >/dev/null 2>&1 && echo CLAUDE_FOUND || echo CLAUDE_MISSING"
     $claudeSnapshot = Wait-Until -FailureMessage "Terminal did not report Claude availability." -Condition {
         $snapshot = Get-TerminalSnapshot -TabId $terminalPane.id
-        $bufferTail = Get-TextValue $snapshot.bufferTail
-        if ($null -ne $snapshot -and ($bufferTail -match 'CLAUDE_(FOUND|MISSING)')) {
+        $searchText = Get-TerminalSearchText $snapshot
+        if ($null -ne $snapshot -and ($searchText -match 'CLAUDE_(FOUND|MISSING)')) {
             return $snapshot
         }
 
         return $null
     }
-    if ($claudeSnapshot.bufferTail -match 'CLAUDE_FOUND') {
+    if ((Get-TerminalSearchText $claudeSnapshot) -match 'CLAUDE_FOUND') {
         Add-Check "claude-command" "claude command is available in WSL terminal"
     }
     else {
@@ -159,14 +205,14 @@ try {
     Send-TerminalLine "command -v codex >/dev/null 2>&1 && echo CODEX_FOUND || echo CODEX_MISSING"
     $codexSnapshot = Wait-Until -FailureMessage "Terminal did not report Codex availability." -Condition {
         $snapshot = Get-TerminalSnapshot -TabId $terminalPane.id
-        $bufferTail = Get-TextValue $snapshot.bufferTail
-        if ($null -ne $snapshot -and ($bufferTail -match 'CODEX_(FOUND|MISSING)')) {
+        $searchText = Get-TerminalSearchText $snapshot
+        if ($null -ne $snapshot -and ($searchText -match 'CODEX_(FOUND|MISSING)')) {
             return $snapshot
         }
 
         return $null
     }
-    if ($codexSnapshot.bufferTail -match 'CODEX_FOUND') {
+    if ((Get-TerminalSearchText $codexSnapshot) -match 'CODEX_FOUND') {
         Add-Check "codex-command" "codex command is available in WSL terminal"
     }
     else {
@@ -186,9 +232,8 @@ try {
     Send-TerminalLine "python3 `$WINMUX_BROWSER_BRIDGE state"
     $bridgeSnapshot = Wait-Until -FailureMessage "Terminal could not query WinMux browser state through the shared browser endpoint." -Condition {
         $snapshot = Get-TerminalSnapshot -TabId $terminalPane.id
-        $bufferTail = Get-TextValue $snapshot.bufferTail
-        $visibleText = Get-TextValue $snapshot.visibleText
-        if ($null -ne $snapshot -and ($bufferTail -match 'selectedPaneId' -or $visibleText -match 'selectedPaneId')) {
+        $searchText = Get-TerminalSearchText $snapshot
+        if ($null -ne $snapshot -and $searchText -match 'selectedPaneId') {
             return $snapshot
         }
 

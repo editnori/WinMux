@@ -11,7 +11,7 @@ This pass is about making the app operable and debuggable before more UI work la
 - [x] Add richer control-level automation with UI-tree snapshots, generic UI actions, terminal inspection, and annotated screenshots.
 - [x] Add a few higher-level scripted flows on top of the generic automation layer.
 - [x] Expose structured diff-pane inspection and a deterministic patch-review recording flow.
-- [ ] Fix the current terminal `WebView2 failed: Object reference not set to an instance of an object.` startup regression seen on fresh WSL terminal panes during automation runs.
+- [x] Fix the fresh WSL terminal startup regression where a second terminal renderer could miss its initial `ready` handshake and never start the ConPTY session.
 
 ## 2. Light mode
 
