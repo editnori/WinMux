@@ -559,6 +559,9 @@ namespace SelfContainedDeployment
                     case "renamethread":
                         RenameThread(request.ThreadId, request.Value);
                         break;
+                    case "renamepane":
+                        RenamePane(request.TabId, request.Value);
+                        break;
                     case "duplicatethread":
                         DuplicateThread(request.ThreadId);
                         break;
@@ -685,11 +688,28 @@ namespace SelfContainedDeployment
             }
         }
 
+        private async void OnPaneTabDoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
+        {
+            if (sender is TabViewItem item && item.Tag is WorkspacePaneRecord pane)
+            {
+                e.Handled = true;
+                await BeginRenamePaneAsync(pane.Id);
+            }
+        }
+
         private async void OnRenameThreadMenuClicked(object sender, RoutedEventArgs e)
         {
             if (sender is MenuFlyoutItem item && item.Tag is string threadId)
             {
                 await BeginRenameThreadAsync(threadId);
+            }
+        }
+
+        private async void OnRenamePaneMenuClicked(object sender, RoutedEventArgs e)
+        {
+            if (sender is MenuFlyoutItem item && item.Tag is string paneId)
+            {
+                await BeginRenamePaneAsync(paneId);
             }
         }
 
@@ -1084,6 +1104,18 @@ namespace SelfContainedDeployment
             };
 
             return pane;
+        }
+
+        private WorkspaceThread FindThreadForPane(string paneId)
+        {
+            if (string.IsNullOrWhiteSpace(paneId))
+            {
+                return null;
+            }
+
+            return _projects
+                .SelectMany(project => project.Threads)
+                .FirstOrDefault(thread => thread.Panes.Any(candidate => string.Equals(candidate.Id, paneId, StringComparison.Ordinal)));
         }
 
         private void AttachPaneInteraction(WorkspaceProject project, WorkspaceThread thread, WorkspacePaneRecord pane)
@@ -1504,6 +1536,30 @@ namespace SelfContainedDeployment
             }
         }
 
+        private async System.Threading.Tasks.Task BeginRenamePaneAsync(string paneId)
+        {
+            WorkspacePaneRecord pane = EnumeratePaneRecords().FirstOrDefault(candidate => string.Equals(candidate.Id, paneId, StringComparison.Ordinal));
+            if (pane is null)
+            {
+                return;
+            }
+
+            WorkspaceThread thread = FindThreadForPane(paneId);
+            LogAutomationEvent("shell", "pane.rename_requested", $"Opening rename dialog for {pane.Title}", new Dictionary<string, string>
+            {
+                ["paneId"] = pane.Id,
+                ["threadId"] = thread?.Id ?? string.Empty,
+                ["projectId"] = _activeProject?.Id ?? string.Empty,
+                ["paneKind"] = pane.Kind.ToString().ToLowerInvariant(),
+            });
+
+            string nextName = await PromptForThreadNameAsync("Rename pane", pane.Title);
+            if (!string.IsNullOrWhiteSpace(nextName))
+            {
+                RenamePane(paneId, nextName);
+            }
+        }
+
         private void RenameThread(string threadId, string nextName)
         {
             WorkspaceThread thread = string.IsNullOrWhiteSpace(threadId) ? _activeThread : FindThread(threadId);
@@ -1520,6 +1576,38 @@ namespace SelfContainedDeployment
                 ["threadId"] = thread.Id,
                 ["projectId"] = thread.Project.Id,
                 ["threadName"] = thread.Name,
+            });
+        }
+
+        private void RenamePane(string paneId, string nextName)
+        {
+            WorkspacePaneRecord pane = string.IsNullOrWhiteSpace(paneId)
+                ? GetSelectedPane(_activeThread)
+                : EnumeratePaneRecords().FirstOrDefault(candidate => string.Equals(candidate.Id, paneId, StringComparison.Ordinal));
+            if (pane is null)
+            {
+                return;
+            }
+
+            string trimmed = nextName?.Trim();
+            if (string.IsNullOrWhiteSpace(trimmed))
+            {
+                return;
+            }
+
+            pane.Title = trimmed;
+            UpdateTabViewItem(pane);
+            RenderPaneWorkspace();
+            UpdateHeader();
+
+            WorkspaceThread thread = FindThreadForPane(pane.Id);
+            LogAutomationEvent("shell", "pane.renamed", $"Renamed pane to {pane.Title}", new Dictionary<string, string>
+            {
+                ["paneId"] = pane.Id,
+                ["threadId"] = thread?.Id ?? string.Empty,
+                ["projectId"] = _activeProject?.Id ?? string.Empty,
+                ["paneKind"] = pane.Kind.ToString().ToLowerInvariant(),
+                ["paneTitle"] = pane.Title,
             });
         }
 
@@ -1971,10 +2059,12 @@ namespace SelfContainedDeployment
                     Tag = pane,
                 };
                 AutomationProperties.SetAutomationId(item, $"shell-tab-{pane.Id}");
+                item.DoubleTapped += OnPaneTabDoubleTapped;
                 _tabItemsById[pane.Id] = item;
             }
 
             item.Tag = pane;
+            item.ContextFlyout = BuildPaneContextMenu(pane);
             object nextHeader = FormatTabHeader(pane.Title, pane.Kind, pane.IsExited);
             if (!Equals(item.Header, nextHeader))
             {
@@ -1992,11 +2082,26 @@ namespace SelfContainedDeployment
             }
 
             TabViewItem item = GetOrCreateTabViewItem(pane);
+            item.ContextFlyout = BuildPaneContextMenu(pane);
             object nextHeader = FormatTabHeader(pane.Title, pane.Kind, pane.IsExited);
             if (!Equals(item.Header, nextHeader))
             {
                 item.Header = nextHeader;
             }
+        }
+
+        private MenuFlyout BuildPaneContextMenu(WorkspacePaneRecord pane)
+        {
+            MenuFlyout menu = new();
+            MenuFlyoutItem renameItem = new()
+            {
+                Text = "Rename",
+                Tag = pane.Id,
+            };
+            AutomationProperties.SetAutomationId(renameItem, $"shell-tab-rename-{pane.Id}");
+            renameItem.Click += OnRenamePaneMenuClicked;
+            menu.Items.Add(renameItem);
+            return menu;
         }
 
         private void RemoveTabViewItem(string tabId)
@@ -3447,22 +3552,35 @@ namespace SelfContainedDeployment
 
         private bool TryInvokeContextMenuItemDirect(MenuFlyoutItem menuItem)
         {
-            if (menuItem?.Tag is not string threadId)
+            if (menuItem?.Tag is not string targetId)
             {
                 return false;
             }
 
+            string automationId = AutomationProperties.GetAutomationId(menuItem) ?? string.Empty;
             string action = menuItem.Text?.Trim().ToLowerInvariant();
+            if (automationId.StartsWith("shell-tab-rename-", StringComparison.Ordinal))
+            {
+                switch (action)
+                {
+                    case "rename":
+                        _ = BeginRenamePaneAsync(targetId);
+                        return true;
+                    default:
+                        return false;
+                }
+            }
+
             switch (action)
             {
                 case "rename":
-                    _ = BeginRenameThreadAsync(threadId);
+                    _ = BeginRenameThreadAsync(targetId);
                     return true;
                 case "duplicate":
-                    DuplicateThread(threadId);
+                    DuplicateThread(targetId);
                     return true;
                 case "delete":
-                    DeleteThread(threadId);
+                    DeleteThread(targetId);
                     return true;
                 default:
                     return false;
