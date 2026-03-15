@@ -1083,7 +1083,7 @@ namespace SelfContainedDeployment
 
                 if (!string.Equals(thread.SelectedPaneId, pane.Id, StringComparison.Ordinal))
                 {
-                    SelectPane(pane);
+                    SelectPane(pane, focusPane: false);
                 }
                 else
                 {
@@ -2217,11 +2217,33 @@ namespace SelfContainedDeployment
         {
             if (sender is Border border && border.Tag is WorkspacePaneRecord pane)
             {
-                SelectPane(pane);
+                bool focusPane = !ShouldDeferPaneFocus(e.OriginalSource as DependencyObject);
+                SelectPane(pane, focusPane);
             }
         }
 
-        private void SelectPane(WorkspacePaneRecord pane)
+        private static bool ShouldDeferPaneFocus(DependencyObject source)
+        {
+            DependencyObject current = source;
+            while (current is not null)
+            {
+                switch (current)
+                {
+                    case Button:
+                    case HyperlinkButton:
+                    case TextBox:
+                    case AutoSuggestBox:
+                    case Microsoft.UI.Xaml.Controls.WebView2:
+                        return true;
+                }
+
+                current = VisualTreeHelper.GetParent(current);
+            }
+
+            return false;
+        }
+
+        private void SelectPane(WorkspacePaneRecord pane, bool focusPane = true)
         {
             if (_activeThread is null || pane is null)
             {
@@ -2237,7 +2259,10 @@ namespace SelfContainedDeployment
             }
 
             UpdatePaneSelectionChrome();
-            FocusSelectedPane();
+            if (focusPane)
+            {
+                FocusSelectedPane();
+            }
             RequestLayoutForVisiblePanes();
             LogAutomationEvent("shell", "pane.selected", $"Selected pane {pane.Id}", new Dictionary<string, string>
             {
@@ -2245,6 +2270,7 @@ namespace SelfContainedDeployment
                 ["paneKind"] = pane.Kind.ToString().ToLowerInvariant(),
                 ["threadId"] = _activeThread.Id,
                 ["projectId"] = _activeProject?.Id ?? string.Empty,
+                ["focusPane"] = focusPane.ToString(),
             });
         }
 
