@@ -2021,7 +2021,7 @@ namespace SelfContainedDeployment
             project ??= _activeProject ?? GetOrCreateProject(Environment.CurrentDirectory);
             thread = ResolveTargetThreadForNewPane(project, thread, WorkspacePaneKind.Editor);
 
-            string startupInput = "nvim -i NONE .\r";
+            string startupInput = BuildEditorStartupInput(project?.ShellProfileId);
             TerminalPaneRecord pane = CreateTerminalPane(project, thread, WorkspacePaneKind.Editor, startupInput, "Editor");
             thread.Panes.Add(pane);
             thread.SelectedPaneId = pane.Id;
@@ -2259,6 +2259,43 @@ namespace SelfContainedDeployment
             return values;
         }
 
+        private static string BuildEditorStartupInput(string shellProfileId)
+        {
+            string profileId = ShellProfiles.Resolve(shellProfileId).Id;
+            return profileId switch
+            {
+                ShellProfileIds.PowerShell => BuildPowerShellEditorStartupInput(),
+                ShellProfileIds.CommandPrompt => BuildCmdEditorStartupInput(),
+                _ => BuildWslEditorStartupInput(),
+            };
+        }
+
+        private static string BuildWslEditorStartupInput()
+        {
+            return "if command -v hx >/dev/null 2>&1; then hx .; " +
+                   "elif command -v nvim >/dev/null 2>&1; then nvim -u NONE -i NONE -c \"set laststatus=0 cmdheight=1 signcolumn=no noruler noshowmode\" .; " +
+                   "elif command -v vim >/dev/null 2>&1; then vim .; " +
+                   "else nano .; fi\r";
+        }
+
+        private static string BuildPowerShellEditorStartupInput()
+        {
+            return "if (Get-Command hx -ErrorAction SilentlyContinue) { hx . } " +
+                   "elseif (Get-Command nvim -ErrorAction SilentlyContinue) { nvim -u NONE -i NONE -c \"set laststatus=0 cmdheight=1 signcolumn=no noruler noshowmode\" . } " +
+                   "elseif (Get-Command vim -ErrorAction SilentlyContinue) { vim . } " +
+                   "elseif (Get-Command nano -ErrorAction SilentlyContinue) { nano . } " +
+                   "else { Write-Host \"No terminal editor found on PATH.\" }\r";
+        }
+
+        private static string BuildCmdEditorStartupInput()
+        {
+            return "@where hx >nul 2>nul && hx . " +
+                   "|| where nvim >nul 2>nul && nvim -u NONE -i NONE -c \"set laststatus=0 cmdheight=1 signcolumn=no noruler noshowmode\" . " +
+                   "|| where vim >nul 2>nul && vim . " +
+                   "|| where nano >nul 2>nul && nano . " +
+                   "|| echo No terminal editor found on PATH.\r";
+        }
+
         private WorkspaceThread FindThreadForPane(string paneId)
         {
             if (string.IsNullOrWhiteSpace(paneId))
@@ -2282,7 +2319,7 @@ namespace SelfContainedDeployment
             {
                 "browser" => CreateBrowserPane(project, thread, snapshot.BrowserUri, string.IsNullOrWhiteSpace(snapshot.Title) ? "Preview" : snapshot.Title, snapshot.Id),
                 "diff" => CreateDiffPane(project, thread, snapshot.DiffPath, diffText: null, string.IsNullOrWhiteSpace(snapshot.Title) ? BuildDiffPaneTitle(snapshot.DiffPath) : snapshot.Title, snapshot.Id),
-                "editor" => CreateTerminalPane(project, thread, WorkspacePaneKind.Editor, "nvim -i NONE .\r", string.IsNullOrWhiteSpace(snapshot.Title) ? "Editor" : snapshot.Title, snapshot.Id),
+                "editor" => CreateTerminalPane(project, thread, WorkspacePaneKind.Editor, BuildEditorStartupInput(project?.ShellProfileId), string.IsNullOrWhiteSpace(snapshot.Title) ? "Editor" : snapshot.Title, snapshot.Id),
                 _ => CreateTerminalPane(
                     project,
                     thread,
