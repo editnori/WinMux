@@ -1,0 +1,53 @@
+<UserControl
+    x:Class="SelfContainedDeployment.Panes.BrowserPaneControl"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Loaded="OnLoaded"
+    Unloaded="OnUnloaded">
+
+    <Grid x:Name="BrowserRoot"
+          AutomationProperties.AutomationId="browser-pane-root"
+          Background="{ThemeResource ShellPageBackgroundBrush}">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="36" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0"
+                Background="{ThemeResource ShellSurfaceBackgroundBrush}"
+                BorderBrush="{ThemeResource ShellBorderBrush}"
+                BorderThickness="0,0,0,1"
+                Padding="8,4,8,4">
+            <Grid ColumnDefinitions="Auto,*,Auto"
+                  ColumnSpacing="8">
+                <Button x:Name="BrowserHomeButton"
+                        AutomationProperties.AutomationId="browser-pane-home"
+                        Style="{StaticResource ShellChromeButtonStyle}"
+                        Click="OnHomeClicked"
+                        ToolTipService.ToolTip="Show browser start page">
+                    <FontIcon FontSize="11" Glyph="&#xE80F;" />
+                </Button>
+
+                <TextBox x:Name="AddressBox"
+                         Grid.Column="1"
+                         AutomationProperties.AutomationId="browser-pane-address"
+                         Style="{StaticResource ShellInlineTextBoxStyle}"
+                         KeyDown="OnAddressBoxKeyDown"
+                         PlaceholderText="Enter a URL or localhost preview" />
+
+                <Button x:Name="BrowserReloadButton"
+                        Grid.Column="2"
+                        AutomationProperties.AutomationId="browser-pane-reload"
+                        Style="{StaticResource ShellChromeButtonStyle}"
+                        Click="OnReloadClicked"
+                        ToolTipService.ToolTip="Reload page">
+                    <FontIcon FontSize="11" Glyph="&#xE72C;" />
+                </Button>
+            </Grid>
+        </Border>
+
+        <WebView2 x:Name="BrowserView"
+                  Grid.Row="1"
+                  AutomationProperties.AutomationId="browser-pane-webview" />
+    </Grid>
+</UserControl>

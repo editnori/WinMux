@@ -56,7 +56,13 @@ namespace SelfContainedDeployment.Automation
 
         public int TabCount { get; set; }
 
+        public int PaneCount { get; set; }
+
+        public string Layout { get; set; }
+
         public List<NativeAutomationTabState> Tabs { get; set; } = new();
+
+        public List<NativeAutomationTabState> Panes { get; set; } = new();
     }
 
     public sealed class NativeAutomationTabState
@@ -64,6 +70,8 @@ namespace SelfContainedDeployment.Automation
         public string Id { get; set; }
 
         public string Title { get; set; }
+
+        public string Kind { get; set; }
 
         public bool Exited { get; set; }
     }

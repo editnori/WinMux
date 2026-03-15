@@ -138,16 +138,57 @@
 
                 <Grid Grid.Row="1"
                       AutomationProperties.AutomationId="shell-workspace-host">
-                    <TabView x:Name="TerminalTabs"
-                             AutomationProperties.AutomationId="shell-tab-view"
-                             AddTabButtonClick="TerminalTabs_AddTabButtonClick"
-                             CanDragTabs="True"
-                             HorizontalAlignment="Stretch"
-                             IsAddTabButtonVisible="True"
-                             SelectionChanged="TerminalTabs_SelectionChanged"
-                             TabCloseRequested="TerminalTabs_TabCloseRequested"
-                             TabWidthMode="SizeToContent"
-                             VerticalAlignment="Stretch" />
+                    <Grid x:Name="PaneWorkspaceShell"
+                          AutomationProperties.AutomationId="shell-pane-workspace">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="40" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+
+                        <Grid Grid.Row="0"
+                              AutomationProperties.AutomationId="shell-pane-strip"
+                              Background="{ThemeResource ShellSurfaceBackgroundBrush}"
+                              BorderBrush="{ThemeResource ShellBorderBrush}"
+                              BorderThickness="0,0,0,1"
+                              ColumnDefinitions="*,Auto,Auto">
+                            <TabView x:Name="TerminalTabs"
+                                     AutomationProperties.AutomationId="shell-tab-view"
+                                     AddTabButtonClick="TerminalTabs_AddTabButtonClick"
+                                     CanDragTabs="True"
+                                     Grid.Column="0"
+                                     HorizontalAlignment="Stretch"
+                                     IsAddTabButtonVisible="True"
+                                     SelectionChanged="TerminalTabs_SelectionChanged"
+                                     TabCloseRequested="TerminalTabs_TabCloseRequested"
+                                     TabWidthMode="SizeToContent"
+                                     VerticalAlignment="Stretch" />
+
+                            <Button x:Name="AddBrowserPaneButton"
+                                    Grid.Column="1"
+                                    AutomationProperties.AutomationId="shell-add-browser-pane"
+                                    Margin="0,6,6,6"
+                                    Style="{StaticResource ShellChromeButtonStyle}"
+                                    Click="OnAddBrowserPaneClicked"
+                                    ToolTipService.ToolTip="Add browser pane">
+                                <FontIcon FontSize="12" Glyph="&#xE774;" />
+                            </Button>
+
+                            <Button x:Name="AddEditorPaneButton"
+                                    Grid.Column="2"
+                                    AutomationProperties.AutomationId="shell-add-editor-pane"
+                                    Margin="0,6,10,6"
+                                    Style="{StaticResource ShellChromeButtonStyle}"
+                                    Click="OnAddEditorPaneClicked"
+                                    ToolTipService.ToolTip="Add editor pane">
+                                <FontIcon FontSize="12" Glyph="&#xE70F;" />
+                            </Button>
+                        </Grid>
+
+                        <Grid x:Name="PaneWorkspaceGrid"
+                              Grid.Row="1"
+                              AutomationProperties.AutomationId="shell-pane-grid"
+                              Background="{ThemeResource ShellPageBackgroundBrush}" />
+                    </Grid>
 
                     <Frame x:Name="SettingsFrame"
                            AutomationProperties.AutomationId="shell-settings-frame"

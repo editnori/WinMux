@@ -24,6 +24,7 @@ namespace SelfContainedDeployment.Terminal
         private bool _webViewInitialized;
         private bool _started;
         private bool _disposed;
+        private bool _startupInputSent;
         private int _cols = 120;
         private int _rows = 32;
         private int _lastLoggedResizeCols;
@@ -53,6 +54,8 @@ namespace SelfContainedDeployment.Terminal
         public string DisplayWorkingDirectory { get; set; }
 
         public string ProcessWorkingDirectory { get; set; }
+
+        public string StartupInput { get; set; }
 
         public string SessionTitle => _sessionTitle;
 
@@ -207,6 +210,7 @@ namespace SelfContainedDeployment.Terminal
                 UpdateSessionTitle(initialTitle);
                 PostMessage(new HostMessage { Type = "setTitle", Title = initialTitle });
                 PostMessage(new HostMessage { Type = "focus" });
+                TrySendStartupInput();
             }
             catch (Exception ex)
             {
@@ -279,6 +283,21 @@ namespace SelfContainedDeployment.Terminal
             LogTerminalEvent("input.sent", "Input forwarded to terminal", new Dictionary<string, string>
             {
                 ["length"] = text.Length.ToString(),
+            });
+        }
+
+        private void TrySendStartupInput()
+        {
+            if (_startupInputSent || string.IsNullOrWhiteSpace(StartupInput))
+            {
+                return;
+            }
+
+            _connection?.WriteInput(StartupInput);
+            _startupInputSent = true;
+            LogTerminalEvent("startup-input.sent", "Startup input sent to terminal", new Dictionary<string, string>
+            {
+                ["length"] = StartupInput.Length.ToString(),
             });
         }
 

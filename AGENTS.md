@@ -23,9 +23,11 @@ The app is no longer the original sample shell.
 
 What exists now:
 
-- fixed native shell layout with a dense inline sidebar and a top tab strip
-- multiple projects, each with nested threads and per-thread tab sets
-- terminal tabs backed by `TerminalControl`
+- fixed native shell layout with a dense inline sidebar and a top pane strip
+- multiple projects, each with nested threads and per-thread pane workspaces
+- terminal panes backed by `TerminalControl`
+- browser preview panes backed by `WebView2` with a built-in start page and project-aware intent
+- editor panes backed by `TerminalControl` launching `nvim .`
 - ConPTY process bridge in C#
 - shared renderer under `Web/` hosted inside `WebView2`
 - WebView2 CDP debug workflow for Playwright-style inspection
@@ -34,9 +36,10 @@ What exists now:
 
 What does not exist yet:
 
-- split panes inside a tab
-- custom tab strip visuals
+- thread overview / niri-style vertical workspace navigation
 - durable workspace/session persistence
+- richer browser profile isolation beyond the current fallback path
+- custom pane-strip visuals and overview polish
 
 ## Important files
 
@@ -53,6 +56,11 @@ What does not exist yet:
 - [Terminal/ConPtyConnection.cs](/mnt/c/Users/lqassem/native-terminal-starter/Terminal/ConPtyConnection.cs)
 - [Terminal/TerminalControl.xaml](/mnt/c/Users/lqassem/native-terminal-starter/Terminal/TerminalControl.xaml)
 - [Terminal/TerminalControl.xaml.cs](/mnt/c/Users/lqassem/native-terminal-starter/Terminal/TerminalControl.xaml.cs)
+
+### Additional panes
+
+- [Panes/BrowserPaneControl.xaml](/mnt/c/Users/lqassem/native-terminal-starter/Panes/BrowserPaneControl.xaml)
+- [Panes/BrowserPaneControl.xaml.cs](/mnt/c/Users/lqassem/native-terminal-starter/Panes/BrowserPaneControl.xaml.cs)
 
 ### Native automation
 

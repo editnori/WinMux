@@ -1,3 +1,6 @@
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
+using SelfContainedDeployment.Panes;
 using SelfContainedDeployment.Terminal;
 using System;
 using System.Collections.Generic;
@@ -327,6 +330,21 @@ namespace SelfContainedDeployment.Shell
         public List<WorkspaceThread> Threads { get; } = new();
     }
 
+    public enum WorkspacePaneKind
+    {
+        Terminal,
+        Browser,
+        Editor,
+    }
+
+    public enum WorkspaceLayoutPreset
+    {
+        Solo = 1,
+        Dual = 2,
+        Triple = 3,
+        Quad = 4,
+    }
+
     public sealed class WorkspaceThread
     {
         public WorkspaceThread(WorkspaceProject project, string name)
@@ -334,6 +352,7 @@ namespace SelfContainedDeployment.Shell
             Project = project ?? throw new ArgumentNullException(nameof(project));
             Id = Guid.NewGuid().ToString("N");
             Name = name;
+            LayoutPreset = WorkspaceLayoutPreset.Dual;
         }
 
         public string Id { get; }
@@ -342,28 +361,97 @@ namespace SelfContainedDeployment.Shell
 
         public WorkspaceProject Project { get; }
 
-        public string SelectedTabId { get; set; }
+        public string SelectedPaneId { get; set; }
 
-        public List<TerminalTabRecord> Tabs { get; } = new();
+        public string SelectedTabId
+        {
+            get => SelectedPaneId;
+            set => SelectedPaneId = value;
+        }
 
-        public string TabSummary => Tabs.Count == 1 ? "1 tab" : $"{Tabs.Count} tabs";
+        public WorkspaceLayoutPreset LayoutPreset { get; set; }
+
+        public int VisiblePaneCapacity => Math.Clamp((int)LayoutPreset, 1, 4);
+
+        public List<WorkspacePaneRecord> Panes { get; } = new();
+
+        public string PaneSummary => Panes.Count == 1 ? "1 pane" : $"{Panes.Count} panes";
+
+        public string TabSummary => PaneSummary;
     }
 
-    public sealed class TerminalTabRecord
+    public abstract class WorkspacePaneRecord
     {
-        public TerminalTabRecord(string header, TerminalControl terminal)
+        protected WorkspacePaneRecord(string title, WorkspacePaneKind kind)
         {
             Id = Guid.NewGuid().ToString("N");
-            Header = header;
-            Terminal = terminal;
+            Title = title;
+            Kind = kind;
         }
 
         public string Id { get; }
 
-        public string Header { get; set; }
+        public string Title { get; set; }
 
-        public bool IsExited { get; set; }
+        public WorkspacePaneKind Kind { get; }
+
+        public virtual bool IsExited { get; protected set; }
+
+        public abstract FrameworkElement View { get; }
+
+        public abstract void ApplyTheme(ElementTheme theme);
+
+        public abstract void FocusPane();
+
+        public abstract void RequestLayout();
+
+        public abstract void DisposePane();
+    }
+
+    public sealed class TerminalPaneRecord : WorkspacePaneRecord
+    {
+        public TerminalPaneRecord(string title, TerminalControl terminal, WorkspacePaneKind kind = WorkspacePaneKind.Terminal)
+            : base(title, kind)
+        {
+            Terminal = terminal;
+        }
 
         public TerminalControl Terminal { get; }
+
+        public override FrameworkElement View => Terminal;
+
+        public override void ApplyTheme(ElementTheme theme) => Terminal.ApplyTheme(theme);
+
+        public override void FocusPane() => Terminal.FocusTerminal();
+
+        public override void RequestLayout() => Terminal.RequestFit();
+
+        public override void DisposePane() => Terminal.DisposeTerminal();
+
+        public void MarkExited()
+        {
+            IsExited = true;
+        }
+    }
+
+    public sealed class BrowserPaneRecord : WorkspacePaneRecord
+    {
+        public BrowserPaneRecord(string title, BrowserPaneControl browser)
+            : base(title, WorkspacePaneKind.Browser)
+        {
+            Browser = browser;
+        }
+
+        public BrowserPaneControl Browser { get; }
+
+        public override FrameworkElement View => Browser;
+
+        public override void ApplyTheme(ElementTheme theme) => Browser.ApplyTheme(theme);
+
+        public override void FocusPane() => Browser.FocusPane();
+
+        public override void RequestLayout() => Browser.RequestLayout();
+
+        public override void DisposePane() => Browser.DisposePane();
     }
 }

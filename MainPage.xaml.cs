@@ -7,6 +7,7 @@ using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using SelfContainedDeployment.Automation;
+using SelfContainedDeployment.Panes;
 using SelfContainedDeployment.Shell;
 using SelfContainedDeployment.Terminal;
 using System;
@@ -24,6 +25,7 @@ namespace SelfContainedDeployment
     {
         private readonly List<WorkspaceProject> _projects = new();
         private readonly Dictionary<string, TabViewItem> _tabItemsById = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, Border> _paneContainersById = new(StringComparer.Ordinal);
         private WorkspaceProject _activeProject;
         private WorkspaceThread _activeThread;
         private bool _showingSettings;
@@ -213,15 +215,15 @@ namespace SelfContainedDeployment
             request ??= new NativeAutomationTerminalStateRequest();
 
             List<NativeAutomationTerminalSnapshot> snapshots = new();
-            foreach ((WorkspaceProject project, WorkspaceThread thread, TerminalTabRecord tab) in EnumerateTerminalRecords())
+            foreach ((WorkspaceProject project, WorkspaceThread thread, TerminalPaneRecord pane) in EnumerateTerminalRecords())
             {
-                if (!string.IsNullOrWhiteSpace(request.TabId) && !string.Equals(tab.Id, request.TabId, StringComparison.OrdinalIgnoreCase))
+                if (!string.IsNullOrWhiteSpace(request.TabId) && !string.Equals(pane.Id, request.TabId, StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }
 
-                NativeAutomationTerminalSnapshot snapshot = await tab.Terminal.GetTerminalSnapshotAsync().ConfigureAwait(true);
-                snapshot.TabId = tab.Id;
+                NativeAutomationTerminalSnapshot snapshot = await pane.Terminal.GetTerminalSnapshotAsync().ConfigureAwait(true);
+                snapshot.TabId = pane.Id;
                 snapshot.ThreadId = thread.Id;
                 snapshot.ProjectId = project.Id;
                 snapshots.Add(snapshot);
@@ -229,7 +231,7 @@ namespace SelfContainedDeployment
 
             return new NativeAutomationTerminalStateResponse
             {
-                SelectedTabId = _activeThread?.SelectedTabId,
+                SelectedTabId = _activeThread?.SelectedPaneId,
                 Tabs = snapshots,
             };
         }
@@ -289,7 +291,7 @@ namespace SelfContainedDeployment
                 ProjectName = _activeProject?.Name,
                 ProjectPath = _activeProject?.RootPath,
                 ActiveThreadId = _activeThread?.Id,
-                ActiveTabId = _activeThread?.SelectedTabId,
+                ActiveTabId = _activeThread?.SelectedPaneId,
                 ActiveView = _showingSettings ? "settings" : "terminal",
                 Theme = ResolveTheme(SampleConfig.CurrentTheme).ToString().ToLowerInvariant(),
                 PaneOpen = ShellSplitView.IsPaneOpen,
@@ -310,7 +312,7 @@ namespace SelfContainedDeployment
                     case "togglepane":
                         ShellSplitView.IsPaneOpen = !ShellSplitView.IsPaneOpen;
                         UpdatePaneLayout();
-                        RequestFitForSelectedTerminal();
+                        RequestLayoutForVisiblePanes();
                         break;
                     case "showterminal":
                         ShowTerminalShell();
@@ -330,6 +332,14 @@ namespace SelfContainedDeployment
                         ShowTerminalShell();
                         AddTerminalTab(_activeProject, _activeThread);
                         break;
+                    case "newbrowserpane":
+                        ShowTerminalShell();
+                        AddBrowserPane(_activeProject, _activeThread, request.Value);
+                        break;
+                    case "neweditorpane":
+                        ShowTerminalShell();
+                        AddEditorPane(_activeProject, _activeThread);
+                        break;
                     case "selectproject":
                         ActivateProject(FindProject(request.ProjectId));
                         ShowTerminalShell();
@@ -346,8 +356,16 @@ namespace SelfContainedDeployment
                         MoveTabAfter(request.TabId, request.TargetTabId);
                         ShowTerminalShell();
                         break;
+                    case "setlayout":
+                        SetThreadLayout(request.ThreadId, request.Value);
+                        ShowTerminalShell();
+                        break;
                     case "closetab":
                         CloseTab(request.TabId);
+                        break;
+                    case "navigatebrowser":
+                        NavigateSelectedBrowser(request.Value);
+                        ShowTerminalShell();
                         break;
                     case "settheme":
                         ApplyTheme(ParseTheme(request.Value));
@@ -382,6 +400,7 @@ namespace SelfContainedDeployment
                     ["projectId"] = request.ProjectId ?? string.Empty,
                     ["threadId"] = request.ThreadId ?? string.Empty,
                     ["tabId"] = request.TabId ?? string.Empty,
+                    ["targetTabId"] = request.TargetTabId ?? string.Empty,
                     ["value"] = request.Value ?? string.Empty,
                 });
 
@@ -426,7 +445,7 @@ namespace SelfContainedDeployment
         {
             ShellSplitView.IsPaneOpen = !ShellSplitView.IsPaneOpen;
             UpdatePaneLayout();
-            RequestFitForSelectedTerminal();
+            RequestLayoutForVisiblePanes();
         }
 
         private void OnSettingsNavClicked(object sender, RoutedEventArgs e)
@@ -545,11 +564,31 @@ namespace SelfContainedDeployment
             AddTerminalTab(_activeProject, _activeThread);
         }
 
+        private void OnAddBrowserPaneClicked(object sender, RoutedEventArgs e)
+        {
+            if (_activeProject is not null && _activeThread is null)
+            {
+                ActivateThread(CreateThread(_activeProject));
+            }
+
+            AddBrowserPane(_activeProject, _activeThread);
+        }
+
+        private void OnAddEditorPaneClicked(object sender, RoutedEventArgs e)
+        {
+            if (_activeProject is not null && _activeThread is null)
+            {
+                ActivateThread(CreateThread(_activeProject));
+            }
+
+            AddEditorPane(_activeProject, _activeThread);
+        }
+
         private void TerminalTabs_TabCloseRequested(TabView sender, TabViewTabCloseRequestedEventArgs args)
         {
-            if (args.Item is TabViewItem item && item.Tag is TerminalTabRecord tab)
+            if (args.Item is TabViewItem item && item.Tag is WorkspacePaneRecord pane)
             {
-                CloseTab(tab.Id);
+                CloseTab(pane.Id);
             }
         }
 
@@ -560,19 +599,20 @@ namespace SelfContainedDeployment
                 return;
             }
 
-            if (TerminalTabs.SelectedItem is TabViewItem item && item.Tag is TerminalTabRecord tab)
+            if (TerminalTabs.SelectedItem is TabViewItem item && item.Tag is WorkspacePaneRecord pane)
             {
-                _activeThread.SelectedTabId = tab.Id;
-                LogAutomationEvent("shell", "tab.selected", $"Selected tab {tab.Id}", new Dictionary<string, string>
+                _activeThread.SelectedPaneId = pane.Id;
+                LogAutomationEvent("shell", "pane.selected", $"Selected pane {pane.Id}", new Dictionary<string, string>
                 {
-                    ["tabId"] = tab.Id,
+                    ["paneId"] = pane.Id,
+                    ["paneKind"] = pane.Kind.ToString().ToLowerInvariant(),
                     ["threadId"] = _activeThread.Id,
                     ["projectId"] = _activeProject?.Id ?? string.Empty,
                 });
             }
 
-            FocusSelectedTerminal();
-            RequestFitForSelectedTerminal();
+            FocusSelectedPane();
+            RequestLayoutForVisiblePanes();
             RefreshProjectTree();
             UpdateHeader();
         }
@@ -641,79 +681,172 @@ namespace SelfContainedDeployment
 
         private void EnsureThreadHasTab(WorkspaceProject project, WorkspaceThread thread)
         {
-            if (thread.Tabs.Count == 0)
+            if (thread.Panes.Count == 0)
             {
                 AddTerminalTab(project, thread);
             }
         }
 
-        private TerminalTabRecord AddTerminalTab(WorkspaceProject project, WorkspaceThread thread)
+        private TerminalPaneRecord AddTerminalTab(WorkspaceProject project, WorkspaceThread thread)
         {
             project ??= _activeProject ?? GetOrCreateProject(Environment.CurrentDirectory);
             thread ??= _activeThread ?? CreateThread(project);
 
+            TerminalPaneRecord pane = CreateTerminalPane(project, thread, WorkspacePaneKind.Terminal, startupInput: null, initialTitle: FormatProjectPath(project));
+            thread.Panes.Add(pane);
+            thread.SelectedPaneId = pane.Id;
+            project.SelectedThreadId = thread.Id;
+            PromoteLayoutForPaneCount(thread);
+
+            if (thread == _activeThread)
+            {
+                RefreshTabView();
+                RequestLayoutForVisiblePanes();
+            }
+
+            RefreshProjectTree();
+            LogAutomationEvent("shell", "pane.created", $"Created terminal pane {pane.Id}", new Dictionary<string, string>
+            {
+                ["paneId"] = pane.Id,
+                ["paneKind"] = pane.Kind.ToString().ToLowerInvariant(),
+                ["threadId"] = thread.Id,
+                ["projectId"] = project.Id,
+                ["shellCommand"] = pane.Terminal.ShellCommand ?? string.Empty,
+            });
+            return pane;
+        }
+
+        private BrowserPaneRecord AddBrowserPane(WorkspaceProject project, WorkspaceThread thread, string initialUri = null)
+        {
+            project ??= _activeProject ?? GetOrCreateProject(Environment.CurrentDirectory);
+            thread ??= _activeThread ?? CreateThread(project);
+
+            BrowserPaneControl browser = new()
+            {
+                ProjectId = project.Id,
+                ProjectName = project.Name,
+                ProjectPath = FormatProjectPath(project),
+                InitialUri = initialUri,
+            };
+            browser.ApplyTheme(ResolveTheme(SampleConfig.CurrentTheme));
+
+            BrowserPaneRecord pane = new("Preview", browser);
+            browser.TitleChanged += (_, title) =>
+            {
+                pane.Title = string.IsNullOrWhiteSpace(title) ? "Preview" : title;
+                LogAutomationEvent("browser", "title.changed", $"Browser title changed to {pane.Title}", new Dictionary<string, string>
+                {
+                    ["paneId"] = pane.Id,
+                    ["threadId"] = thread.Id,
+                    ["projectId"] = project.Id,
+                    ["title"] = pane.Title,
+                });
+                if (thread == _activeThread)
+                {
+                    UpdateTabViewItem(pane);
+                }
+            };
+
+            thread.Panes.Add(pane);
+            thread.SelectedPaneId = pane.Id;
+            project.SelectedThreadId = thread.Id;
+            PromoteLayoutForPaneCount(thread);
+
+            if (thread == _activeThread)
+            {
+                RefreshTabView();
+            }
+
+            RefreshProjectTree();
+            LogAutomationEvent("shell", "pane.created", $"Created browser pane {pane.Id}", new Dictionary<string, string>
+            {
+                ["paneId"] = pane.Id,
+                ["paneKind"] = pane.Kind.ToString().ToLowerInvariant(),
+                ["threadId"] = thread.Id,
+                ["projectId"] = project.Id,
+                ["initialUri"] = initialUri ?? string.Empty,
+            });
+            return pane;
+        }
+
+        private TerminalPaneRecord AddEditorPane(WorkspaceProject project, WorkspaceThread thread)
+        {
+            project ??= _activeProject ?? GetOrCreateProject(Environment.CurrentDirectory);
+            thread ??= _activeThread ?? CreateThread(project);
+
+            string startupInput = "nvim .\r";
+            TerminalPaneRecord pane = CreateTerminalPane(project, thread, WorkspacePaneKind.Editor, startupInput, "Editor");
+            thread.Panes.Add(pane);
+            thread.SelectedPaneId = pane.Id;
+            project.SelectedThreadId = thread.Id;
+            PromoteLayoutForPaneCount(thread);
+
+            if (thread == _activeThread)
+            {
+                RefreshTabView();
+                RequestLayoutForVisiblePanes();
+            }
+
+            RefreshProjectTree();
+            LogAutomationEvent("shell", "pane.created", $"Created editor pane {pane.Id}", new Dictionary<string, string>
+            {
+                ["paneId"] = pane.Id,
+                ["paneKind"] = pane.Kind.ToString().ToLowerInvariant(),
+                ["threadId"] = thread.Id,
+                ["projectId"] = project.Id,
+                ["startupInput"] = startupInput.Trim(),
+            });
+            return pane;
+        }
+
+        private TerminalPaneRecord CreateTerminalPane(WorkspaceProject project, WorkspaceThread thread, WorkspacePaneKind kind, string startupInput, string initialTitle)
+        {
             TerminalControl terminal = new()
             {
                 DisplayWorkingDirectory = FormatProjectPath(project),
                 InitialWorkingDirectory = FormatProjectPath(project),
                 ProcessWorkingDirectory = ShellProfiles.ResolveProcessWorkingDirectory(project.RootPath),
                 ShellCommand = ShellProfiles.BuildLaunchCommand(project.ShellProfileId, project.RootPath),
+                StartupInput = startupInput,
             };
 
             terminal.ApplyTheme(ResolveTheme(SampleConfig.CurrentTheme));
 
-            TerminalTabRecord tab = new(terminal.InitialTitleHint, terminal);
+            TerminalPaneRecord pane = new(initialTitle, terminal, kind);
             terminal.SessionTitleChanged += (_, title) =>
             {
-                tab.Header = title;
-                LogAutomationEvent("terminal", "title.changed", $"Terminal title changed to {title}", new Dictionary<string, string>
+                pane.Title = string.IsNullOrWhiteSpace(title) ? initialTitle : title;
+                LogAutomationEvent("terminal", "title.changed", $"Terminal title changed to {pane.Title}", new Dictionary<string, string>
                 {
-                    ["tabId"] = tab.Id,
+                    ["paneId"] = pane.Id,
                     ["threadId"] = thread.Id,
                     ["projectId"] = project.Id,
-                    ["title"] = title ?? string.Empty,
+                    ["title"] = pane.Title ?? string.Empty,
                 });
                 if (thread == _activeThread)
                 {
-                    UpdateTabViewItem(tab);
+                    UpdateTabViewItem(pane);
                 }
             };
             terminal.SessionExited += (_, _) =>
             {
-                tab.IsExited = true;
-                LogAutomationEvent("terminal", "session.exited", $"Terminal exited for tab {tab.Id}", new Dictionary<string, string>
+                pane.MarkExited();
+                LogAutomationEvent("terminal", "session.exited", $"Terminal exited for pane {pane.Id}", new Dictionary<string, string>
                 {
-                    ["tabId"] = tab.Id,
+                    ["paneId"] = pane.Id,
                     ["threadId"] = thread.Id,
                     ["projectId"] = project.Id,
+                    ["paneKind"] = pane.Kind.ToString().ToLowerInvariant(),
                 });
                 if (thread == _activeThread)
                 {
-                    UpdateTabViewItem(tab);
+                    UpdateTabViewItem(pane);
                 }
 
                 RefreshProjectTree();
             };
 
-            thread.Tabs.Add(tab);
-            thread.SelectedTabId = tab.Id;
-            project.SelectedThreadId = thread.Id;
-
-            if (thread == _activeThread)
-            {
-                RefreshTabView();
-                RequestFitForSelectedTerminal();
-            }
-
-            RefreshProjectTree();
-            LogAutomationEvent("shell", "tab.created", $"Created tab {tab.Id}", new Dictionary<string, string>
-            {
-                ["tabId"] = tab.Id,
-                ["threadId"] = thread.Id,
-                ["projectId"] = project.Id,
-                ["shellCommand"] = terminal.ShellCommand ?? string.Empty,
-            });
-            return tab;
+            return pane;
         }
 
         private void CloseTab(string tabId)
@@ -727,35 +860,36 @@ namespace SelfContainedDeployment
             {
                 foreach (WorkspaceThread thread in project.Threads)
                 {
-                    TerminalTabRecord tab = thread.Tabs.FirstOrDefault(candidate => candidate.Id == tabId);
-                    if (tab is null)
+                    WorkspacePaneRecord pane = thread.Panes.FirstOrDefault(candidate => candidate.Id == tabId);
+                    if (pane is null)
                     {
                         continue;
                     }
 
-                    RemoveTabViewItem(tab.Id);
-                    tab.Terminal.DisposeTerminal();
-                    thread.Tabs.Remove(tab);
+                    RemoveTabViewItem(pane.Id);
+                    pane.DisposePane();
+                    thread.Panes.Remove(pane);
 
-                    if (thread.Tabs.Count == 0)
+                    if (thread.Panes.Count == 0)
                     {
                         AddTerminalTab(project, thread);
                     }
 
-                    thread.SelectedTabId = thread.Tabs.FirstOrDefault()?.Id;
+                    thread.SelectedPaneId = thread.Panes.FirstOrDefault()?.Id;
 
                     if (thread == _activeThread)
                     {
                         RefreshTabView();
-                        FocusSelectedTerminal();
-                        RequestFitForSelectedTerminal();
+                        FocusSelectedPane();
+                        RequestLayoutForVisiblePanes();
                     }
 
                     RefreshProjectTree();
                     UpdateHeader();
-                    LogAutomationEvent("shell", "tab.closed", $"Closed tab {tab.Id}", new Dictionary<string, string>
+                    LogAutomationEvent("shell", "pane.closed", $"Closed pane {pane.Id}", new Dictionary<string, string>
                     {
-                        ["tabId"] = tab.Id,
+                        ["paneId"] = pane.Id,
+                        ["paneKind"] = pane.Kind.ToString().ToLowerInvariant(),
                         ["threadId"] = thread.Id,
                         ["projectId"] = project.Id,
                     });
@@ -775,18 +909,18 @@ namespace SelfContainedDeployment
             {
                 foreach (WorkspaceThread thread in project.Threads)
                 {
-                    TerminalTabRecord tab = thread.Tabs.FirstOrDefault(candidate => candidate.Id == tabId);
-                    if (tab is null)
+                    WorkspacePaneRecord pane = thread.Panes.FirstOrDefault(candidate => candidate.Id == tabId);
+                    if (pane is null)
                     {
                         continue;
                     }
 
                     ActivateThread(thread);
-                    thread.SelectedTabId = tab.Id;
+                    thread.SelectedPaneId = pane.Id;
                     project.SelectedThreadId = thread.Id;
                     RefreshTabView();
-                    FocusSelectedTerminal();
-                    RequestFitForSelectedTerminal();
+                    FocusSelectedPane();
+                    RequestLayoutForVisiblePanes();
                     return;
                 }
             }
@@ -805,31 +939,31 @@ namespace SelfContainedDeployment
             {
                 foreach (WorkspaceThread thread in project.Threads)
                 {
-                    int sourceIndex = thread.Tabs.FindIndex(candidate => candidate.Id == tabId);
-                    int targetIndex = thread.Tabs.FindIndex(candidate => candidate.Id == targetTabId);
+                    int sourceIndex = thread.Panes.FindIndex(candidate => candidate.Id == tabId);
+                    int targetIndex = thread.Panes.FindIndex(candidate => candidate.Id == targetTabId);
                     if (sourceIndex < 0 || targetIndex < 0)
                     {
                         continue;
                     }
 
-                    TerminalTabRecord source = thread.Tabs[sourceIndex];
-                    thread.Tabs.RemoveAt(sourceIndex);
+                    WorkspacePaneRecord source = thread.Panes[sourceIndex];
+                    thread.Panes.RemoveAt(sourceIndex);
                     if (sourceIndex < targetIndex)
                     {
                         targetIndex--;
                     }
 
-                    thread.Tabs.Insert(targetIndex + 1, source);
+                    thread.Panes.Insert(targetIndex + 1, source);
 
                     if (thread == _activeThread)
                     {
                         RefreshTabView();
                     }
 
-                    LogAutomationEvent("shell", "tab.moved", $"Moved tab {tabId} after {targetTabId}", new Dictionary<string, string>
+                    LogAutomationEvent("shell", "pane.moved", $"Moved pane {tabId} after {targetTabId}", new Dictionary<string, string>
                     {
-                        ["tabId"] = tabId,
-                        ["targetTabId"] = targetTabId,
+                        ["paneId"] = tabId,
+                        ["targetPaneId"] = targetTabId,
                         ["threadId"] = thread.Id,
                         ["projectId"] = project.Id,
                     });
@@ -838,6 +972,75 @@ namespace SelfContainedDeployment
             }
 
             throw new InvalidOperationException($"Could not move tab '{tabId}' after '{targetTabId}'.");
+        }
+
+        private static void PromoteLayoutForPaneCount(WorkspaceThread thread)
+        {
+            if (thread is null)
+            {
+                return;
+            }
+
+            thread.LayoutPreset = thread.Panes.Count switch
+            {
+                <= 1 => WorkspaceLayoutPreset.Solo,
+                2 => WorkspaceLayoutPreset.Dual,
+                3 => WorkspaceLayoutPreset.Triple,
+                _ => WorkspaceLayoutPreset.Quad,
+            };
+        }
+
+        private void SetThreadLayout(string threadId, string value)
+        {
+            WorkspaceThread thread = string.IsNullOrWhiteSpace(threadId) ? _activeThread : FindThread(threadId);
+            if (thread is null)
+            {
+                return;
+            }
+
+            thread.LayoutPreset = ParseLayoutPreset(value);
+            if (ReferenceEquals(thread, _activeThread))
+            {
+                RefreshTabView();
+                RequestLayoutForVisiblePanes();
+            }
+
+            RefreshProjectTree();
+            LogAutomationEvent("shell", "thread.layout_changed", $"Thread layout changed to {thread.LayoutPreset}", new Dictionary<string, string>
+            {
+                ["threadId"] = thread.Id,
+                ["projectId"] = thread.Project.Id,
+                ["layout"] = thread.LayoutPreset.ToString().ToLowerInvariant(),
+            });
+        }
+
+        private void NavigateSelectedBrowser(string value)
+        {
+            if (TerminalTabs.SelectedItem is not TabViewItem item || item.Tag is not BrowserPaneRecord pane)
+            {
+                return;
+            }
+
+            pane.Browser.Navigate(value);
+            LogAutomationEvent("browser", "navigate.requested", $"Browser navigate requested for pane {pane.Id}", new Dictionary<string, string>
+            {
+                ["paneId"] = pane.Id,
+                ["threadId"] = _activeThread?.Id ?? string.Empty,
+                ["projectId"] = _activeProject?.Id ?? string.Empty,
+                ["value"] = value ?? string.Empty,
+            });
+        }
+
+        private static WorkspaceLayoutPreset ParseLayoutPreset(string value)
+        {
+            return value?.Trim().ToLowerInvariant() switch
+            {
+                "1" or "solo" or "single" => WorkspaceLayoutPreset.Solo,
+                "2" or "dual" or "split" => WorkspaceLayoutPreset.Dual,
+                "3" or "triple" => WorkspaceLayoutPreset.Triple,
+                "4" or "quad" or "grid" => WorkspaceLayoutPreset.Quad,
+                _ => WorkspaceLayoutPreset.Quad,
+            };
         }
 
         private void ActivateProject(WorkspaceProject project)
@@ -886,7 +1089,7 @@ namespace SelfContainedDeployment
             RefreshTabView();
             UpdateWorkspaceVisibility();
             UpdateHeader();
-            RequestFitForSelectedTerminal();
+            RequestLayoutForVisiblePanes();
             LogAutomationEvent("shell", "thread.selected", $"Selected thread {thread.Name}", new Dictionary<string, string>
             {
                 ["threadId"] = thread.Id,
@@ -936,9 +1139,24 @@ namespace SelfContainedDeployment
             WorkspaceProject project = FindProjectForThread(source);
             WorkspaceThread duplicate = CreateThread(project, $"Copy of {source.Name}");
 
-            for (int i = 1; i < source.Tabs.Count; i++)
+            duplicate.LayoutPreset = source.LayoutPreset;
+            ClearThreadPanes(project, duplicate);
+
+            foreach (WorkspacePaneRecord pane in source.Panes)
             {
-                AddTerminalTab(project, duplicate);
+                switch (pane.Kind)
+                {
+                    case WorkspacePaneKind.Browser:
+                        string currentUri = (pane as BrowserPaneRecord)?.Browser.CurrentUri;
+                        AddBrowserPane(project, duplicate, currentUri);
+                        break;
+                    case WorkspacePaneKind.Editor:
+                        AddEditorPane(project, duplicate);
+                        break;
+                    default:
+                        AddTerminalTab(project, duplicate);
+                        break;
+                }
             }
 
             ActivateThread(duplicate);
@@ -957,11 +1175,7 @@ namespace SelfContainedDeployment
             WorkspaceProject project = FindProjectForThread(thread);
             bool wasActive = ReferenceEquals(thread, _activeThread);
 
-            foreach (TerminalTabRecord tab in thread.Tabs)
-            {
-                RemoveTabViewItem(tab.Id);
-                tab.Terminal.DisposeTerminal();
-            }
+            ClearThreadPanes(project, thread);
 
             project.Threads.Remove(thread);
             if (string.Equals(project.SelectedThreadId, thread.Id, StringComparison.Ordinal))
@@ -1001,6 +1215,29 @@ namespace SelfContainedDeployment
                 ["threadId"] = thread.Id,
                 ["projectId"] = project.Id,
                 ["remainingThreadCount"] = project.Threads.Count.ToString(),
+            });
+        }
+
+        private void ClearThreadPanes(WorkspaceProject project, WorkspaceThread thread)
+        {
+            foreach (WorkspacePaneRecord pane in thread.Panes.ToList())
+            {
+                RemoveTabViewItem(pane.Id);
+                pane.DisposePane();
+            }
+
+            thread.Panes.Clear();
+            thread.SelectedPaneId = null;
+
+            if (ReferenceEquals(thread, _activeThread))
+            {
+                RefreshTabView();
+            }
+
+            LogAutomationEvent("shell", "thread.panes_cleared", $"Cleared panes for thread {thread.Name}", new Dictionary<string, string>
+            {
+                ["threadId"] = thread.Id,
+                ["projectId"] = project?.Id ?? string.Empty,
             });
         }
 
@@ -1209,7 +1446,7 @@ namespace SelfContainedDeployment
                 return;
             }
 
-            List<TabViewItem> desiredItems = _activeThread.Tabs
+            List<TabViewItem> desiredItems = _activeThread.Panes
                 .Select(GetOrCreateTabViewItem)
                 .ToList();
 
@@ -1238,9 +1475,9 @@ namespace SelfContainedDeployment
                 TerminalTabs.TabItems.Insert(index, desiredItem);
             }
 
-            string selectedTabId = _activeThread.SelectedTabId ?? _activeThread.Tabs.FirstOrDefault()?.Id;
+            string selectedTabId = _activeThread.SelectedPaneId ?? _activeThread.Panes.FirstOrDefault()?.Id;
             TabViewItem selectedItem = desiredItems
-                .FirstOrDefault(item => (item.Tag as TerminalTabRecord)?.Id == selectedTabId)
+                .FirstOrDefault(item => (item.Tag as WorkspacePaneRecord)?.Id == selectedTabId)
                 ?? desiredItems.FirstOrDefault();
 
             if (!ReferenceEquals(TerminalTabs.SelectedItem, selectedItem))
@@ -1256,36 +1493,37 @@ namespace SelfContainedDeployment
                 }
             }
 
-            if (selectedItem?.Tag is TerminalTabRecord selectedTab)
+            if (selectedItem?.Tag is WorkspacePaneRecord selectedPane)
             {
-                _activeThread.SelectedTabId = selectedTab.Id;
+                _activeThread.SelectedPaneId = selectedPane.Id;
             }
 
+            RenderPaneWorkspace();
             UpdateWorkspaceVisibility();
-            LogAutomationEvent("render", "tabview.refreshed", $"TabView refreshed for thread {_activeThread.Name}", new Dictionary<string, string>
+            LogAutomationEvent("render", "pane-strip.refreshed", $"Pane strip refreshed for thread {_activeThread.Name}", new Dictionary<string, string>
             {
                 ["threadId"] = _activeThread.Id,
                 ["projectId"] = _activeProject?.Id ?? string.Empty,
-                ["tabCount"] = _activeThread.Tabs.Count.ToString(),
+                ["paneCount"] = _activeThread.Panes.Count.ToString(),
             });
         }
 
-        private TabViewItem GetOrCreateTabViewItem(TerminalTabRecord tab)
+        private TabViewItem GetOrCreateTabViewItem(WorkspacePaneRecord pane)
         {
-            if (!_tabItemsById.TryGetValue(tab.Id, out TabViewItem item))
+            if (!_tabItemsById.TryGetValue(pane.Id, out TabViewItem item))
             {
                 item = new TabViewItem
                 {
-                    Content = tab.Terminal,
+                    Content = null,
                     IsClosable = true,
-                    Tag = tab,
+                    Tag = pane,
                 };
-                AutomationProperties.SetAutomationId(item, $"shell-tab-{tab.Id}");
-                _tabItemsById[tab.Id] = item;
+                AutomationProperties.SetAutomationId(item, $"shell-tab-{pane.Id}");
+                _tabItemsById[pane.Id] = item;
             }
 
-            item.Tag = tab;
-            object nextHeader = FormatTabHeader(tab.Header, tab.IsExited);
+            item.Tag = pane;
+            object nextHeader = FormatTabHeader(pane.Title, pane.Kind, pane.IsExited);
             if (!Equals(item.Header, nextHeader))
             {
                 item.Header = nextHeader;
@@ -1294,15 +1532,15 @@ namespace SelfContainedDeployment
             return item;
         }
 
-        private void UpdateTabViewItem(TerminalTabRecord tab)
+        private void UpdateTabViewItem(WorkspacePaneRecord pane)
         {
-            if (tab is null)
+            if (pane is null)
             {
                 return;
             }
 
-            TabViewItem item = GetOrCreateTabViewItem(tab);
-            object nextHeader = FormatTabHeader(tab.Header, tab.IsExited);
+            TabViewItem item = GetOrCreateTabViewItem(pane);
+            object nextHeader = FormatTabHeader(pane.Title, pane.Kind, pane.IsExited);
             if (!Equals(item.Header, nextHeader))
             {
                 item.Header = nextHeader;
@@ -1319,6 +1557,7 @@ namespace SelfContainedDeployment
             TerminalTabs.TabItems.Remove(item);
             item.Content = null;
             _tabItemsById.Remove(tabId);
+            RemovePaneContainer(tabId);
         }
 
         private int FindTabViewIndex(TabViewItem target)
@@ -1332,6 +1571,150 @@ namespace SelfContainedDeployment
             }
 
             return -1;
+        }
+
+        private void RemovePaneContainer(string paneId)
+        {
+            if (string.IsNullOrWhiteSpace(paneId) || !_paneContainersById.TryGetValue(paneId, out Border container))
+            {
+                return;
+            }
+
+            PaneWorkspaceGrid.Children.Remove(container);
+            container.Child = null;
+            _paneContainersById.Remove(paneId);
+        }
+
+        private void RenderPaneWorkspace()
+        {
+            PaneWorkspaceGrid.RowDefinitions.Clear();
+            PaneWorkspaceGrid.ColumnDefinitions.Clear();
+
+            if (_activeThread is null || _showingSettings)
+            {
+                foreach (Border container in _paneContainersById.Values)
+                {
+                    container.Visibility = Visibility.Collapsed;
+                }
+
+                return;
+            }
+
+            List<WorkspacePaneRecord> visiblePanes = GetVisiblePanes(_activeThread).ToList();
+            if (visiblePanes.Count == 0)
+            {
+                foreach (Border container in _paneContainersById.Values)
+                {
+                    container.Visibility = Visibility.Collapsed;
+                }
+
+                return;
+            }
+
+            foreach (Border container in _paneContainersById.Values)
+            {
+                container.Visibility = Visibility.Collapsed;
+            }
+
+            switch (visiblePanes.Count)
+            {
+                case 1:
+                    PaneWorkspaceGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+                    PaneWorkspaceGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                    AddPaneCell(visiblePanes[0], 0, 0);
+                    break;
+                case 2:
+                    PaneWorkspaceGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+                    PaneWorkspaceGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                    PaneWorkspaceGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                    AddPaneCell(visiblePanes[0], 0, 0);
+                    AddPaneCell(visiblePanes[1], 0, 1);
+                    break;
+                case 3:
+                    PaneWorkspaceGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+                    PaneWorkspaceGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+                    PaneWorkspaceGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.2, GridUnitType.Star) });
+                    PaneWorkspaceGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.8, GridUnitType.Star) });
+                    AddPaneCell(visiblePanes[0], 0, 0, rowSpan: 2);
+                    AddPaneCell(visiblePanes[1], 0, 1);
+                    AddPaneCell(visiblePanes[2], 1, 1);
+                    break;
+                default:
+                    PaneWorkspaceGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+                    PaneWorkspaceGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+                    PaneWorkspaceGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                    PaneWorkspaceGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                    AddPaneCell(visiblePanes[0], 0, 0);
+                    AddPaneCell(visiblePanes[1], 0, 1);
+                    AddPaneCell(visiblePanes[2], 1, 0);
+                    AddPaneCell(visiblePanes[3], 1, 1);
+                    break;
+            }
+        }
+
+        private void AddPaneCell(WorkspacePaneRecord pane, int row, int column, int rowSpan = 1, int columnSpan = 1)
+        {
+            if (!_paneContainersById.TryGetValue(pane.Id, out Border border))
+            {
+                border = new Border
+                {
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(6),
+                    Background = (Brush)Application.Current.Resources["ShellSurfaceBackgroundBrush"],
+                    Child = pane.View,
+                    Margin = new Thickness(10),
+                };
+                _paneContainersById[pane.Id] = border;
+                PaneWorkspaceGrid.Children.Add(border);
+            }
+
+            border.Visibility = Visibility.Visible;
+            border.BorderBrush = (Brush)Application.Current.Resources[ReferenceEquals(GetSelectedPane(_activeThread), pane)
+                ? "ShellNavActiveBrush"
+                : "ShellBorderBrush"];
+            Grid.SetRow(border, row);
+            Grid.SetColumn(border, column);
+            Grid.SetRowSpan(border, rowSpan);
+            Grid.SetColumnSpan(border, columnSpan);
+
+            if (pane is BrowserPaneRecord browserPane)
+            {
+                _ = browserPane.Browser.EnsureInitializedAsync();
+            }
+        }
+
+        private IEnumerable<WorkspacePaneRecord> GetVisiblePanes(WorkspaceThread thread)
+        {
+            if (thread is null || thread.Panes.Count == 0)
+            {
+                return Enumerable.Empty<WorkspacePaneRecord>();
+            }
+
+            int capacity = Math.Min(thread.VisiblePaneCapacity, thread.Panes.Count);
+            if (capacity <= 0)
+            {
+                capacity = 1;
+            }
+
+            int selectedIndex = thread.Panes.FindIndex(candidate => candidate.Id == thread.SelectedPaneId);
+            if (selectedIndex < 0)
+            {
+                selectedIndex = 0;
+            }
+
+            int start = Math.Max(0, selectedIndex - (capacity - 1));
+            if (start + capacity > thread.Panes.Count)
+            {
+                start = Math.Max(0, thread.Panes.Count - capacity);
+            }
+
+            return thread.Panes.Skip(start).Take(capacity);
+        }
+
+        private static WorkspacePaneRecord GetSelectedPane(WorkspaceThread thread)
+        {
+            return thread?.Panes.FirstOrDefault(candidate => candidate.Id == thread.SelectedPaneId)
+                ?? thread?.Panes.FirstOrDefault();
         }
 
         private void ShowSettings()
@@ -1349,32 +1732,33 @@ namespace SelfContainedDeployment
             _showingSettings = false;
             UpdateWorkspaceVisibility();
             UpdateSidebarActions();
-            FocusSelectedTerminal();
-            RequestFitForSelectedTerminal();
+            FocusSelectedPane();
+            RequestLayoutForVisiblePanes();
             UpdateHeader();
-            LogAutomationEvent("shell", "view.terminal", _activeThread is null ? "Showing empty project state" : "Showing terminal workspace", new Dictionary<string, string>
+            LogAutomationEvent("shell", "view.terminal", _activeThread is null ? "Showing empty project state" : "Showing pane workspace", new Dictionary<string, string>
             {
                 ["projectId"] = _activeProject?.Id ?? string.Empty,
                 ["threadId"] = _activeThread?.Id ?? string.Empty,
             });
         }
 
-        private void FocusSelectedTerminal()
+        private void FocusSelectedPane()
         {
-            if (TerminalTabs.SelectedItem is TabViewItem item && item.Tag is TerminalTabRecord tab)
+            if (TerminalTabs.SelectedItem is TabViewItem item && item.Tag is WorkspacePaneRecord pane)
             {
-                tab.Terminal.FocusTerminal();
+                pane.FocusPane();
             }
         }
 
-        private void RequestFitForSelectedTerminal()
+        private void RequestLayoutForVisiblePanes()
         {
-            if (TerminalTabs.SelectedItem is TabViewItem item && item.Tag is TerminalTabRecord tab)
+            foreach (WorkspacePaneRecord pane in GetVisiblePanes(_activeThread))
             {
-                tab.Terminal.RequestFit();
-                LogAutomationEvent("render", "terminal.fit_requested", $"Requested fit for tab {tab.Id}", new Dictionary<string, string>
+                pane.RequestLayout();
+                LogAutomationEvent("render", "pane.layout_requested", $"Requested layout for pane {pane.Id}", new Dictionary<string, string>
                 {
-                    ["tabId"] = tab.Id,
+                    ["paneId"] = pane.Id,
+                    ["paneKind"] = pane.Kind.ToString().ToLowerInvariant(),
                     ["threadId"] = _activeThread?.Id ?? string.Empty,
                     ["projectId"] = _activeProject?.Id ?? string.Empty,
                 });
@@ -1383,12 +1767,12 @@ namespace SelfContainedDeployment
 
         private void SendInputToSelectedTerminal(string text)
         {
-            if (TerminalTabs.SelectedItem is TabViewItem item && item.Tag is TerminalTabRecord tab)
+            if (TerminalTabs.SelectedItem is TabViewItem item && item.Tag is TerminalPaneRecord pane)
             {
-                tab.Terminal.SendInput(text);
+                pane.Terminal.SendInput(text);
                 LogAutomationEvent("terminal", "input.sent", "Sent input to selected terminal", new Dictionary<string, string>
                 {
-                    ["tabId"] = tab.Id,
+                    ["paneId"] = pane.Id,
                     ["threadId"] = _activeThread?.Id ?? string.Empty,
                     ["projectId"] = _activeProject?.Id ?? string.Empty,
                     ["length"] = (text?.Length ?? 0).ToString(),
@@ -1450,7 +1834,7 @@ namespace SelfContainedDeployment
             if (_showingSettings)
             {
                 SettingsFrame.Visibility = Visibility.Visible;
-                TerminalTabs.Visibility = Visibility.Collapsed;
+                PaneWorkspaceShell.Visibility = Visibility.Collapsed;
                 EmptyThreadStatePanel.Visibility = Visibility.Collapsed;
                 return;
             }
@@ -1458,26 +1842,31 @@ namespace SelfContainedDeployment
             SettingsFrame.Visibility = Visibility.Collapsed;
 
             bool showEmptyState = _activeProject is not null && _activeThread is null;
-            TerminalTabs.Visibility = showEmptyState ? Visibility.Collapsed : Visibility.Visible;
+            PaneWorkspaceShell.Visibility = showEmptyState ? Visibility.Collapsed : Visibility.Visible;
             EmptyThreadStatePanel.Visibility = showEmptyState ? Visibility.Visible : Visibility.Collapsed;
         }
 
         private void ApplyThemeToAllTerminals(ElementTheme resolvedTheme)
         {
-            foreach (TerminalControl terminal in EnumerateTerminals())
+            foreach (WorkspacePaneRecord pane in EnumeratePaneRecords())
             {
-                terminal.ApplyTheme(resolvedTheme);
+                pane.ApplyTheme(resolvedTheme);
             }
         }
 
         private IEnumerable<TerminalControl> EnumerateTerminals()
         {
-            return EnumerateTerminalRecords().Select(record => record.Tab.Terminal);
+            return EnumerateTerminalRecords().Select(record => record.Pane.Terminal);
         }
 
-        private IEnumerable<(WorkspaceProject Project, WorkspaceThread Thread, TerminalTabRecord Tab)> EnumerateTerminalRecords()
+        private IEnumerable<WorkspacePaneRecord> EnumeratePaneRecords()
         {
-            return _projects.SelectMany(project => project.Threads.SelectMany(thread => thread.Tabs.Select(tab => (project, thread, tab))));
+            return _projects.SelectMany(project => project.Threads.SelectMany(thread => thread.Panes));
+        }
+
+        private IEnumerable<(WorkspaceProject Project, WorkspaceThread Thread, TerminalPaneRecord Pane)> EnumerateTerminalRecords()
+        {
+            return _projects.SelectMany(project => project.Threads.SelectMany(thread => thread.Panes.OfType<TerminalPaneRecord>().Select(pane => (project, thread, pane))));
         }
 
         private WorkspaceProject ResolveActionProject(NativeAutomationActionRequest request)
@@ -2321,12 +2710,22 @@ namespace SelfContainedDeployment
             {
                 Id = thread.Id,
                 Name = thread.Name,
-                SelectedTabId = thread.SelectedTabId,
-                TabCount = thread.Tabs.Count,
-                Tabs = thread.Tabs.Select(tab => new NativeAutomationTabState
+                SelectedTabId = thread.SelectedPaneId,
+                TabCount = thread.Panes.Count,
+                PaneCount = thread.Panes.Count,
+                Layout = thread.LayoutPreset.ToString().ToLowerInvariant(),
+                Tabs = thread.Panes.Select(tab => new NativeAutomationTabState
                 {
                     Id = tab.Id,
-                    Title = FormatTabHeader(tab.Header),
+                    Kind = tab.Kind.ToString().ToLowerInvariant(),
+                    Title = FormatTabHeader(tab.Title, tab.Kind),
+                    Exited = tab.IsExited,
+                }).ToList(),
+                Panes = thread.Panes.Select(tab => new NativeAutomationTabState
+                {
+                    Id = tab.Id,
+                    Kind = tab.Kind.ToString().ToLowerInvariant(),
+                    Title = FormatTabHeader(tab.Title, tab.Kind),
                     Exited = tab.IsExited,
                 }).ToList(),
             };
@@ -2395,12 +2794,17 @@ namespace SelfContainedDeployment
             return project.DisplayPath;
         }
 
-        private static string FormatTabHeader(string title, bool exited = false)
+        private static string FormatTabHeader(string title, WorkspacePaneKind kind = WorkspacePaneKind.Terminal, bool exited = false)
         {
             string nextTitle;
             if (string.IsNullOrWhiteSpace(title))
             {
-                nextTitle = "shell";
+                nextTitle = kind switch
+                {
+                    WorkspacePaneKind.Browser => "preview",
+                    WorkspacePaneKind.Editor => "editor",
+                    _ => "shell",
+                };
             }
             else
             {
@@ -2416,7 +2820,15 @@ namespace SelfContainedDeployment
                 nextTitle = nextTitle[..28];
             }
 
-            return exited ? $"{nextTitle} (ended)" : nextTitle;
+            string prefix = kind switch
+            {
+                WorkspacePaneKind.Browser => "Web",
+                WorkspacePaneKind.Editor => "Edit",
+                _ => string.Empty,
+            };
+
+            string formatted = string.IsNullOrWhiteSpace(prefix) ? nextTitle : $"{prefix} {nextTitle}";
+            return exited ? $"{formatted} (ended)" : formatted;
         }
 
         private async System.Threading.Tasks.Task<ProjectDraft> PromptForProjectAsync()

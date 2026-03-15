@@ -40,6 +40,9 @@ bun run native:events
 bun run native:events:clear
 bun run native:recording-status
 bun run native:action -- '{"action":"newThread"}'
+bun run native:action -- '{"action":"newBrowserPane"}'
+bun run native:action -- '{"action":"newEditorPane"}'
+bun run native:action -- '{"action":"setLayout","value":"3"}'
 bun run native:ui-action -- '{"action":"click","automationId":"shell-nav-settings"}'
 bun run native:desktop-action -- '{"action":"focusWindow","titleContains":"WinMux"}'
 bun run native:desktop-uia-action -- '{"action":"invoke","titleContains":"Browse for Folder","name":"OK"}'
@@ -69,11 +72,15 @@ Supported `action` values:
 - `newProject`
 - `newThread`
 - `newTab`
+- `newBrowserPane`
+- `newEditorPane`
 - `selectProject`
 - `selectThread`
 - `selectTab`
 - `moveTabAfter`
 - `closeTab`
+- `setLayout`
+- `navigateBrowser`
 - `setTheme`
 - `setProfile`
 - `renameThread`
@@ -92,8 +99,12 @@ Relevant payload fields:
 Notes:
 
 - `newProject` on the semantic route creates a project directly from `value` without opening the dialog.
-- `input` sends text to the selected terminal tab, not to arbitrary native controls.
-- `moveTabAfter` provides a semantic tab reorder path without coordinate dragging.
+- `newBrowserPane` adds a project-aware preview pane to the active thread.
+- `newEditorPane` adds a terminal-backed editor pane that launches `nvim .`.
+- `setLayout` accepts `1|2|3|4` or `solo|dual|triple|quad`.
+- `navigateBrowser` sends a URL to the selected browser pane; an empty `value` returns it to the built-in start page.
+- `input` sends text to the selected terminal/editor pane, not to arbitrary native controls.
+- `moveTabAfter` provides a semantic pane reorder path without coordinate dragging.
 
 ### Generic UI actions
 
