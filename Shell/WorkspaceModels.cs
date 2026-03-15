@@ -357,6 +357,7 @@ namespace SelfContainedDeployment.Shell
         Terminal,
         Browser,
         Editor,
+        Diff,
     }
 
     public enum WorkspaceLayoutPreset
@@ -496,5 +497,31 @@ namespace SelfContainedDeployment.Shell
         public override void RequestLayout() => Browser.RequestLayout();
 
         public override void DisposePane() => Browser.DisposePane();
+    }
+
+    public sealed class DiffPaneRecord : WorkspacePaneRecord
+    {
+        public DiffPaneRecord(string title, DiffPaneControl diffPane, string diffPath = null, string id = null)
+            : base(title, WorkspacePaneKind.Diff, id)
+        {
+            DiffPane = diffPane;
+            DiffPath = diffPath;
+        }
+
+        public DiffPaneControl DiffPane { get; }
+
+        public string DiffPath { get; set; }
+
+        public override FrameworkElement View => DiffPane;
+
+        public override void ApplyTheme(ElementTheme theme) => DiffPane.ApplyTheme(theme);
+
+        public override void FocusPane() => DiffPane.FocusPane();
+
+        public override void RequestLayout() => DiffPane.RequestLayout();
+
+        public override void DisposePane()
+        {
+        }
     }
 }

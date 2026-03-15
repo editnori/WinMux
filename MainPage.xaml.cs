@@ -4,7 +4,6 @@ using Microsoft.UI.Xaml.Automation.Peers;
 using Microsoft.UI.Xaml.Automation.Provider;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
-using Microsoft.UI.Xaml.Documents;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Dispatching;
@@ -909,6 +908,7 @@ namespace SelfContainedDeployment
 
             _activeGitSnapshot.SelectedPath = changedFile.Path;
             UpdateDiffFileSelection();
+            AddOrSelectDiffPane(_activeProject, _activeThread, changedFile.Path, null);
             QueueActiveThreadGitRefresh(changedFile.Path);
         }
 
@@ -1068,6 +1068,7 @@ namespace SelfContainedDeployment
                                 Title = pane.Title,
                                 HasCustomTitle = pane.HasCustomTitle,
                                 BrowserUri = pane is BrowserPaneRecord browserPane ? browserPane.Browser.CurrentUri : null,
+                                DiffPath = pane is DiffPaneRecord diffPane ? diffPane.DiffPath : null,
                                 ReplayTool = pane.ReplayTool,
                                 ReplaySessionId = pane.ReplaySessionId,
                                 ReplayCommand = pane.ReplayCommand,
@@ -1254,6 +1255,11 @@ namespace SelfContainedDeployment
             project ??= _activeProject ?? GetOrCreateProject(Environment.CurrentDirectory);
             thread ??= _activeThread ?? CreateThread(project);
 
+            if (paneKind == WorkspacePaneKind.Diff)
+            {
+                return thread;
+            }
+
             if (thread.Panes.Count < thread.PaneLimit)
             {
                 return thread;
@@ -1334,6 +1340,71 @@ namespace SelfContainedDeployment
                 ["projectId"] = project.Id,
                 ["initialUri"] = initialUri ?? string.Empty,
             });
+            QueueSessionSave();
+            return pane;
+        }
+
+        private DiffPaneRecord AddOrSelectDiffPane(WorkspaceProject project, WorkspaceThread thread, string diffPath, string diffText)
+        {
+            project ??= _activeProject ?? GetOrCreateProject(Environment.CurrentDirectory);
+            thread = ResolveTargetThreadForNewPane(project, thread, WorkspacePaneKind.Diff);
+
+            DiffPaneRecord pane = thread.Panes.OfType<DiffPaneRecord>().FirstOrDefault();
+            bool created = false;
+            if (pane is null)
+            {
+                pane = CreateDiffPane(project, thread, diffPath, diffText, BuildDiffPaneTitle(diffPath));
+                thread.Panes.Add(pane);
+                PromoteLayoutForPaneCount(thread);
+                created = true;
+            }
+            else
+            {
+                UpdateDiffPane(pane, diffPath, diffText);
+            }
+
+            thread.SelectedPaneId = pane.Id;
+            project.SelectedThreadId = thread.Id;
+
+            if (thread.LayoutPreset == WorkspaceLayoutPreset.Solo)
+            {
+                thread.LayoutPreset = WorkspaceLayoutPreset.Dual;
+            }
+
+            if (thread == _activeThread)
+            {
+                RefreshTabView();
+                RequestLayoutForVisiblePanes();
+            }
+            else
+            {
+                ActivateThread(thread);
+            }
+
+            RefreshProjectTree();
+            if (created)
+            {
+                LogAutomationEvent("shell", "pane.created", $"Created diff pane {pane.Id}", new Dictionary<string, string>
+                {
+                    ["paneId"] = pane.Id,
+                    ["paneKind"] = pane.Kind.ToString().ToLowerInvariant(),
+                    ["threadId"] = thread.Id,
+                    ["projectId"] = project.Id,
+                    ["diffPath"] = diffPath ?? string.Empty,
+                });
+            }
+            else
+            {
+                LogAutomationEvent("shell", "pane.updated", $"Updated diff pane {pane.Id}", new Dictionary<string, string>
+                {
+                    ["paneId"] = pane.Id,
+                    ["paneKind"] = pane.Kind.ToString().ToLowerInvariant(),
+                    ["threadId"] = thread.Id,
+                    ["projectId"] = project.Id,
+                    ["diffPath"] = diffPath ?? string.Empty,
+                });
+            }
+
             QueueSessionSave();
             return pane;
         }
@@ -1428,6 +1499,37 @@ namespace SelfContainedDeployment
             return pane;
         }
 
+        private DiffPaneRecord CreateDiffPane(WorkspaceProject project, WorkspaceThread thread, string diffPath, string diffText, string initialTitle, string paneId = null)
+        {
+            DiffPaneControl diffPaneControl = new();
+            diffPaneControl.ApplyTheme(ResolveTheme(SampleConfig.CurrentTheme));
+
+            DiffPaneRecord pane = new(initialTitle, diffPaneControl, diffPath, paneId);
+            AttachPaneInteraction(project, thread, pane);
+            UpdateDiffPane(pane, diffPath, diffText);
+            return pane;
+        }
+
+        private void UpdateDiffPane(DiffPaneRecord pane, string diffPath, string diffText)
+        {
+            if (pane is null)
+            {
+                return;
+            }
+
+            pane.DiffPath = diffPath;
+            if (!pane.HasCustomTitle)
+            {
+                pane.Title = BuildDiffPaneTitle(diffPath);
+            }
+
+            pane.DiffPane.SetDiff(diffPath, diffText);
+            if (ReferenceEquals(FindThreadForPane(pane.Id), _activeThread))
+            {
+                UpdateTabViewItem(pane);
+            }
+        }
+
         private TerminalPaneRecord CreateTerminalPane(WorkspaceProject project, WorkspaceThread thread, WorkspacePaneKind kind, string startupInput, string initialTitle, string paneId = null)
         {
             TerminalControl terminal = new()
@@ -1514,6 +1616,7 @@ namespace SelfContainedDeployment
             WorkspacePaneRecord pane = snapshot.Kind?.Trim().ToLowerInvariant() switch
             {
                 "browser" => CreateBrowserPane(project, thread, snapshot.BrowserUri, string.IsNullOrWhiteSpace(snapshot.Title) ? "Preview" : snapshot.Title, snapshot.Id),
+                "diff" => CreateDiffPane(project, thread, snapshot.DiffPath, diffText: null, string.IsNullOrWhiteSpace(snapshot.Title) ? BuildDiffPaneTitle(snapshot.DiffPath) : snapshot.Title, snapshot.Id),
                 "editor" => CreateTerminalPane(project, thread, WorkspacePaneKind.Editor, "nvim .\r", string.IsNullOrWhiteSpace(snapshot.Title) ? "Editor" : snapshot.Title, snapshot.Id),
                 _ => CreateTerminalPane(project, thread, WorkspacePaneKind.Terminal, BuildReplayStartupInput(snapshot), string.IsNullOrWhiteSpace(snapshot.Title) ? FormatThreadPath(project, thread) : snapshot.Title, snapshot.Id),
             };
@@ -2100,6 +2203,9 @@ namespace SelfContainedDeployment
                     case WorkspacePaneKind.Browser:
                         string currentUri = (pane as BrowserPaneRecord)?.Browser.CurrentUri;
                         AddBrowserPane(project, duplicate, currentUri);
+                        break;
+                    case WorkspacePaneKind.Diff:
+                        AddOrSelectDiffPane(project, duplicate, (pane as DiffPaneRecord)?.DiffPath, diffText: null);
                         break;
                     case WorkspacePaneKind.Editor:
                         AddEditorPane(project, duplicate);
@@ -3226,7 +3332,10 @@ namespace SelfContainedDeployment
                 DiffWorktreeText.Text = string.Empty;
                 DiffSummaryText.Text = "No working tree changes";
                 PopulateDiffFileList(null, null);
-                RenderDiffPreview(string.Empty);
+                if (_activeThread?.Panes.OfType<DiffPaneRecord>().FirstOrDefault() is DiffPaneRecord emptyDiffPane)
+                {
+                    UpdateDiffPane(emptyDiffPane, emptyDiffPane.DiffPath, null);
+                }
                 return;
             }
 
@@ -3242,7 +3351,14 @@ namespace SelfContainedDeployment
                     : $"{FormatGitSummary(_activeGitSnapshot.StatusSummary, totalAddedLines, totalRemovedLines)}\n{_activeGitSnapshot.DiffSummary}")
                 : _activeGitSnapshot.Error;
             PopulateDiffFileList(_activeGitSnapshot.ChangedFiles, _activeGitSnapshot.SelectedPath);
-            RenderDiffPreview(_activeGitSnapshot.SelectedDiff ?? string.Empty);
+
+            if (_activeThread?.Panes.OfType<DiffPaneRecord>().FirstOrDefault() is DiffPaneRecord diffPane)
+            {
+                string targetPath = string.IsNullOrWhiteSpace(_activeGitSnapshot.SelectedPath)
+                    ? diffPane.DiffPath
+                    : _activeGitSnapshot.SelectedPath;
+                UpdateDiffPane(diffPane, targetPath, _activeGitSnapshot.SelectedDiff);
+            }
         }
 
         private void PopulateDiffFileList(IReadOnlyList<GitChangedFile> changedFiles, string selectedPath)
@@ -3368,45 +3484,6 @@ namespace SelfContainedDeployment
                 GitChangedFile changedFile = ResolveSelectedDiffFile(button);
                 ApplyDiffFileButtonState(button, string.Equals(changedFile?.Path, selectedPath, StringComparison.Ordinal));
             }
-        }
-
-        private void RenderDiffPreview(string diffText)
-        {
-            DiffPreviewBlock.Blocks.Clear();
-            if (string.IsNullOrWhiteSpace(diffText))
-            {
-                Paragraph emptyParagraph = new();
-                emptyParagraph.Inlines.Add(new Run
-                {
-                    Text = "Select a changed file to inspect its diff.",
-                    Foreground = AppBrush(DiffPreviewBlock, "ShellTextTertiaryBrush"),
-                });
-                DiffPreviewBlock.Blocks.Add(emptyParagraph);
-                return;
-            }
-
-            Paragraph paragraph = new()
-            {
-                Margin = new Thickness(0),
-            };
-
-            string[] lines = diffText.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
-            for (int index = 0; index < lines.Length; index++)
-            {
-                string line = lines[index];
-                paragraph.Inlines.Add(new Run
-                {
-                    Text = line,
-                    Foreground = AppBrush(DiffPreviewBlock, ResolveDiffLineBrushKey(line)),
-                });
-
-                if (index < lines.Length - 1)
-                {
-                    paragraph.Inlines.Add(new LineBreak());
-                }
-            }
-
-            DiffPreviewBlock.Blocks.Add(paragraph);
         }
 
         private static string FormatGitSummary(string statusSummary, int totalAddedLines, int totalRemovedLines)
@@ -4723,39 +4800,6 @@ namespace SelfContainedDeployment
             return "ShellWarningBrush";
         }
 
-        private static string ResolveDiffLineBrushKey(string line)
-        {
-            if (string.IsNullOrEmpty(line))
-            {
-                return "ShellTextSecondaryBrush";
-            }
-
-            if (line.StartsWith("+", StringComparison.Ordinal) && !line.StartsWith("+++", StringComparison.Ordinal))
-            {
-                return "ShellSuccessBrush";
-            }
-
-            if (line.StartsWith("-", StringComparison.Ordinal) && !line.StartsWith("---", StringComparison.Ordinal))
-            {
-                return "ShellDangerBrush";
-            }
-
-            if (line.StartsWith("@@", StringComparison.Ordinal))
-            {
-                return "ShellInfoBrush";
-            }
-
-            if (line.StartsWith("diff ", StringComparison.Ordinal) ||
-                line.StartsWith("index ", StringComparison.Ordinal) ||
-                line.StartsWith("---", StringComparison.Ordinal) ||
-                line.StartsWith("+++", StringComparison.Ordinal))
-            {
-                return "ShellTextSecondaryBrush";
-            }
-
-            return "ShellTextPrimaryBrush";
-        }
-
         private static void ApplyActionButtonState(Button button, TextBlock label, bool active)
         {
             button.Background = active ? AppBrush(button, "ShellNavActiveBrush") : null;
@@ -4911,6 +4955,21 @@ namespace SelfContainedDeployment
             return ShellProfiles.ResolveDisplayPath(rootPath, profileId);
         }
 
+        private static string BuildDiffPaneTitle(string diffPath)
+        {
+            if (string.IsNullOrWhiteSpace(diffPath))
+            {
+                return "Diff";
+            }
+
+            string trimmed = diffPath.Replace('\\', '/').TrimEnd('/');
+            int slashIndex = trimmed.LastIndexOf('/');
+            string fileName = slashIndex >= 0 && slashIndex < trimmed.Length - 1
+                ? trimmed[(slashIndex + 1)..]
+                : trimmed;
+            return $"Diff {fileName}";
+        }
+
         private static string FormatTabHeader(string title, WorkspacePaneKind kind = WorkspacePaneKind.Terminal, bool exited = false)
         {
             string nextTitle;
@@ -4920,6 +4979,7 @@ namespace SelfContainedDeployment
                 {
                     WorkspacePaneKind.Browser => "preview",
                     WorkspacePaneKind.Editor => "editor",
+                    WorkspacePaneKind.Diff => "diff",
                     _ => "shell",
                 };
             }
@@ -4941,6 +5001,7 @@ namespace SelfContainedDeployment
             {
                 WorkspacePaneKind.Browser => "Web",
                 WorkspacePaneKind.Editor => "Edit",
+                WorkspacePaneKind.Diff => "Diff",
                 _ => string.Empty,
             };
 

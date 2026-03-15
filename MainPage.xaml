@@ -273,11 +273,6 @@
                                                    Style="{StaticResource ShellHintTextStyle}"
                                                    Text="No working tree changes"
                                                    TextWrapping="WrapWholeWords" />
-                                    </StackPanel>
-
-                                    <StackPanel Spacing="8">
-                                        <TextBlock Text="CHANGED FILES"
-                                                   Style="{StaticResource ShellInspectorLabelTextStyle}" />
                                         <Border Background="{ThemeResource ShellMutedSurfaceBrush}"
                                                 BorderBrush="{ThemeResource ShellBorderBrush}"
                                                 BorderThickness="1"
@@ -295,27 +290,6 @@
                                                    Style="{StaticResource ShellHintTextStyle}"
                                                    Text="No changed files in this thread."
                                                    Visibility="Collapsed" />
-                                    </StackPanel>
-
-                                    <StackPanel Spacing="8">
-                                        <TextBlock Text="DIFF PREVIEW"
-                                                   Style="{StaticResource ShellInspectorLabelTextStyle}" />
-                                        <Border Background="{ThemeResource ShellMutedSurfaceBrush}"
-                                                BorderBrush="{ThemeResource ShellBorderBrush}"
-                                                BorderThickness="1"
-                                                CornerRadius="4"
-                                                Padding="10">
-                                            <ScrollViewer MaxHeight="420"
-                                                          VerticalScrollBarVisibility="Auto"
-                                                          HorizontalScrollBarVisibility="Auto">
-                                                <RichTextBlock x:Name="DiffPreviewBlock"
-                                                               AutomationProperties.AutomationId="shell-diff-preview"
-                                                               FontFamily="Consolas"
-                                                               FontSize="12"
-                                                               IsTextSelectionEnabled="True"
-                                                               TextWrapping="NoWrap" />
-                                            </ScrollViewer>
-                                        </Border>
                                     </StackPanel>
                                 </StackPanel>
                             </ScrollViewer>

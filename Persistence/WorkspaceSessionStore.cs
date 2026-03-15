@@ -82,6 +82,8 @@ namespace SelfContainedDeployment.Persistence
 
         public string BrowserUri { get; set; }
 
+        public string DiffPath { get; set; }
+
         public string ReplayTool { get; set; }
 
         public string ReplaySessionId { get; set; }
