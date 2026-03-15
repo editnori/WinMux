@@ -3,6 +3,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.Web.WebView2.Core;
 using SelfContainedDeployment.Automation;
+using SelfContainedDeployment.Browser;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -10,6 +11,7 @@ using System.Net;
 using System.Runtime.InteropServices.WindowsRuntime;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using System.Threading.Tasks;
 using System.Linq;
 using Windows.System;
@@ -95,6 +97,7 @@ namespace SelfContainedDeployment.Panes
         private ElementTheme _themePreference = ElementTheme.Default;
         private string _profileSeedStatus = "Shared WinMux browser profile";
         private string _extensionImportStatus = "No browser extensions imported yet.";
+        private string _credentialAutofillStatus = "No imported WinMux credentials.";
         private readonly List<BrowserExtensionSnapshot> _installedExtensions = new();
 
         public BrowserPaneControl()
@@ -130,6 +133,8 @@ namespace SelfContainedDeployment.Panes
         public string ProfileSeedStatus => _profileSeedStatus;
 
         public string ExtensionImportStatus => _extensionImportStatus;
+
+        public string CredentialAutofillStatus => _credentialAutofillStatus;
 
         public IReadOnlyList<string> InstalledExtensionNames => _installedExtensions
             .OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
@@ -314,6 +319,7 @@ namespace SelfContainedDeployment.Panes
 
                 await ImportSeededExtensionsAsync(core).ConfigureAwait(true);
                 await RefreshInstalledExtensionsAsync(core).ConfigureAwait(true);
+                UpdateCredentialAutofillStatus();
 
                 if (string.IsNullOrWhiteSpace(InitialUri))
                 {
@@ -388,6 +394,7 @@ namespace SelfContainedDeployment.Panes
             RaiseInteractionRequested();
             _currentUri = "winmux://start";
             AddressBox.Text = string.Empty;
+            UpdateCredentialAutofillStatus();
             BrowserView.CoreWebView2.NavigateToString(BuildStartPageHtml());
             LogBrowserEvent("start-page.shown", "Browser start page rendered");
             await Task.CompletedTask;
@@ -551,6 +558,7 @@ namespace SelfContainedDeployment.Panes
         {
             if (!args.IsSuccess && !string.Equals(_currentUri, "winmux://start", StringComparison.OrdinalIgnoreCase))
             {
+                UpdateCredentialAutofillStatus();
                 sender.NavigateToString(BuildErrorPageHtml(args.WebErrorStatus.ToString(), _currentUri));
                 LogBrowserEvent("navigate.failed", $"Browser navigation failed for {_currentUri}", new Dictionary<string, string>
                 {
@@ -565,6 +573,8 @@ namespace SelfContainedDeployment.Panes
                 AddressBox.Text = BrowserView.Source?.ToString() ?? _currentUri ?? string.Empty;
             }
 
+            UpdateCredentialAutofillStatus();
+            _ = TryAutofillMatchingCredentialsAsync();
             LogBrowserEvent("navigate.completed", $"Browser navigation completed for {_currentUri}", new Dictionary<string, string>
             {
                 ["uri"] = _currentUri ?? string.Empty,
@@ -600,6 +610,145 @@ namespace SelfContainedDeployment.Panes
             }
 
             LogBrowserEvent("source.changed", $"Browser source changed to {_currentUri}");
+        }
+
+        private void UpdateCredentialAutofillStatus()
+        {
+            if (BrowserCredentialStore.GetCredentialCount() == 0)
+            {
+                _credentialAutofillStatus = "No imported WinMux credentials.";
+                return;
+            }
+
+            BrowserCredentialMatch match = BrowserCredentialStore.ResolveForUri(_currentUri);
+            _credentialAutofillStatus = match is null
+                ? $"Imported WinMux credentials available ({BrowserCredentialStore.GetCredentialCount()} entries), but none match this page."
+                : $"Imported WinMux credentials matched {match.Host}.";
+        }
+
+        private async Task TryAutofillMatchingCredentialsAsync()
+        {
+            if (!_initialized || BrowserView.CoreWebView2 is null)
+            {
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(_currentUri) ||
+                string.Equals(_currentUri, "winmux://start", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(_currentUri, "about:blank", StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            BrowserCredentialMatch match = BrowserCredentialStore.ResolveForUri(_currentUri);
+            if (match is null)
+            {
+                return;
+            }
+
+            string username = JsonSerializer.Serialize(match.Username ?? string.Empty);
+            string password = JsonSerializer.Serialize(match.Password ?? string.Empty);
+            string host = JsonSerializer.Serialize(match.Host ?? string.Empty);
+            string script = $$"""
+(() => {
+  const usernameValue = {{username}};
+  const passwordValue = {{password}};
+  const matchedHost = {{host}};
+
+  const isVisible = (element) => {
+    if (!element) return false;
+    const style = window.getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
+  };
+
+  const setValue = (element, value) => {
+    if (!element || !value || element.value) return false;
+    element.focus();
+    element.value = value;
+    element.dispatchEvent(new Event('input', { bubbles: true }));
+    element.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+  };
+
+  const findCandidate = (selectors) => {
+    for (const selector of selectors) {
+      const candidates = Array.from(document.querySelectorAll(selector));
+      for (const candidate of candidates) {
+        if (isVisible(candidate) && !candidate.disabled && !candidate.readOnly) {
+          return candidate;
+        }
+      }
+    }
+
+    return null;
+  };
+
+  const usernameSelectors = [
+    'input[type="email"]',
+    'input[autocomplete="username"]',
+    'input[name*="user" i]',
+    'input[name*="email" i]',
+    'input[id*="user" i]',
+    'input[id*="email" i]',
+    'input[type="text"]'
+  ];
+  const passwordSelectors = [
+    'input[type="password"]',
+    'input[autocomplete="current-password"]',
+    'input[autocomplete="new-password"]'
+  ];
+
+  const apply = () => {
+    const usernameField = findCandidate(usernameSelectors);
+    const passwordField = findCandidate(passwordSelectors);
+    const filledUsername = setValue(usernameField, usernameValue);
+    const filledPassword = setValue(passwordField, passwordValue);
+    return {
+      matchedHost,
+      filledUsername,
+      filledPassword,
+      hasUsernameField: !!usernameField,
+      hasPasswordField: !!passwordField
+    };
+  };
+
+  const initial = apply();
+  let attempts = 0;
+  const timer = window.setInterval(() => {
+    attempts += 1;
+    const result = apply();
+    if ((result.filledUsername || !result.hasUsernameField) &&
+        (result.filledPassword || !result.hasPasswordField || !passwordValue) ||
+        attempts >= 20) {
+      window.clearInterval(timer);
+    }
+  }, 500);
+
+  return initial;
+})()
+""";
+
+            try
+            {
+                string result = await BrowserView.CoreWebView2.ExecuteScriptAsync(script).AsTask().ConfigureAwait(true);
+                _credentialAutofillStatus = $"Imported WinMux credentials autofilled for {match.Host}.";
+                LogBrowserEvent("credentials.autofill_attempted", $"Attempted WinMux credential autofill for {match.Host}", new Dictionary<string, string>
+                {
+                    ["host"] = match.Host ?? string.Empty,
+                    ["hasUsername"] = (!string.IsNullOrWhiteSpace(match.Username)).ToString(),
+                    ["result"] = result ?? string.Empty,
+                });
+            }
+            catch (Exception ex)
+            {
+                _credentialAutofillStatus = $"Imported WinMux credentials failed to autofill for {match.Host}.";
+                LogBrowserEvent("credentials.autofill_failed", $"WinMux credential autofill failed for {match.Host}: {ex.Message}", new Dictionary<string, string>
+                {
+                    ["host"] = match.Host ?? string.Empty,
+                    ["error"] = ex.Message,
+                });
+            }
         }
 
         private async Task<CoreWebView2Environment> GetEnvironmentAsync()

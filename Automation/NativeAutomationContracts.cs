@@ -299,6 +299,8 @@ namespace SelfContainedDeployment.Automation
 
         public string ExtensionImportStatus { get; set; }
 
+        public string CredentialAutofillStatus { get; set; }
+
         public List<string> InstalledExtensions { get; set; } = new();
     }
 

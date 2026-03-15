@@ -7,6 +7,7 @@ using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using SelfContainedDeployment.Automation;
+using SelfContainedDeployment.Browser;
 using SelfContainedDeployment.Panes;
 using SelfContainedDeployment.Shell;
 using SelfContainedDeployment.Terminal;
@@ -320,6 +321,7 @@ namespace SelfContainedDeployment
                     Initialized = pane.Browser.IsInitialized,
                     ProfileSeedStatus = pane.Browser.ProfileSeedStatus,
                     ExtensionImportStatus = pane.Browser.ExtensionImportStatus,
+                    CredentialAutofillStatus = pane.Browser.CredentialAutofillStatus,
                     InstalledExtensions = pane.Browser.InstalledExtensionNames.ToList(),
                 });
             }
@@ -535,6 +537,9 @@ namespace SelfContainedDeployment
                     case "navigatebrowser":
                         NavigateSelectedBrowser(request.Value);
                         ShowTerminalShell();
+                        break;
+                    case "importbrowserpasswordscsv":
+                        ImportBrowserPasswordsCsv(request.Value);
                         break;
                     case "settheme":
                         ApplyTheme(ParseTheme(request.Value));
@@ -1304,6 +1309,30 @@ namespace SelfContainedDeployment
             return (TerminalTabs.SelectedItem as TabViewItem)?.Tag as BrowserPaneRecord
                 ?? _activeThread?.Panes.OfType<BrowserPaneRecord>().FirstOrDefault(candidate => string.Equals(candidate.Id, _activeThread.SelectedPaneId, StringComparison.Ordinal))
                 ?? _activeThread?.Panes.OfType<BrowserPaneRecord>().FirstOrDefault();
+        }
+
+        private void ImportBrowserPasswordsCsv(string csvPath)
+        {
+            BrowserCredentialImportResult result = BrowserCredentialStore.ImportGooglePasswordsCsv(csvPath);
+            if (!result.Ok)
+            {
+                throw new InvalidOperationException(result.Message);
+            }
+
+            foreach ((_, _, BrowserPaneRecord pane) in EnumerateBrowserRecords())
+            {
+                _ = pane.Browser.EnsureInitializedAsync();
+                if (!string.IsNullOrWhiteSpace(pane.Browser.CurrentUri))
+                {
+                    pane.Browser.Navigate(pane.Browser.CurrentUri);
+                }
+            }
+
+            LogAutomationEvent("browser", "credentials.imported", result.Message, new Dictionary<string, string>
+            {
+                ["path"] = csvPath ?? string.Empty,
+                ["importedCount"] = result.ImportedCount.ToString(),
+            });
         }
 
         private static WorkspaceLayoutPreset ParseLayoutPreset(string value)

@@ -27,6 +27,7 @@ What exists now:
 - multiple projects, each with nested threads and per-thread pane workspaces
 - terminal panes backed by `TerminalControl`
 - browser preview panes backed by `WebView2` with a built-in start page and a shared WinMux browser profile
+- imported browser-password CSV support backed by a WinMux-encrypted credential store
 - editor panes backed by `TerminalControl` launching `nvim .`
 - ConPTY process bridge in C#
 - shared renderer under `Web/` hosted inside `WebView2`

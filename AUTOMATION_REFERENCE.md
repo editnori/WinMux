@@ -81,6 +81,7 @@ Supported `action` values:
 - `newTab`
 - `newBrowserPane`
 - `newEditorPane`
+- `importBrowserPasswordsCsv`
 - `selectProject`
 - `selectThread`
 - `selectTab`
@@ -108,6 +109,7 @@ Notes:
 - `newProject` on the semantic route creates a project directly from `value` without opening the dialog.
 - `newBrowserPane` adds a preview pane to the active thread backed by the shared WinMux browser profile.
 - `newEditorPane` adds a terminal-backed editor pane that launches `nvim .`.
+- `importBrowserPasswordsCsv` imports a Google Passwords CSV into the WinMux-encrypted credential store.
 - `setLayout` accepts `1|2|3|4` or `solo|dual|triple|quad`.
 - `navigateBrowser` sends a URL to the selected browser pane; an empty `value` returns it to the built-in start page.
 - `input` sends text to the selected terminal/editor pane, not to arbitrary native controls.
@@ -126,6 +128,7 @@ These routes expose browser-pane state directly from the native app, which is no
 - initialization state
 - profile seed status
 - extension import status
+- credential autofill status
 - imported preferred extension names
 
 `POST /browser-eval` executes JavaScript inside a browser pane and returns the raw `ExecuteScriptAsync` result.
