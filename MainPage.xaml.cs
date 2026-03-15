@@ -1479,6 +1479,7 @@ namespace SelfContainedDeployment
             UpdateWorkspaceVisibility();
             UpdateHeader();
             RequestLayoutForVisiblePanes();
+            FocusSelectedPane();
             LogAutomationEvent("shell", "thread.selected", $"Selected thread {thread.Name}", new Dictionary<string, string>
             {
                 ["threadId"] = thread.Id,
@@ -3544,31 +3545,53 @@ namespace SelfContainedDeployment
             return ActualTheme == ElementTheme.Light ? ElementTheme.Light : ElementTheme.Dark;
         }
 
-        private static Brush AppBrush(string key)
+        private static Brush AppBrush(FrameworkElement element, string key)
         {
+            ElementTheme effectiveTheme = SampleConfig.CurrentTheme == ElementTheme.Default
+                ? (Current?.ActualTheme == ElementTheme.Light ? ElementTheme.Light : ElementTheme.Dark)
+                : SampleConfig.CurrentTheme;
+
+            Windows.UI.Color color = (effectiveTheme, key) switch
+            {
+                (ElementTheme.Light, "ShellNavActiveBrush") => Windows.UI.Color.FromArgb(0xFF, 0xE7, 0xE7, 0xEB),
+                (ElementTheme.Light, "ShellBorderBrush") => Windows.UI.Color.FromArgb(0xFF, 0xE4, 0xE4, 0xE7),
+                (ElementTheme.Light, "ShellTextPrimaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0x18, 0x18, 0x1B),
+                (ElementTheme.Light, "ShellTextSecondaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0x52, 0x52, 0x5B),
+                (ElementTheme.Dark, "ShellNavActiveBrush") => Windows.UI.Color.FromArgb(0xFF, 0x1F, 0x22, 0x28),
+                (ElementTheme.Dark, "ShellBorderBrush") => Windows.UI.Color.FromArgb(0xFF, 0x23, 0x25, 0x2B),
+                (ElementTheme.Dark, "ShellTextPrimaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0xFA, 0xFA, 0xFA),
+                (ElementTheme.Dark, "ShellTextSecondaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0xA1, 0xA1, 0xAA),
+                _ => default,
+            };
+
+            if (color != default)
+            {
+                return new SolidColorBrush(color);
+            }
+
             return (Brush)Application.Current.Resources[key];
         }
 
         private static void ApplyActionButtonState(Button button, TextBlock label, bool active)
         {
-            button.Background = active ? AppBrush("ShellNavActiveBrush") : null;
-            button.BorderBrush = active ? AppBrush("ShellBorderBrush") : null;
-            button.Foreground = active ? AppBrush("ShellTextPrimaryBrush") : AppBrush("ShellTextSecondaryBrush");
-            label.Foreground = active ? AppBrush("ShellTextPrimaryBrush") : AppBrush("ShellTextSecondaryBrush");
+            button.Background = active ? AppBrush(button, "ShellNavActiveBrush") : null;
+            button.BorderBrush = active ? AppBrush(button, "ShellBorderBrush") : null;
+            button.Foreground = active ? AppBrush(button, "ShellTextPrimaryBrush") : AppBrush(button, "ShellTextSecondaryBrush");
+            label.Foreground = active ? AppBrush(label, "ShellTextPrimaryBrush") : AppBrush(label, "ShellTextSecondaryBrush");
         }
 
         private static void ApplyProjectButtonState(Button button, bool active)
         {
-            button.Background = active ? AppBrush("ShellNavActiveBrush") : null;
-            button.BorderBrush = active ? AppBrush("ShellBorderBrush") : null;
-            button.Foreground = active ? AppBrush("ShellTextPrimaryBrush") : AppBrush("ShellTextSecondaryBrush");
+            button.Background = active ? AppBrush(button, "ShellNavActiveBrush") : null;
+            button.BorderBrush = active ? AppBrush(button, "ShellBorderBrush") : null;
+            button.Foreground = active ? AppBrush(button, "ShellTextPrimaryBrush") : AppBrush(button, "ShellTextSecondaryBrush");
         }
 
         private static void ApplyThreadButtonState(Button button, bool active)
         {
-            button.Background = active ? AppBrush("ShellMutedSurfaceBrush") : null;
-            button.BorderBrush = active ? AppBrush("ShellBorderBrush") : null;
-            button.Foreground = active ? AppBrush("ShellTextPrimaryBrush") : AppBrush("ShellTextSecondaryBrush");
+            button.Background = active ? AppBrush(button, "ShellNavActiveBrush") : null;
+            button.BorderBrush = active ? AppBrush(button, "ShellBorderBrush") : null;
+            button.Foreground = active ? AppBrush(button, "ShellTextPrimaryBrush") : AppBrush(button, "ShellTextSecondaryBrush");
         }
 
         private static string ResolveRequestedPath(string rootPath)
