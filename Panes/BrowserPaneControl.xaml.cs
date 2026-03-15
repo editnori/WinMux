@@ -180,7 +180,6 @@ namespace SelfContainedDeployment.Panes
 
         public void FocusPane()
         {
-            RaiseInteractionRequested();
             if (!_initialized || BrowserView.CoreWebView2 is null)
             {
                 AddressBox.Focus(FocusState.Programmatic);

@@ -45,6 +45,8 @@ namespace SelfContainedDeployment
         private double _splitterStartSecondaryRatio;
         private bool _showingSettings;
         private bool _suppressTabSelectionChanged;
+        private bool _refreshingTabView;
+        private bool _suppressPaneInteractionRequests;
         private bool _suppressThreadNameSync;
         private string _inlineRenamingPaneId;
         private bool _restoringSession;
@@ -59,6 +61,7 @@ namespace SelfContainedDeployment
         private bool _pendingGitPreserveSelection;
         private string _lastProjectTreeRenderKey;
         private string _lastPaneWorkspaceRenderKey;
+        private bool _projectTreeRefreshEnqueued;
 
         public static MainPage Current;
 
@@ -285,22 +288,35 @@ namespace SelfContainedDeployment
         private bool TryPerformKnownUiActionWithoutElement(NativeAutomationUiActionRequest request)
         {
             string automationId = request?.AutomationId?.Trim();
-            if (string.IsNullOrWhiteSpace(automationId) || !automationId.StartsWith("shell-thread-", StringComparison.Ordinal))
+            if (string.IsNullOrWhiteSpace(automationId))
             {
                 return false;
             }
 
-            string threadId = automationId["shell-thread-".Length..];
-            switch (request.Action?.Trim().ToLowerInvariant())
+            string action = request.Action?.Trim().ToLowerInvariant();
+            if (automationId.StartsWith("shell-thread-", StringComparison.Ordinal))
             {
-                case "doubleclick":
-                    _ = BeginRenameThreadAsync(threadId);
-                    return true;
-                case "invokemenuitem":
-                    return TryInvokeThreadMenuAction(threadId, request.MenuItemText ?? request.Value);
-                default:
-                    return false;
+                string threadId = automationId["shell-thread-".Length..];
+                switch (action)
+                {
+                    case "doubleclick":
+                        _ = BeginRenameThreadAsync(threadId);
+                        return true;
+                    case "invokemenuitem":
+                        return TryInvokeThreadMenuAction(threadId, request.MenuItemText ?? request.Value);
+                    default:
+                        return false;
+                }
             }
+
+            if (automationId.StartsWith("shell-project-", StringComparison.Ordinal) &&
+                !automationId.Contains("-add-thread-", StringComparison.Ordinal) &&
+                string.Equals(action, "invokemenuitem", StringComparison.Ordinal))
+            {
+                return TryInvokeProjectMenuAction(automationId["shell-project-".Length..], request.MenuItemText ?? request.Value);
+            }
+
+            return false;
         }
 
         public async System.Threading.Tasks.Task<NativeAutomationTerminalStateResponse> GetTerminalStateAsync(NativeAutomationTerminalStateRequest request)
@@ -694,6 +710,7 @@ namespace SelfContainedDeployment
         private void OnProjectTreeRefreshTimerTick(DispatcherQueueTimer sender, object args)
         {
             _projectTreeRefreshTimer.Stop();
+            _projectTreeRefreshEnqueued = false;
             RefreshProjectTree();
         }
 
@@ -932,7 +949,7 @@ namespace SelfContainedDeployment
 
         private void TerminalTabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            if (_activeThread is null || _suppressTabSelectionChanged)
+            if (_activeThread is null || _suppressTabSelectionChanged || _refreshingTabView)
             {
                 return;
             }
@@ -951,7 +968,7 @@ namespace SelfContainedDeployment
 
             FocusSelectedPane();
             RequestLayoutForVisiblePanes();
-            RefreshProjectTree();
+            QueueProjectTreeRefresh();
             UpdateHeader();
             QueueSessionSave();
         }
@@ -1009,9 +1026,25 @@ namespace SelfContainedDeployment
             _sessionSaveTimer.Start();
         }
 
-        private void QueueProjectTreeRefresh()
+        private void QueueProjectTreeRefresh(bool immediate = false)
         {
             _projectTreeRefreshTimer.Stop();
+            if (immediate)
+            {
+                if (_projectTreeRefreshEnqueued)
+                {
+                    return;
+                }
+
+                _projectTreeRefreshEnqueued = true;
+                DispatcherQueue.TryEnqueue(() =>
+                {
+                    _projectTreeRefreshEnqueued = false;
+                    RefreshProjectTree();
+                });
+                return;
+            }
+
             _projectTreeRefreshTimer.Start();
         }
 
@@ -1650,6 +1683,11 @@ namespace SelfContainedDeployment
         {
             void ActivatePaneFromInteraction()
             {
+                if (_suppressPaneInteractionRequests || _refreshingTabView)
+                {
+                    return;
+                }
+
                 if (!ReferenceEquals(_activeThread, thread))
                 {
                     ActivateThread(thread);
@@ -2006,7 +2044,8 @@ namespace SelfContainedDeployment
             if (thread is null)
             {
                 _activeThread = null;
-                QueueProjectTreeRefresh();
+                _lastProjectTreeRenderKey = null;
+                QueueProjectTreeRefresh(immediate: true);
                 RefreshTabView();
                 UpdateWorkspaceVisibility();
                 UpdateHeader();
@@ -2260,15 +2299,21 @@ namespace SelfContainedDeployment
                 {
                     _activeProject = project;
                     _activeThread = null;
-                    RefreshProjectTree();
+                    _activeGitSnapshot = null;
+                    _lastProjectTreeRenderKey = null;
+                    _lastPaneWorkspaceRenderKey = null;
+                    QueueProjectTreeRefresh(immediate: true);
                     RefreshTabView();
                     UpdateWorkspaceVisibility();
+                    UpdateSidebarActions();
+                    UpdateInspectorVisibility();
                     UpdateHeader();
                 }
             }
             else
             {
-                RefreshProjectTree();
+                _lastProjectTreeRenderKey = null;
+                QueueProjectTreeRefresh(immediate: true);
                 UpdateWorkspaceVisibility();
                 UpdateHeader();
             }
@@ -2304,14 +2349,21 @@ namespace SelfContainedDeployment
             if (ReferenceEquals(project, _activeProject))
             {
                 _activeThread = null;
+                _activeGitSnapshot = null;
+                _showingSettings = false;
+                _lastProjectTreeRenderKey = null;
+                _lastPaneWorkspaceRenderKey = null;
                 RefreshTabView();
+                QueueProjectTreeRefresh(immediate: true);
                 UpdateWorkspaceVisibility();
+                UpdateSidebarActions();
+                UpdateInspectorVisibility();
                 UpdateHeader();
-                ShowTerminalShell();
             }
             else
             {
-                QueueProjectTreeRefresh();
+                _lastProjectTreeRenderKey = null;
+                QueueProjectTreeRefresh(immediate: true);
             }
 
             QueueSessionSave();
@@ -2505,11 +2557,15 @@ namespace SelfContainedDeployment
                     {
                         Text = project.Name,
                         FontSize = 12,
+                        TextWrapping = TextWrapping.NoWrap,
+                        TextTrimming = TextTrimming.CharacterEllipsis,
                     });
                     textStack.Children.Add(new TextBlock
                     {
                         Text = $"{FormatProjectPath(project)} · {project.Threads.Count} thread{(project.Threads.Count == 1 ? string.Empty : "s")}",
                         Style = (Style)Application.Current.Resources["ShellHintTextStyle"],
+                        TextWrapping = TextWrapping.NoWrap,
+                        TextTrimming = TextTrimming.CharacterEllipsis,
                     });
                     projectLayout.Children.Add(textStack);
                 }
@@ -2642,6 +2698,7 @@ namespace SelfContainedDeployment
                         {
                             Text = thread.Name,
                             FontSize = 12,
+                            TextWrapping = TextWrapping.NoWrap,
                             TextTrimming = TextTrimming.CharacterEllipsis,
                         });
 
@@ -2652,6 +2709,7 @@ namespace SelfContainedDeployment
                         {
                             Text = $"{threadLocation} · {thread.TabSummary}",
                             Style = (Style)Application.Current.Resources["ShellHintTextStyle"],
+                            TextWrapping = TextWrapping.NoWrap,
                             TextTrimming = TextTrimming.CharacterEllipsis,
                         });
 
@@ -2680,9 +2738,20 @@ namespace SelfContainedDeployment
         {
             if (_activeThread is null)
             {
-                if (TerminalTabs.TabItems.Count > 0)
+                bool previousSuppressSelection = _suppressTabSelectionChanged;
+                _refreshingTabView = true;
+                _suppressTabSelectionChanged = true;
+                try
                 {
-                    TerminalTabs.TabItems.Clear();
+                    if (TerminalTabs.TabItems.Count > 0)
+                    {
+                        TerminalTabs.TabItems.Clear();
+                    }
+                }
+                finally
+                {
+                    _suppressTabSelectionChanged = previousSuppressSelection;
+                    _refreshingTabView = false;
                 }
 
                 UpdateWorkspaceVisibility();
@@ -2693,52 +2762,55 @@ namespace SelfContainedDeployment
                 .Select(GetOrCreateTabViewItem)
                 .ToList();
 
-            foreach (TabViewItem existingItem in TerminalTabs.TabItems.OfType<TabViewItem>().ToList())
+            bool previousSuppression = _suppressTabSelectionChanged;
+            _refreshingTabView = true;
+            _suppressTabSelectionChanged = true;
+            try
             {
-                if (!desiredItems.Contains(existingItem))
+                foreach (TabViewItem existingItem in TerminalTabs.TabItems.OfType<TabViewItem>().ToList())
                 {
-                    TerminalTabs.TabItems.Remove(existingItem);
-                }
-            }
-
-            for (int index = 0; index < desiredItems.Count; index++)
-            {
-                TabViewItem desiredItem = desiredItems[index];
-                int existingIndex = FindTabViewIndex(desiredItem);
-                if (existingIndex == index)
-                {
-                    continue;
+                    if (!desiredItems.Contains(existingItem))
+                    {
+                        TerminalTabs.TabItems.Remove(existingItem);
+                    }
                 }
 
-                if (existingIndex >= 0)
+                for (int index = 0; index < desiredItems.Count; index++)
                 {
-                    TerminalTabs.TabItems.RemoveAt(existingIndex);
+                    TabViewItem desiredItem = desiredItems[index];
+                    int existingIndex = FindTabViewIndex(desiredItem);
+                    if (existingIndex == index)
+                    {
+                        continue;
+                    }
+
+                    if (existingIndex >= 0)
+                    {
+                        TerminalTabs.TabItems.RemoveAt(existingIndex);
+                    }
+
+                    TerminalTabs.TabItems.Insert(index, desiredItem);
                 }
 
-                TerminalTabs.TabItems.Insert(index, desiredItem);
-            }
+                string selectedTabId = _activeThread.SelectedPaneId ?? _activeThread.Panes.FirstOrDefault()?.Id;
+                TabViewItem selectedItem = desiredItems
+                    .FirstOrDefault(item => (item.Tag as WorkspacePaneRecord)?.Id == selectedTabId)
+                    ?? desiredItems.FirstOrDefault();
 
-            string selectedTabId = _activeThread.SelectedPaneId ?? _activeThread.Panes.FirstOrDefault()?.Id;
-            TabViewItem selectedItem = desiredItems
-                .FirstOrDefault(item => (item.Tag as WorkspacePaneRecord)?.Id == selectedTabId)
-                ?? desiredItems.FirstOrDefault();
-
-            if (!ReferenceEquals(TerminalTabs.SelectedItem, selectedItem))
-            {
-                _suppressTabSelectionChanged = true;
-                try
+                if (!ReferenceEquals(TerminalTabs.SelectedItem, selectedItem))
                 {
                     TerminalTabs.SelectedItem = selectedItem;
                 }
-                finally
+
+                if (selectedItem?.Tag is WorkspacePaneRecord selectedPane)
                 {
-                    _suppressTabSelectionChanged = false;
+                    _activeThread.SelectedPaneId = selectedPane.Id;
                 }
             }
-
-            if (selectedItem?.Tag is WorkspacePaneRecord selectedPane)
+            finally
             {
-                _activeThread.SelectedPaneId = selectedPane.Id;
+                _suppressTabSelectionChanged = previousSuppression;
+                _refreshingTabView = false;
             }
 
             RenderPaneWorkspace();
@@ -3574,7 +3646,16 @@ namespace SelfContainedDeployment
         {
             if (TerminalTabs.SelectedItem is TabViewItem item && item.Tag is WorkspacePaneRecord pane)
             {
-                pane.FocusPane();
+                bool previousSuppression = _suppressPaneInteractionRequests;
+                _suppressPaneInteractionRequests = true;
+                try
+                {
+                    pane.FocusPane();
+                }
+                finally
+                {
+                    _suppressPaneInteractionRequests = previousSuppression;
+                }
             }
         }
 
@@ -3626,10 +3707,12 @@ namespace SelfContainedDeployment
                 return;
             }
 
-            InspectorColumn.Width = _inspectorOpen
+            bool showInspector = _inspectorOpen && !_showingSettings && _activeThread is not null;
+
+            InspectorColumn.Width = showInspector
                 ? new GridLength(320)
                 : new GridLength(0);
-            InspectorSidebar.Visibility = _inspectorOpen ? Visibility.Visible : Visibility.Collapsed;
+            InspectorSidebar.Visibility = showInspector ? Visibility.Visible : Visibility.Collapsed;
 
             ToolTipService.SetToolTip(ToggleInspectorButton, _inspectorOpen ? "Hide inspector" : "Show inspector");
             if (ToggleInspectorButton.Content is FontIcon icon)
@@ -3721,6 +3804,7 @@ namespace SelfContainedDeployment
                 SettingsFrame.Visibility = Visibility.Visible;
                 PaneWorkspaceShell.Visibility = Visibility.Collapsed;
                 EmptyThreadStatePanel.Visibility = Visibility.Collapsed;
+                UpdateInspectorVisibility();
                 return;
             }
 
@@ -3729,6 +3813,7 @@ namespace SelfContainedDeployment
             bool showEmptyState = _activeProject is not null && _activeThread is null;
             PaneWorkspaceShell.Visibility = showEmptyState ? Visibility.Collapsed : Visibility.Visible;
             EmptyThreadStatePanel.Visibility = showEmptyState ? Visibility.Visible : Visibility.Collapsed;
+            UpdateInspectorVisibility();
         }
 
         private void ApplyThemeToAllTerminals(ElementTheme resolvedTheme)
@@ -4659,6 +4744,7 @@ namespace SelfContainedDeployment
                 case "duplicate":
                     DuplicateThread(targetId);
                     return true;
+                case "clear thread":
                 case "delete":
                     DeleteThread(targetId);
                     return true;
@@ -4683,8 +4769,32 @@ namespace SelfContainedDeployment
                 case "duplicate":
                     DuplicateThread(threadId);
                     return true;
+                case "clear thread":
                 case "delete":
                     DeleteThread(threadId);
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        private bool TryInvokeProjectMenuAction(string projectId, string menuItemText)
+        {
+            if (string.IsNullOrWhiteSpace(projectId))
+            {
+                return false;
+            }
+
+            string action = menuItemText?.Trim().ToLowerInvariant();
+            switch (action)
+            {
+                case "new thread":
+                    ActivateThread(CreateThread(FindProject(projectId)));
+                    ShowTerminalShell();
+                    return true;
+                case "clear all threads":
+                    ClearProjectThreads(projectId);
+                    ShowTerminalShell();
                     return true;
                 default:
                     return false;
