@@ -79,7 +79,9 @@ namespace SelfContainedDeployment.Git
             snapshot.StatusSummary = BuildStatusSummary(snapshot.ChangedFiles);
 
             string resolvedSelectedPath = selectedPath;
-            if (string.IsNullOrWhiteSpace(resolvedSelectedPath))
+            bool selectedPathExists = !string.IsNullOrWhiteSpace(resolvedSelectedPath) &&
+                snapshot.ChangedFiles.Any(file => string.Equals(file.Path, resolvedSelectedPath, StringComparison.Ordinal));
+            if (!selectedPathExists)
             {
                 resolvedSelectedPath = snapshot.ChangedFiles.FirstOrDefault()?.Path;
             }

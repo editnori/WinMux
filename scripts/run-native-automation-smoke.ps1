@@ -349,7 +349,7 @@ try {
     $lightTerminalTree = Wait-Until -FailureMessage "Selected thread did not expose a light-theme selected state." -Condition {
         $tree = Invoke-AutomationGet "/ui-tree"
         $selectedThread = @($tree.interactiveNodes) | Where-Object { $_.automationId -eq "shell-thread-$($state.activeThreadId)" -and $_.selected -eq $true } | Select-Object -First 1
-        if ($null -ne $selectedThread) {
+        if ($null -ne $selectedThread -and $selectedThread.background -eq "#FFE7E7EB") {
             return $selectedThread
         }
 

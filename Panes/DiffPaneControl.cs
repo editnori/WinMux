@@ -70,7 +70,7 @@ namespace SelfContainedDeployment.Panes
                 HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
                 Padding = new Thickness(12, 12, 12, 12),
                 Content = _diffBlock,
-                Background = ResolveBrush("ShellMutedSurfaceBrush"),
+                Background = ResolveBrush("ShellSurfaceBackgroundBrush"),
             };
             Grid.SetRow(_scrollViewer, 1);
             root.Children.Add(_scrollViewer);
@@ -96,7 +96,7 @@ namespace SelfContainedDeployment.Panes
             _headerBorder.BorderBrush = ResolveBrush("ShellBorderBrush");
             _pathText.Foreground = ResolveBrush("ShellTextPrimaryBrush");
             _summaryText.Foreground = ResolveBrush("ShellTextTertiaryBrush");
-            _scrollViewer.Background = ResolveBrush("ShellMutedSurfaceBrush");
+            _scrollViewer.Background = ResolveBrush("ShellSurfaceBackgroundBrush");
             RenderDiff(_currentDiff);
         }
 

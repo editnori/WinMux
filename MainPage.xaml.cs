@@ -2075,10 +2075,16 @@ namespace SelfContainedDeployment
 
         private void ActivateThread(WorkspaceThread thread)
         {
+            WorkspaceThread previousThread = _activeThread;
             _activeThread = thread ?? throw new ArgumentNullException(nameof(thread));
             _activeProject = FindProjectForThread(thread);
             _activeProject.SelectedThreadId = thread.Id;
             EnsureThreadHasTab(_activeProject, thread);
+            if (!ReferenceEquals(previousThread, thread))
+            {
+                _activeGitSnapshot = null;
+                ApplyGitSnapshotToUi();
+            }
             QueueProjectTreeRefresh();
             RefreshTabView();
             UpdateWorkspaceVisibility();
@@ -3489,10 +3495,9 @@ namespace SelfContainedDeployment
 
             if (_activeThread?.Panes.OfType<DiffPaneRecord>().FirstOrDefault() is DiffPaneRecord diffPane)
             {
-                string targetPath = string.IsNullOrWhiteSpace(_activeGitSnapshot.SelectedPath)
-                    ? diffPane.DiffPath
-                    : _activeGitSnapshot.SelectedPath;
-                UpdateDiffPane(diffPane, targetPath, _activeGitSnapshot.SelectedDiff);
+                bool hasLiveSelectedDiff = !string.IsNullOrWhiteSpace(_activeGitSnapshot.SelectedPath) &&
+                    _activeGitSnapshot.ChangedFiles.Any(file => string.Equals(file.Path, _activeGitSnapshot.SelectedPath, StringComparison.Ordinal));
+                UpdateDiffPane(diffPane, hasLiveSelectedDiff ? _activeGitSnapshot.SelectedPath : null, hasLiveSelectedDiff ? _activeGitSnapshot.SelectedDiff : null);
             }
         }
 
