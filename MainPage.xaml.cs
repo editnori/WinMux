@@ -1622,6 +1622,7 @@ namespace SelfContainedDeployment
         private static bool IsInteractiveUiNode(DependencyObject node, string automationId)
         {
             return node is Button
+                or HyperlinkButton
                 or ToggleButton
                 or RadioButton
                 or CheckBox
@@ -2433,18 +2434,17 @@ namespace SelfContainedDeployment
             {
                 Content = new TextBlock
                 {
-                    Text = "Browse…",
-                    FontSize = 12,
+                    Text = "Browse",
+                    FontSize = 11,
                     TextWrapping = TextWrapping.NoWrap,
+                    VerticalAlignment = VerticalAlignment.Center,
                 },
-                HorizontalAlignment = HorizontalAlignment.Left,
-                HorizontalContentAlignment = HorizontalAlignment.Center,
-                Width = 132,
-                MinWidth = 132,
                 Height = 28,
-                Style = (Style)Application.Current.Resources["ShellNavButtonStyle"],
-                Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["ShellMutedSurfaceBrush"],
-                BorderBrush = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["ShellBorderBrush"],
+                Width = 84,
+                Padding = new Thickness(6, 0, 6, 0),
+                HorizontalAlignment = HorizontalAlignment.Right,
+                HorizontalContentAlignment = HorizontalAlignment.Center,
+                VerticalContentAlignment = VerticalAlignment.Center,
             };
             AutomationProperties.SetAutomationId(browseButton, "dialog-project-browse");
             AutomationProperties.SetName(browseButton, "Browse for folder");
@@ -2474,6 +2474,22 @@ namespace SelfContainedDeployment
             };
             AutomationProperties.SetAutomationId(helperText, "dialog-project-helper");
 
+            TextBlock projectDirectoryLabel = new()
+            {
+                Text = "Project directory",
+                Style = (Style)Application.Current.Resources["ShellHintTextStyle"],
+            };
+            Grid projectDirectoryRow = new()
+            {
+                ColumnSpacing = 10,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+            };
+            projectDirectoryRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            projectDirectoryRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            projectDirectoryRow.Children.Add(pathBox);
+            Grid.SetColumn(browseButton, 1);
+            projectDirectoryRow.Children.Add(browseButton);
+
             TextBlock shellProfileLabel = new()
             {
                 Text = "Shell profile",
@@ -2487,7 +2503,7 @@ namespace SelfContainedDeployment
 
             Grid body = new()
             {
-                Width = 620,
+                Width = 480,
                 RowSpacing = 14,
             };
             body.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -2497,27 +2513,20 @@ namespace SelfContainedDeployment
             body.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             body.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             body.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            body.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             AutomationProperties.SetAutomationId(body, "dialog-project-body");
 
-            body.Children.Add(new TextBlock
-            {
-                Text = "Project directory",
-                Style = (Style)Application.Current.Resources["ShellHintTextStyle"],
-            });
-            Grid.SetRow(pathBox, 1);
-            body.Children.Add(pathBox);
-            Grid.SetRow(browseButton, 2);
-            body.Children.Add(browseButton);
-            Grid.SetRow(shellProfileLabel, 3);
+            body.Children.Add(projectDirectoryLabel);
+            Grid.SetRow(projectDirectoryRow, 1);
+            body.Children.Add(projectDirectoryRow);
+            Grid.SetRow(shellProfileLabel, 2);
             body.Children.Add(shellProfileLabel);
-            Grid.SetRow(profileBox, 4);
+            Grid.SetRow(profileBox, 3);
             body.Children.Add(profileBox);
-            Grid.SetRow(terminalPathLabel, 5);
+            Grid.SetRow(terminalPathLabel, 4);
             body.Children.Add(terminalPathLabel);
-            Grid.SetRow(previewValue, 6);
+            Grid.SetRow(previewValue, 5);
             body.Children.Add(previewValue);
-            Grid.SetRow(helperText, 7);
+            Grid.SetRow(helperText, 6);
             body.Children.Add(helperText);
 
             ContentDialog dialog = new()
@@ -2528,7 +2537,7 @@ namespace SelfContainedDeployment
                 CloseButtonText = "Cancel",
                 DefaultButton = ContentDialogButton.Primary,
                 Content = body,
-                MinWidth = 680,
+                MinWidth = 540,
             };
 
             string selectedPath = null;
