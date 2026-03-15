@@ -4,6 +4,7 @@
 using Microsoft.UI.Xaml;
 using SelfContainedDeployment.Automation;
 using System;
+using System.IO;
 
 namespace SelfContainedDeployment
 {
@@ -17,6 +18,7 @@ namespace SelfContainedDeployment
         public App()
         {
             this.InitializeComponent();
+            UnhandledException += OnUnhandledException;
         }
 
         protected override void OnLaunched(LaunchActivatedEventArgs args)
@@ -47,6 +49,22 @@ namespace SelfContainedDeployment
         {
             MainWindowInstance?.PersistSessionState();
             automationServer?.Dispose();
+        }
+
+        private void OnUnhandledException(object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs e)
+        {
+            try
+            {
+                string directory = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "WinMux");
+                Directory.CreateDirectory(directory);
+                string path = Path.Combine(directory, "startup-error.log");
+                File.AppendAllText(path, $"{DateTimeOffset.UtcNow:O}{Environment.NewLine}{e.Message}{Environment.NewLine}{e.Exception}{Environment.NewLine}{new string('-', 80)}{Environment.NewLine}");
+            }
+            catch
+            {
+            }
         }
     }
 }

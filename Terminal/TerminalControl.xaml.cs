@@ -81,6 +81,8 @@ namespace SelfContainedDeployment.Terminal
 
         public string ProcessWorkingDirectory { get; set; }
 
+        public IReadOnlyDictionary<string, string> LaunchEnvironment { get; set; }
+
         public string StartupInput { get; set; }
 
         public string SessionTitle => _sessionTitle;
@@ -318,7 +320,7 @@ namespace SelfContainedDeployment.Terminal
                 _connection = new ConPtyConnection();
                 _connection.OutputReceived += OnOutputReceived;
                 _connection.ProcessExited += OnProcessExited;
-                _connection.Start(_cols, _rows, ShellCommand, ResolveProcessWorkingDirectory());
+                _connection.Start(_cols, _rows, ShellCommand, ResolveProcessWorkingDirectory(), LaunchEnvironment);
                 LogTerminalEvent("session.started", "Started ConPTY session", new Dictionary<string, string>
                 {
                     ["cols"] = _cols.ToString(),

@@ -1,7 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
@@ -13,6 +15,7 @@ namespace SelfContainedDeployment.Terminal
     public sealed class ConPtyConnection : IDisposable
     {
         private const int ExtendedStartupInfoPresent = 0x00080000;
+        private const int CreateUnicodeEnvironment = 0x00000400;
         private const int ProcThreadAttributePseudoConsole = 0x00020016;
         private static readonly UTF8Encoding Utf8NoBom = new(false);
 
@@ -30,7 +33,7 @@ namespace SelfContainedDeployment.Terminal
 
         public bool IsRunning => _process is not null && !_process.HasExited;
 
-        public void Start(int cols, int rows, string shellCommand = null, string workingDirectory = null)
+        public void Start(int cols, int rows, string shellCommand = null, string workingDirectory = null, IReadOnlyDictionary<string, string> environmentVariables = null)
         {
             ThrowIfDisposed();
 
@@ -41,7 +44,7 @@ namespace SelfContainedDeployment.Terminal
 
             shellCommand ??= Environment.GetEnvironmentVariable("COMSPEC") ?? "cmd.exe";
             workingDirectory ??= Environment.CurrentDirectory;
-            SetTerminalEnvironmentDefaults();
+            IReadOnlyDictionary<string, string> launchEnvironment = BuildLaunchEnvironment(workingDirectory, environmentVariables);
 
             SECURITY_ATTRIBUTES securityAttributes = new()
             {
@@ -54,6 +57,7 @@ namespace SelfContainedDeployment.Terminal
             IntPtr appInput = IntPtr.Zero;
             IntPtr appOutput = IntPtr.Zero;
             IntPtr attributeList = IntPtr.Zero;
+            IntPtr environmentBlock = IntPtr.Zero;
             PROCESS_INFORMATION processInfo = default;
 
             try
@@ -103,6 +107,7 @@ namespace SelfContainedDeployment.Terminal
                 };
 
                 StringBuilder commandLine = new(shellCommand);
+                environmentBlock = BuildEnvironmentBlockPointer(launchEnvironment);
 
                 if (!CreateProcessW(
                     null,
@@ -110,8 +115,8 @@ namespace SelfContainedDeployment.Terminal
                     IntPtr.Zero,
                     IntPtr.Zero,
                     false,
-                    ExtendedStartupInfoPresent,
-                    IntPtr.Zero,
+                    ExtendedStartupInfoPresent | CreateUnicodeEnvironment,
+                    environmentBlock,
                     workingDirectory,
                     ref startupInfo,
                     out processInfo))
@@ -166,58 +171,105 @@ namespace SelfContainedDeployment.Terminal
                 CloseHandleIfOpen(ref appOutput);
                 CloseHandleIfOpen(ref processInfo.hThread);
                 CloseHandleIfOpen(ref processInfo.hProcess);
+                if (environmentBlock != IntPtr.Zero)
+                {
+                    Marshal.FreeHGlobal(environmentBlock);
+                }
             }
         }
 
-        private static void SetTerminalEnvironmentDefaults()
+        private static IReadOnlyDictionary<string, string> BuildLaunchEnvironment(string workingDirectory, IReadOnlyDictionary<string, string> overrides)
         {
-            Environment.SetEnvironmentVariable("TERM_PROGRAM", SelfContainedDeployment.SampleConfig.FeatureName);
-            Environment.SetEnvironmentVariable("TERM_PROGRAM_VERSION", "0.1");
-            Environment.SetEnvironmentVariable("COLORTERM", "truecolor");
-            Environment.SetEnvironmentVariable("TERM", "xterm-256color");
+            Dictionary<string, string> values = Environment.GetEnvironmentVariables()
+                .Cast<System.Collections.DictionaryEntry>()
+                .Where(entry => entry.Key is string && entry.Value is not null)
+                .ToDictionary(
+                    entry => (string)entry.Key,
+                    entry => entry.Value?.ToString() ?? string.Empty,
+                    StringComparer.OrdinalIgnoreCase);
 
-            string automationPort = Environment.GetEnvironmentVariable("NATIVE_TERMINAL_AUTOMATION_PORT");
+            values["TERM_PROGRAM"] = SelfContainedDeployment.SampleConfig.FeatureName;
+            values["TERM_PROGRAM_VERSION"] = "0.1";
+            values["COLORTERM"] = "truecolor";
+            values["TERM"] = "xterm-256color";
+
+            string automationPort = values.TryGetValue("NATIVE_TERMINAL_AUTOMATION_PORT", out string portValue)
+                ? portValue
+                : Environment.GetEnvironmentVariable("NATIVE_TERMINAL_AUTOMATION_PORT");
             if (!string.IsNullOrWhiteSpace(automationPort))
             {
                 string baseUrl = $"http://127.0.0.1:{automationPort}";
-                Environment.SetEnvironmentVariable("WINMUX_AUTOMATION_URL", baseUrl);
-                Environment.SetEnvironmentVariable("WINMUX_BROWSER_STATE_URL", $"{baseUrl}/browser-state");
-                Environment.SetEnvironmentVariable("WINMUX_BROWSER_EVAL_URL", $"{baseUrl}/browser-eval");
-                Environment.SetEnvironmentVariable("WINMUX_BROWSER_SCREENSHOT_URL", $"{baseUrl}/browser-screenshot");
+                values["WINMUX_AUTOMATION_URL"] = baseUrl;
+                values["WINMUX_BROWSER_STATE_URL"] = $"{baseUrl}/browser-state";
+                values["WINMUX_BROWSER_EVAL_URL"] = $"{baseUrl}/browser-eval";
+                values["WINMUX_BROWSER_SCREENSHOT_URL"] = $"{baseUrl}/browser-screenshot";
             }
 
-            Environment.SetEnvironmentVariable("WINMUX_BROWSER_PROFILE_MODE", "shared");
-            Environment.SetEnvironmentVariable("WINMUX_REPO_ROOT", Environment.CurrentDirectory);
-            IncludeWslEnvironmentVariable("WINMUX_BROWSER_PROFILE_MODE/u");
-            IncludeWslEnvironmentVariable("WINMUX_AUTOMATION_URL/u");
-            IncludeWslEnvironmentVariable("WINMUX_BROWSER_STATE_URL/u");
-            IncludeWslEnvironmentVariable("WINMUX_BROWSER_EVAL_URL/u");
-            IncludeWslEnvironmentVariable("WINMUX_BROWSER_SCREENSHOT_URL/u");
-            IncludeWslEnvironmentVariable("WINMUX_REPO_ROOT/p");
+            values["WINMUX_BROWSER_PROFILE_MODE"] = "shared";
+            values["WINMUX_REPO_ROOT"] = values.TryGetValue("WINMUX_REPO_ROOT", out string repoRoot) && !string.IsNullOrWhiteSpace(repoRoot)
+                ? repoRoot
+                : Environment.CurrentDirectory;
+            values["WINMUX_THREAD_ROOT"] = values.TryGetValue("WINMUX_THREAD_ROOT", out string threadRoot) && !string.IsNullOrWhiteSpace(threadRoot)
+                ? threadRoot
+                : workingDirectory ?? Environment.CurrentDirectory;
+
+            values["WSLENV"] = AppendWslenvEntry(values.TryGetValue("WSLENV", out string wslenv) ? wslenv : null, "WINMUX_BROWSER_PROFILE_MODE/u");
+            values["WSLENV"] = AppendWslenvEntry(values["WSLENV"], "WINMUX_AUTOMATION_URL/u");
+            values["WSLENV"] = AppendWslenvEntry(values["WSLENV"], "WINMUX_BROWSER_STATE_URL/u");
+            values["WSLENV"] = AppendWslenvEntry(values["WSLENV"], "WINMUX_BROWSER_EVAL_URL/u");
+            values["WSLENV"] = AppendWslenvEntry(values["WSLENV"], "WINMUX_BROWSER_SCREENSHOT_URL/u");
+            values["WSLENV"] = AppendWslenvEntry(values["WSLENV"], "WINMUX_REPO_ROOT/p");
+            values["WSLENV"] = AppendWslenvEntry(values["WSLENV"], "WINMUX_THREAD_ROOT/p");
+
+            if (overrides is not null)
+            {
+                foreach ((string key, string value) in overrides)
+                {
+                    if (string.IsNullOrWhiteSpace(key))
+                    {
+                        continue;
+                    }
+
+                    values[key] = value ?? string.Empty;
+                }
+            }
+
+            return values;
         }
 
-        private static void IncludeWslEnvironmentVariable(string entry)
+        private static string AppendWslenvEntry(string existing, string entry)
         {
             if (string.IsNullOrWhiteSpace(entry))
             {
-                return;
+                return existing ?? string.Empty;
             }
 
-            string existing = Environment.GetEnvironmentVariable("WSLENV");
             string[] entries = string.IsNullOrWhiteSpace(existing)
                 ? Array.Empty<string>()
                 : existing.Split(':', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
             if (Array.Exists(entries, candidate => string.Equals(candidate, entry, StringComparison.OrdinalIgnoreCase)))
             {
-                return;
+                return existing;
             }
 
-            string nextValue = entries.Length == 0
+            return entries.Length == 0
                 ? entry
                 : $"{existing}:{entry}";
+        }
 
-            Environment.SetEnvironmentVariable("WSLENV", nextValue);
+        private static IntPtr BuildEnvironmentBlockPointer(IReadOnlyDictionary<string, string> values)
+        {
+            if (values is null || values.Count == 0)
+            {
+                return IntPtr.Zero;
+            }
+
+            string environmentBlock = string.Join("\0", values
+                .OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+                .Select(pair => $"{pair.Key}={pair.Value}")) + "\0\0";
+
+            return Marshal.StringToHGlobalUni(environmentBlock);
         }
 
         public void WriteInput(string text)

@@ -44,6 +44,7 @@ namespace SelfContainedDeployment
         private double _splitterStartPrimaryRatio;
         private double _splitterStartSecondaryRatio;
         private bool _showingSettings;
+        private bool _showingOverview;
         private bool _suppressTabSelectionChanged;
         private bool _refreshingTabView;
         private bool _suppressPaneInteractionRequests;
@@ -55,13 +56,26 @@ namespace SelfContainedDeployment
         private readonly DispatcherQueueTimer _sessionSaveTimer;
         private readonly DispatcherQueueTimer _projectTreeRefreshTimer;
         private readonly DispatcherQueueTimer _gitRefreshTimer;
+        private readonly HashSet<string> _baselineCaptureInFlightThreadIds = new(StringComparer.Ordinal);
         private GitThreadSnapshot _activeGitSnapshot;
         private int _latestGitRefreshRequestId;
         private string _pendingGitSelectedPath;
         private bool _pendingGitPreserveSelection;
         private string _lastProjectTreeRenderKey;
         private string _lastPaneWorkspaceRenderKey;
+        private string _lastThreadOverviewRenderKey;
         private bool _projectTreeRefreshEnqueued;
+        private bool _suppressDiffReviewSourceSelectionChanged;
+        private bool _capturingDiffCheckpoint;
+
+        private sealed class DiffReviewSourceOption
+        {
+            public DiffReviewSourceKind Kind { get; init; }
+
+            public string CheckpointId { get; init; }
+
+            public string Label { get; init; }
+        }
 
         public static MainPage Current;
 
@@ -176,7 +190,7 @@ namespace SelfContainedDeployment
             return new NativeAutomationUiTreeResponse
             {
                 WindowTitle = ((App)Application.Current).MainWindowInstance?.Title,
-                ActiveView = _showingSettings ? "settings" : "terminal",
+                ActiveView = ResolveActiveViewName(),
                 Root = root,
                 InteractiveNodes = interactiveNodes,
             };
@@ -370,10 +384,18 @@ namespace SelfContainedDeployment
                     Uri = pane.Browser.CurrentUri,
                     AddressText = pane.Browser.AddressText,
                     Initialized = pane.Browser.IsInitialized,
+                    SelectedTabId = pane.Browser.SelectedTabId,
+                    TabCount = pane.Browser.TabCount,
                     ProfileSeedStatus = pane.Browser.ProfileSeedStatus,
                     ExtensionImportStatus = pane.Browser.ExtensionImportStatus,
                     CredentialAutofillStatus = pane.Browser.CredentialAutofillStatus,
                     InstalledExtensions = pane.Browser.InstalledExtensionNames.ToList(),
+                    Tabs = pane.Browser.Tabs.Select(tab => new NativeAutomationBrowserTabSnapshot
+                    {
+                        Id = tab.Id,
+                        Title = tab.Title,
+                        Uri = tab.Uri,
+                    }).ToList(),
                 });
             }
 
@@ -532,6 +554,7 @@ namespace SelfContainedDeployment
 
         public NativeAutomationState GetAutomationState()
         {
+            GitThreadSnapshot displayedSnapshot = ResolveDisplayedGitSnapshot();
             List<NativeAutomationProjectState> projects = _projects.Select(project => new NativeAutomationProjectState
             {
                 Id = project.Id,
@@ -551,15 +574,18 @@ namespace SelfContainedDeployment
                 ProjectPath = _activeProject?.RootPath,
                 ActiveThreadId = _activeThread?.Id,
                 ActiveTabId = _activeThread?.SelectedPaneId,
-                ActiveView = _showingSettings ? "settings" : "terminal",
+                ActiveView = ResolveActiveViewName(),
                 Theme = ResolveTheme(SampleConfig.CurrentTheme).ToString().ToLowerInvariant(),
                 PaneOpen = ShellSplitView.IsPaneOpen,
                 InspectorOpen = _inspectorOpen,
                 ShellProfileId = _activeProject?.ShellProfileId,
-                GitBranch = _activeThread?.BranchName,
-                WorktreePath = _activeThread?.WorktreePath,
-                ChangedFileCount = _activeThread?.ChangedFileCount ?? 0,
-                SelectedDiffPath = _activeGitSnapshot?.SelectedPath ?? _activeThread?.SelectedDiffPath,
+                GitBranch = displayedSnapshot?.BranchName ?? _activeThread?.BranchName,
+                WorktreePath = displayedSnapshot?.WorktreePath ?? _activeThread?.WorktreePath,
+                ChangedFileCount = displayedSnapshot?.ChangedFiles.Count ?? _activeThread?.ChangedFileCount ?? 0,
+                SelectedDiffPath = displayedSnapshot?.SelectedPath ?? _activeThread?.SelectedDiffPath,
+                DiffReviewSource = _activeThread is null ? "live" : FormatDiffReviewSource(_activeThread.DiffReviewSource),
+                SelectedCheckpointId = _activeThread?.SelectedCheckpointId,
+                CheckpointCount = _activeThread?.DiffCheckpoints.Count ?? 0,
                 Projects = projects,
                 Threads = projects.SelectMany(project => project.Threads).ToList(),
             };
@@ -580,6 +606,9 @@ namespace SelfContainedDeployment
                         break;
                     case "showterminal":
                         ShowTerminalShell();
+                        break;
+                    case "showoverview":
+                        ShowThreadOverview();
                         break;
                     case "showsettings":
                         ShowSettings();
@@ -639,6 +668,14 @@ namespace SelfContainedDeployment
                         ShowTerminalShell();
                         QueueActiveThreadGitRefresh(preserveSelection: true);
                         break;
+                    case "capturecheckpoint":
+                        _ = CaptureDiffCheckpointAsync(request.Value);
+                        ShowTerminalShell();
+                        break;
+                    case "selectreviewsource":
+                        SelectDiffReviewSource(request.Value);
+                        ShowTerminalShell();
+                        break;
                     case "selectdifffile":
                         if (_activeGitSnapshot is not null && !string.IsNullOrWhiteSpace(request.Value))
                         {
@@ -664,6 +701,18 @@ namespace SelfContainedDeployment
                         break;
                     case "navigatebrowser":
                         NavigateSelectedBrowser(request.Value);
+                        ShowTerminalShell();
+                        break;
+                    case "newbrowsertab":
+                        _ = ResolveBrowserPane()?.Browser.AddTabAsync(request.Value);
+                        ShowTerminalShell();
+                        break;
+                    case "selectbrowsertab":
+                        _ = ResolveBrowserPane()?.Browser.SelectTabAsync(request.Value);
+                        ShowTerminalShell();
+                        break;
+                    case "closebrowsertab":
+                        _ = ResolveBrowserPane()?.Browser.CloseTabAsync(request.Value);
                         ShowTerminalShell();
                         break;
                     case "importbrowserpasswordscsv":
@@ -804,6 +853,22 @@ namespace SelfContainedDeployment
             ShowSettings();
         }
 
+        private void OnShowOverviewClicked(object sender, RoutedEventArgs e)
+        {
+            if (_showingOverview)
+            {
+                ShowTerminalShell();
+                return;
+            }
+
+            ShowThreadOverview();
+        }
+
+        private void OnCloseOverviewClicked(object sender, RoutedEventArgs e)
+        {
+            ShowTerminalShell();
+        }
+
         private async void OnNewProjectClicked(object sender, RoutedEventArgs e)
         {
             ProjectDraft draft = await PromptForProjectAsync();
@@ -861,6 +926,15 @@ namespace SelfContainedDeployment
         }
 
         private void OnThreadButtonClicked(object sender, RoutedEventArgs e)
+        {
+            if (sender is Button button && button.Tag is string threadId)
+            {
+                ActivateThread(FindThread(threadId));
+                ShowTerminalShell();
+            }
+        }
+
+        private void OnOverviewThreadClicked(object sender, RoutedEventArgs e)
         {
             if (sender is Button button && button.Tag is string threadId)
             {
@@ -988,6 +1062,21 @@ namespace SelfContainedDeployment
             QueueActiveThreadGitRefresh(preserveSelection: true);
         }
 
+        private async void OnCaptureCheckpointClicked(object sender, RoutedEventArgs e)
+        {
+            await CaptureDiffCheckpointAsync().ConfigureAwait(true);
+        }
+
+        private void OnDiffReviewSourceSelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (_suppressDiffReviewSourceSelectionChanged || DiffReviewSourceComboBox?.SelectedItem is not DiffReviewSourceOption option)
+            {
+                return;
+            }
+
+            ApplyDiffReviewSourceSelection(option.Kind, option.CheckpointId);
+        }
+
         private void OnDiffFileButtonClicked(object sender, RoutedEventArgs e)
         {
             if (sender is not Button button)
@@ -996,16 +1085,12 @@ namespace SelfContainedDeployment
             }
 
             GitChangedFile changedFile = ResolveSelectedDiffFile(button);
-            if (_activeGitSnapshot is null || changedFile is null)
+            if (_activeThread is null || changedFile is null)
             {
                 return;
             }
 
-            _activeGitSnapshot.SelectedPath = changedFile.Path;
-            _activeThread.SelectedDiffPath = changedFile.Path;
-            UpdateDiffFileSelection();
-            AddOrSelectDiffPane(_activeProject, _activeThread, changedFile.Path, null);
-            QueueActiveThreadGitRefresh(changedFile.Path);
+            SelectDiffPathInCurrentReview(changedFile.Path);
         }
 
         private void TerminalTabs_TabCloseRequested(TabView sender, TabViewTabCloseRequestedEventArgs args)
@@ -1137,6 +1222,163 @@ namespace SelfContainedDeployment
             DiffWorktreeText.Text = _activeThread.WorktreePath ?? _activeProject?.RootPath ?? string.Empty;
         }
 
+        private GitThreadSnapshot ResolveDisplayedGitSnapshot()
+        {
+            if (_activeThread is null)
+            {
+                return null;
+            }
+
+            NormalizeDiffReviewSource(_activeThread);
+            return _activeThread.DiffReviewSource switch
+            {
+                DiffReviewSourceKind.Baseline when _activeThread.BaselineSnapshot is not null => _activeThread.BaselineSnapshot,
+                DiffReviewSourceKind.Checkpoint when !string.IsNullOrWhiteSpace(_activeThread.SelectedCheckpointId) =>
+                    _activeThread.DiffCheckpoints.FirstOrDefault(checkpoint => string.Equals(checkpoint.Id, _activeThread.SelectedCheckpointId, StringComparison.Ordinal))?.Snapshot
+                    ?? _activeGitSnapshot,
+                _ => _activeGitSnapshot,
+            };
+        }
+
+        private IReadOnlyList<DiffReviewSourceOption> BuildDiffReviewSourceOptions(WorkspaceThread thread)
+        {
+            if (thread is null)
+            {
+                return Array.Empty<DiffReviewSourceOption>();
+            }
+
+            List<DiffReviewSourceOption> options = new()
+            {
+                new DiffReviewSourceOption
+                {
+                    Kind = DiffReviewSourceKind.Live,
+                    Label = "Live working tree",
+                }
+            };
+
+            if (thread.BaselineSnapshot is not null)
+            {
+                options.Add(new DiffReviewSourceOption
+                {
+                    Kind = DiffReviewSourceKind.Baseline,
+                    Label = "Thread baseline",
+                });
+            }
+
+            foreach (WorkspaceDiffCheckpoint checkpoint in thread.DiffCheckpoints.OrderByDescending(candidate => candidate.CapturedAt))
+            {
+                options.Add(new DiffReviewSourceOption
+                {
+                    Kind = DiffReviewSourceKind.Checkpoint,
+                    CheckpointId = checkpoint.Id,
+                    Label = string.IsNullOrWhiteSpace(checkpoint.Name)
+                        ? checkpoint.CapturedAt.LocalDateTime.ToString("MMM d HH:mm")
+                        : checkpoint.Name,
+                });
+            }
+
+            return options;
+        }
+
+        private void RefreshDiffReviewSourceControls()
+        {
+            if (DiffReviewSourceComboBox is null || DiffReviewSourceMetaText is null || CaptureCheckpointButton is null)
+            {
+                return;
+            }
+
+            if (_activeThread is null)
+            {
+                _suppressDiffReviewSourceSelectionChanged = true;
+                DiffReviewSourceComboBox.ItemsSource = null;
+                DiffReviewSourceComboBox.SelectedItem = null;
+                _suppressDiffReviewSourceSelectionChanged = false;
+                DiffReviewSourceComboBox.IsEnabled = false;
+                DiffReviewSourceMetaText.Text = "No thread selected";
+                CaptureCheckpointButton.IsEnabled = false;
+                return;
+            }
+
+            IReadOnlyList<DiffReviewSourceOption> options = BuildDiffReviewSourceOptions(_activeThread);
+            DiffReviewSourceOption selectedOption = options.FirstOrDefault(option =>
+                option.Kind == _activeThread.DiffReviewSource &&
+                string.Equals(option.CheckpointId, _activeThread.SelectedCheckpointId, StringComparison.Ordinal))
+                ?? options.FirstOrDefault();
+
+            _suppressDiffReviewSourceSelectionChanged = true;
+            DiffReviewSourceComboBox.DisplayMemberPath = nameof(DiffReviewSourceOption.Label);
+            DiffReviewSourceComboBox.ItemsSource = options;
+            DiffReviewSourceComboBox.SelectedItem = selectedOption;
+            _suppressDiffReviewSourceSelectionChanged = false;
+
+            DiffReviewSourceComboBox.IsEnabled = options.Count > 1;
+            CaptureCheckpointButton.IsEnabled = !_capturingDiffCheckpoint;
+            DiffReviewSourceMetaText.Text = BuildDiffReviewSourceMeta(_activeThread, selectedOption);
+        }
+
+        private static string BuildDiffReviewSourceMeta(WorkspaceThread thread, DiffReviewSourceOption selectedOption)
+        {
+            if (thread is null || selectedOption is null)
+            {
+                return "Live working tree";
+            }
+
+            return selectedOption.Kind switch
+            {
+                DiffReviewSourceKind.Live => thread.BaselineSnapshot is null
+                    ? "Live working tree. Baseline will be captured on the first successful git refresh."
+                    : $"Live working tree · {thread.DiffCheckpoints.Count} checkpoint{(thread.DiffCheckpoints.Count == 1 ? string.Empty : "s")}",
+                DiffReviewSourceKind.Baseline => "Thread baseline captured when this thread first resolved git state.",
+                DiffReviewSourceKind.Checkpoint => thread.DiffCheckpoints.FirstOrDefault(checkpoint => string.Equals(checkpoint.Id, selectedOption.CheckpointId, StringComparison.Ordinal)) is WorkspaceDiffCheckpoint checkpoint
+                    ? $"Captured {checkpoint.CapturedAt.LocalDateTime:g}"
+                    : "Saved checkpoint",
+                _ => "Live working tree",
+            };
+        }
+
+        private void ApplyDiffReviewSourceSelection(DiffReviewSourceKind kind, string checkpointId = null)
+        {
+            if (_activeThread is null)
+            {
+                return;
+            }
+
+            _activeThread.DiffReviewSource = kind;
+            _activeThread.SelectedCheckpointId = kind == DiffReviewSourceKind.Checkpoint ? checkpointId : null;
+            NormalizeDiffReviewSource(_activeThread);
+            RefreshDiffReviewSourceControls();
+            ApplyGitSnapshotToUi();
+            QueueSessionSave();
+            LogAutomationEvent("git", "review_source.selected", $"Selected {FormatDiffReviewSource(_activeThread.DiffReviewSource)} review source", new Dictionary<string, string>
+            {
+                ["threadId"] = _activeThread.Id,
+                ["projectId"] = _activeProject?.Id ?? string.Empty,
+                ["reviewSource"] = FormatDiffReviewSource(_activeThread.DiffReviewSource),
+                ["checkpointId"] = _activeThread.SelectedCheckpointId ?? string.Empty,
+            });
+        }
+
+        private void SelectDiffReviewSource(string value)
+        {
+            string normalized = value?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(normalized) || string.Equals(normalized, "live", StringComparison.OrdinalIgnoreCase))
+            {
+                ApplyDiffReviewSourceSelection(DiffReviewSourceKind.Live);
+                return;
+            }
+
+            if (string.Equals(normalized, "baseline", StringComparison.OrdinalIgnoreCase))
+            {
+                ApplyDiffReviewSourceSelection(DiffReviewSourceKind.Baseline);
+                return;
+            }
+
+            string checkpointId = normalized.StartsWith("checkpoint:", StringComparison.OrdinalIgnoreCase)
+                ? normalized["checkpoint:".Length..]
+                : normalized;
+            ApplyDiffReviewSourceSelection(DiffReviewSourceKind.Checkpoint, checkpointId);
+        }
+
         private WorkspaceSessionSnapshot BuildSessionSnapshot()
         {
             return new WorkspaceSessionSnapshot
@@ -1147,7 +1389,7 @@ namespace SelfContainedDeployment
                 MaxPaneCountPerThread = SampleConfig.MaxPaneCountPerThread,
                 PaneOpen = ShellSplitView.IsPaneOpen,
                 InspectorOpen = _inspectorOpen,
-                ActiveView = _showingSettings ? "settings" : "terminal",
+                ActiveView = ResolveActiveViewName(),
                 ActiveProjectId = _activeProject?.Id,
                 ActiveThreadId = _activeThread?.Id,
                 ThreadSequence = _threadSequence,
@@ -1167,10 +1409,20 @@ namespace SelfContainedDeployment
                         WorktreePath = thread.WorktreePath,
                         BranchName = thread.BranchName,
                         SelectedDiffPath = thread.SelectedDiffPath,
+                        DiffReviewSource = FormatDiffReviewSource(thread.DiffReviewSource),
+                        SelectedCheckpointId = thread.SelectedCheckpointId,
+                        BaselineSnapshot = CreateGitSnapshotSessionSnapshot(thread.BaselineSnapshot),
                         SelectedPaneId = thread.SelectedPaneId,
                         Layout = WorkspaceSessionStore.FormatLayout(thread.LayoutPreset),
                         PrimarySplitRatio = thread.PrimarySplitRatio,
                         SecondarySplitRatio = thread.SecondarySplitRatio,
+                        DiffCheckpoints = thread.DiffCheckpoints.Select(checkpoint => new GitCheckpointSessionSnapshot
+                        {
+                            Id = checkpoint.Id,
+                            Name = checkpoint.Name,
+                            CapturedAt = checkpoint.CapturedAt.ToString("O"),
+                            Snapshot = CreateGitSnapshotSessionSnapshot(checkpoint.Snapshot),
+                        }).ToList(),
                         Panes = thread.Panes
                             .Where(pane => !pane.IsExited)
                             .Select(pane => new PaneSessionSnapshot
@@ -1180,6 +1432,15 @@ namespace SelfContainedDeployment
                                 Title = pane.Title,
                                 HasCustomTitle = pane.HasCustomTitle,
                                 BrowserUri = pane is BrowserPaneRecord browserPane ? browserPane.Browser.CurrentUri : null,
+                                SelectedBrowserTabId = pane is BrowserPaneRecord browserPaneState ? browserPaneState.Browser.SelectedTabId : null,
+                                BrowserTabs = pane is BrowserPaneRecord browserPaneTabs
+                                    ? browserPaneTabs.Browser.Tabs.Select(tab => new BrowserTabSessionSnapshot
+                                    {
+                                        Id = tab.Id,
+                                        Title = tab.Title,
+                                        Uri = tab.Uri,
+                                    }).ToList()
+                                    : new List<BrowserTabSessionSnapshot>(),
                                 DiffPath = pane is DiffPaneRecord diffPane ? diffPane.DiffPath : null,
                                 ReplayTool = pane.ReplayTool,
                                 ReplaySessionId = pane.ReplaySessionId,
@@ -1189,6 +1450,117 @@ namespace SelfContainedDeployment
                     }).ToList(),
                 }).ToList(),
             };
+        }
+
+        private static GitSnapshotSessionSnapshot CreateGitSnapshotSessionSnapshot(GitThreadSnapshot snapshot)
+        {
+            if (snapshot is null)
+            {
+                return null;
+            }
+
+            return new GitSnapshotSessionSnapshot
+            {
+                BranchName = snapshot.BranchName,
+                RepositoryRootPath = snapshot.RepositoryRootPath,
+                WorktreePath = snapshot.WorktreePath,
+                StatusSummary = snapshot.StatusSummary,
+                DiffSummary = snapshot.DiffSummary,
+                SelectedPath = snapshot.SelectedPath,
+                SelectedDiff = snapshot.SelectedDiff,
+                Error = snapshot.Error,
+                ChangedFiles = snapshot.ChangedFiles.Select(file => new GitChangedFileSessionSnapshot
+                {
+                    Status = file.Status,
+                    Path = file.Path,
+                    AddedLines = file.AddedLines,
+                    RemovedLines = file.RemovedLines,
+                    DiffText = file.DiffText,
+                }).ToList(),
+            };
+        }
+
+        private static GitThreadSnapshot RestoreGitThreadSnapshot(GitSnapshotSessionSnapshot snapshot)
+        {
+            if (snapshot is null)
+            {
+                return null;
+            }
+
+            GitThreadSnapshot restored = new()
+            {
+                BranchName = snapshot.BranchName,
+                RepositoryRootPath = snapshot.RepositoryRootPath,
+                WorktreePath = snapshot.WorktreePath,
+                StatusSummary = snapshot.StatusSummary,
+                DiffSummary = snapshot.DiffSummary,
+                SelectedPath = snapshot.SelectedPath,
+                SelectedDiff = snapshot.SelectedDiff,
+                Error = snapshot.Error,
+                ChangedFiles = (snapshot.ChangedFiles ?? new List<GitChangedFileSessionSnapshot>()).Select(file => new GitChangedFile
+                {
+                    Status = file.Status,
+                    Path = file.Path,
+                    AddedLines = file.AddedLines,
+                    RemovedLines = file.RemovedLines,
+                    DiffText = file.DiffText,
+                }).ToList(),
+            };
+            GitStatusService.SelectDiffPath(restored, restored.SelectedPath);
+            return restored;
+        }
+
+        private static string FormatDiffReviewSource(DiffReviewSourceKind kind)
+        {
+            return kind switch
+            {
+                DiffReviewSourceKind.Baseline => "baseline",
+                DiffReviewSourceKind.Checkpoint => "checkpoint",
+                _ => "live",
+            };
+        }
+
+        private string ResolveActiveViewName()
+        {
+            if (_showingSettings)
+            {
+                return "settings";
+            }
+
+            return _showingOverview ? "overview" : "terminal";
+        }
+
+        private static DiffReviewSourceKind ParseDiffReviewSource(string value)
+        {
+            return value?.Trim().ToLowerInvariant() switch
+            {
+                "baseline" => DiffReviewSourceKind.Baseline,
+                "checkpoint" => DiffReviewSourceKind.Checkpoint,
+                _ => DiffReviewSourceKind.Live,
+            };
+        }
+
+        private static void NormalizeDiffReviewSource(WorkspaceThread thread)
+        {
+            if (thread is null)
+            {
+                return;
+            }
+
+            if (thread.DiffReviewSource == DiffReviewSourceKind.Baseline && thread.BaselineSnapshot is not null)
+            {
+                return;
+            }
+
+            if (thread.DiffReviewSource == DiffReviewSourceKind.Checkpoint &&
+                !string.IsNullOrWhiteSpace(thread.SelectedCheckpointId) &&
+                thread.DiffCheckpoints.Any(checkpoint => string.Equals(checkpoint.Id, thread.SelectedCheckpointId, StringComparison.Ordinal)))
+            {
+                return;
+            }
+
+            thread.DiffReviewSource = DiffReviewSourceKind.Live;
+            thread.SelectedCheckpointId = null;
         }
 
         private bool TryRestoreSession()
@@ -1241,10 +1613,25 @@ namespace SelfContainedDeployment
                             WorktreePath = string.IsNullOrWhiteSpace(threadSnapshot.WorktreePath) ? project.RootPath : threadSnapshot.WorktreePath,
                             BranchName = threadSnapshot.BranchName,
                             SelectedDiffPath = threadSnapshot.SelectedDiffPath,
+                            DiffReviewSource = ParseDiffReviewSource(threadSnapshot.DiffReviewSource),
+                            SelectedCheckpointId = threadSnapshot.SelectedCheckpointId,
+                            BaselineSnapshot = RestoreGitThreadSnapshot(threadSnapshot.BaselineSnapshot),
                             LayoutPreset = WorkspaceSessionStore.ParseLayout(threadSnapshot.Layout),
                             PrimarySplitRatio = ClampPaneSplitRatio(threadSnapshot.PrimarySplitRatio <= 0 ? 0.58 : threadSnapshot.PrimarySplitRatio),
                             SecondarySplitRatio = ClampPaneSplitRatio(threadSnapshot.SecondarySplitRatio <= 0 ? 0.5 : threadSnapshot.SecondarySplitRatio),
                         };
+                        foreach (GitCheckpointSessionSnapshot checkpointSnapshot in threadSnapshot.DiffCheckpoints ?? new List<GitCheckpointSessionSnapshot>())
+                        {
+                            thread.DiffCheckpoints.Add(new WorkspaceDiffCheckpoint(checkpointSnapshot.Name, checkpointSnapshot.Id)
+                            {
+                                CapturedAt = DateTimeOffset.TryParse(checkpointSnapshot.CapturedAt, out DateTimeOffset capturedAt)
+                                    ? capturedAt
+                                    : DateTimeOffset.UtcNow,
+                                Snapshot = RestoreGitThreadSnapshot(checkpointSnapshot.Snapshot),
+                            });
+                        }
+
+                        NormalizeDiffReviewSource(thread);
                         project.Threads.Add(thread);
 
                         foreach (PaneSessionSnapshot paneSnapshot in threadSnapshot.Panes ?? new List<PaneSessionSnapshot>())
@@ -1346,12 +1733,12 @@ namespace SelfContainedDeployment
             return project;
         }
 
-        private WorkspaceThread CreateThread(WorkspaceProject project, string threadName = null, bool ensureInitialPane = true)
+        private WorkspaceThread CreateThread(WorkspaceProject project, string threadName = null, bool ensureInitialPane = true, WorkspaceThread inheritFromThread = null)
         {
             project ??= _activeProject ?? GetOrCreateProject(Environment.CurrentDirectory);
 
             WorkspaceThread thread = new(project, string.IsNullOrWhiteSpace(threadName) ? $"Thread {_threadSequence++}" : threadName.Trim());
-            if (TryResolveInheritedWorktreePath(project, out string inheritedWorktreePath))
+            if (TryResolveInheritedWorktreePath(project, inheritFromThread, out string inheritedWorktreePath))
             {
                 thread.WorktreePath = inheritedWorktreePath;
             }
@@ -1373,7 +1760,7 @@ namespace SelfContainedDeployment
             return thread;
         }
 
-        private bool TryResolveInheritedWorktreePath(WorkspaceProject project, out string worktreePath)
+        private bool TryResolveInheritedWorktreePath(WorkspaceProject project, WorkspaceThread explicitSourceThread, out string worktreePath)
         {
             worktreePath = null;
             if (project is null)
@@ -1381,12 +1768,12 @@ namespace SelfContainedDeployment
                 return false;
             }
 
-            WorkspaceThread sourceThread = null;
-            if (ReferenceEquals(project, _activeProject) && _activeThread is not null)
+            WorkspaceThread sourceThread = explicitSourceThread;
+            if (sourceThread is null && ReferenceEquals(project, _activeProject) && _activeThread is not null)
             {
                 sourceThread = _activeThread;
             }
-            else if (!string.IsNullOrWhiteSpace(project.SelectedThreadId))
+            else if (sourceThread is null && !string.IsNullOrWhiteSpace(project.SelectedThreadId))
             {
                 sourceThread = project.Threads.FirstOrDefault(thread => string.Equals(thread.Id, project.SelectedThreadId, StringComparison.Ordinal));
             }
@@ -1424,7 +1811,7 @@ namespace SelfContainedDeployment
                 return thread;
             }
 
-            WorkspaceThread overflowThread = CreateThread(project, ensureInitialPane: false);
+            WorkspaceThread overflowThread = CreateThread(project, ensureInitialPane: false, inheritFromThread: thread);
             LogAutomationEvent("shell", "thread.overflow_created", $"Created overflow thread {overflowThread.Name} for {paneKind.ToString().ToLowerInvariant()} pane", new Dictionary<string, string>
             {
                 ["projectId"] = project.Id,
@@ -1690,12 +2077,14 @@ namespace SelfContainedDeployment
 
         private TerminalPaneRecord CreateTerminalPane(WorkspaceProject project, WorkspaceThread thread, WorkspacePaneKind kind, string startupInput, string initialTitle, string paneId = null)
         {
+            string threadRootPath = ResolveThreadRootPath(project, thread);
             TerminalControl terminal = new()
             {
                 DisplayWorkingDirectory = FormatThreadPath(project, thread),
                 InitialWorkingDirectory = FormatThreadPath(project, thread),
-                ProcessWorkingDirectory = ShellProfiles.ResolveProcessWorkingDirectory(ResolveThreadRootPath(project, thread)),
-                ShellCommand = ShellProfiles.BuildLaunchCommand(project.ShellProfileId, ResolveThreadRootPath(project, thread)),
+                ProcessWorkingDirectory = ShellProfiles.ResolveProcessWorkingDirectory(threadRootPath),
+                ShellCommand = ShellProfiles.BuildLaunchCommand(project.ShellProfileId, threadRootPath),
+                LaunchEnvironment = BuildTerminalLaunchEnvironment(project, thread, threadRootPath),
                 StartupInput = startupInput,
             };
 
@@ -1752,6 +2141,20 @@ namespace SelfContainedDeployment
             return pane;
         }
 
+        private static IReadOnlyDictionary<string, string> BuildTerminalLaunchEnvironment(WorkspaceProject project, WorkspaceThread thread, string threadRootPath)
+        {
+            Dictionary<string, string> values = new(StringComparer.OrdinalIgnoreCase)
+            {
+                ["WINMUX_REPO_ROOT"] = Environment.CurrentDirectory,
+                ["WINMUX_PROJECT_ROOT"] = project?.RootPath ?? string.Empty,
+                ["WINMUX_THREAD_ROOT"] = threadRootPath ?? string.Empty,
+                ["WINMUX_PROJECT_ID"] = project?.Id ?? string.Empty,
+                ["WINMUX_THREAD_ID"] = thread?.Id ?? string.Empty,
+            };
+
+            return values;
+        }
+
         private WorkspaceThread FindThreadForPane(string paneId)
         {
             if (string.IsNullOrWhiteSpace(paneId))
@@ -1783,6 +2186,17 @@ namespace SelfContainedDeployment
             pane.ReplayTool = snapshot.ReplayTool;
             pane.ReplaySessionId = snapshot.ReplaySessionId;
             pane.ReplayCommand = snapshot.ReplayCommand;
+            if (pane is BrowserPaneRecord browserPane && snapshot.BrowserTabs?.Count > 0)
+            {
+                browserPane.Browser.RestoreTabSession(
+                    snapshot.BrowserTabs.Select(tab => new BrowserPaneControl.BrowserPaneTabSnapshot
+                    {
+                        Id = tab.Id,
+                        Title = tab.Title,
+                        Uri = tab.Uri,
+                    }).ToList(),
+                    snapshot.SelectedBrowserTabId);
+            }
             return pane;
         }
 
@@ -2222,6 +2636,7 @@ namespace SelfContainedDeployment
         {
             WorkspaceThread previousThread = _activeThread;
             _activeThread = thread ?? throw new ArgumentNullException(nameof(thread));
+            NormalizeDiffReviewSource(_activeThread);
             _activeProject = FindProjectForThread(thread);
             _activeProject.SelectedThreadId = thread.Id;
             EnsureThreadHasTab(_activeProject, thread);
@@ -2235,6 +2650,7 @@ namespace SelfContainedDeployment
             RefreshTabView();
             UpdateWorkspaceVisibility();
             UpdateHeader();
+            RefreshDiffReviewSourceControls();
             RequestLayoutForVisiblePanes();
             FocusSelectedPane();
             QueueActiveThreadGitRefresh(thread.SelectedDiffPath, preserveSelection: true);
@@ -2389,7 +2805,7 @@ namespace SelfContainedDeployment
         {
             WorkspaceThread source = FindThread(threadId);
             WorkspaceProject project = FindProjectForThread(source);
-            WorkspaceThread duplicate = CreateThread(project, $"Copy of {source.Name}");
+            WorkspaceThread duplicate = CreateThread(project, $"Copy of {source.Name}", inheritFromThread: source);
 
             duplicate.LayoutPreset = source.LayoutPreset;
             ClearThreadPanes(project, duplicate);
@@ -3592,6 +4008,7 @@ namespace SelfContainedDeployment
         private void ShowSettings()
         {
             _showingSettings = true;
+            _showingOverview = false;
             SettingsFrame.Navigate(typeof(SettingsPage));
             UpdateWorkspaceVisibility();
             UpdateSidebarActions();
@@ -3603,6 +4020,7 @@ namespace SelfContainedDeployment
         private void ShowTerminalShell()
         {
             _showingSettings = false;
+            _showingOverview = false;
             UpdateWorkspaceVisibility();
             UpdateSidebarActions();
             FocusSelectedPane();
@@ -3611,6 +4029,21 @@ namespace SelfContainedDeployment
             QueueActiveThreadGitRefresh(_activeThread?.SelectedDiffPath ?? _activeGitSnapshot?.SelectedPath, preserveSelection: true);
             QueueSessionSave();
             LogAutomationEvent("shell", "view.terminal", _activeThread is null ? "Showing empty project state" : "Showing pane workspace", new Dictionary<string, string>
+            {
+                ["projectId"] = _activeProject?.Id ?? string.Empty,
+                ["threadId"] = _activeThread?.Id ?? string.Empty,
+            });
+        }
+
+        private void ShowThreadOverview()
+        {
+            _showingSettings = false;
+            _showingOverview = _activeProject is not null;
+            UpdateWorkspaceVisibility();
+            UpdateSidebarActions();
+            UpdateHeader();
+            QueueSessionSave();
+            LogAutomationEvent("shell", "view.overview", _activeProject is null ? "Overview unavailable" : "Showing thread overview", new Dictionary<string, string>
             {
                 ["projectId"] = _activeProject?.Id ?? string.Empty,
                 ["threadId"] = _activeThread?.Id ?? string.Empty,
@@ -3646,6 +4079,66 @@ namespace SelfContainedDeployment
             ApplyActiveGitSnapshot(snapshot);
         }
 
+        private async System.Threading.Tasks.Task CaptureDiffCheckpointAsync(string checkpointName = null)
+        {
+            if (_activeThread is null || _activeProject is null || _capturingDiffCheckpoint)
+            {
+                return;
+            }
+
+            WorkspaceThread thread = _activeThread;
+            WorkspaceProject project = _activeProject;
+            string selectedPath = ResolveDisplayedGitSnapshot()?.SelectedPath ?? thread.SelectedDiffPath;
+            string worktreePath = thread.WorktreePath ?? project.RootPath;
+            _capturingDiffCheckpoint = true;
+            RefreshDiffReviewSourceControls();
+
+            try
+            {
+                GitThreadSnapshot checkpointSnapshot = await System.Threading.Tasks.Task
+                    .Run(() => GitStatusService.CaptureComplete(worktreePath, selectedPath))
+                    .ConfigureAwait(true);
+
+                if (!ReferenceEquals(thread, _activeThread) || !ReferenceEquals(project, _activeProject))
+                {
+                    return;
+                }
+
+                if (thread.BaselineSnapshot is null)
+                {
+                    thread.BaselineSnapshot = GitStatusService.CloneSnapshot(checkpointSnapshot);
+                    LogAutomationEvent("git", "thread.baseline_captured", "Captured thread baseline from checkpoint flow", new Dictionary<string, string>
+                    {
+                        ["threadId"] = thread.Id,
+                        ["projectId"] = project.Id,
+                        ["selectedPath"] = checkpointSnapshot.SelectedPath ?? string.Empty,
+                    });
+                }
+
+                WorkspaceDiffCheckpoint checkpoint = new(
+                    string.IsNullOrWhiteSpace(checkpointName) ? $"Checkpoint {thread.DiffCheckpoints.Count + 1}" : checkpointName.Trim());
+                checkpoint.CapturedAt = DateTimeOffset.UtcNow;
+                checkpoint.Snapshot = GitStatusService.CloneSnapshot(checkpointSnapshot);
+                thread.DiffCheckpoints.Add(checkpoint);
+
+                RefreshDiffReviewSourceControls();
+                QueueSessionSave();
+                LogAutomationEvent("git", "checkpoint.captured", $"Captured {checkpoint.Name}", new Dictionary<string, string>
+                {
+                    ["threadId"] = thread.Id,
+                    ["projectId"] = project.Id,
+                    ["checkpointId"] = checkpoint.Id,
+                    ["checkpointName"] = checkpoint.Name,
+                    ["selectedPath"] = checkpointSnapshot.SelectedPath ?? string.Empty,
+                });
+            }
+            finally
+            {
+                _capturingDiffCheckpoint = false;
+                RefreshDiffReviewSourceControls();
+            }
+        }
+
         private void ApplyActiveGitSnapshot(GitThreadSnapshot snapshot)
         {
             _activeGitSnapshot = snapshot;
@@ -3653,6 +4146,7 @@ namespace SelfContainedDeployment
             _activeThread.WorktreePath = string.IsNullOrWhiteSpace(_activeThread.WorktreePath) ? snapshot.WorktreePath : _activeThread.WorktreePath;
             _activeThread.ChangedFileCount = snapshot.ChangedFiles.Count;
             _activeThread.SelectedDiffPath = snapshot.SelectedPath;
+            EnsureThreadBaselineCapture(_activeThread, _activeProject, snapshot);
             ApplyGitSnapshotToUi();
             QueueProjectTreeRefresh();
             LogAutomationEvent("git", "thread.snapshot_refreshed", string.IsNullOrWhiteSpace(snapshot.Error) ? "Refreshed thread git snapshot" : snapshot.Error, new Dictionary<string, string>
@@ -3666,14 +4160,71 @@ namespace SelfContainedDeployment
             });
         }
 
+        private void EnsureThreadBaselineCapture(WorkspaceThread thread, WorkspaceProject project, GitThreadSnapshot liveSnapshot)
+        {
+            if (thread is null || project is null || thread.BaselineSnapshot is not null)
+            {
+                RefreshDiffReviewSourceControls();
+                return;
+            }
+
+            if (!_baselineCaptureInFlightThreadIds.Add(thread.Id))
+            {
+                RefreshDiffReviewSourceControls();
+                return;
+            }
+
+            string worktreePath = thread.WorktreePath ?? project.RootPath;
+            string selectedPath = liveSnapshot?.SelectedPath;
+            _ = System.Threading.Tasks.Task.Run(() => GitStatusService.CaptureComplete(worktreePath, selectedPath))
+                .ContinueWith(task =>
+                {
+                    DispatcherQueue.TryEnqueue(() =>
+                    {
+                        _baselineCaptureInFlightThreadIds.Remove(thread.Id);
+                        if (task.IsFaulted || task.IsCanceled)
+                        {
+                            LogAutomationEvent("git", "thread.baseline_failed", "Failed to capture thread baseline", new Dictionary<string, string>
+                            {
+                                ["threadId"] = thread.Id,
+                                ["projectId"] = project.Id,
+                            });
+                            RefreshDiffReviewSourceControls();
+                            return;
+                        }
+
+                        if (thread.BaselineSnapshot is null)
+                        {
+                            thread.BaselineSnapshot = GitStatusService.CloneSnapshot(task.Result);
+                            QueueSessionSave();
+                            LogAutomationEvent("git", "thread.baseline_captured", "Captured thread baseline", new Dictionary<string, string>
+                            {
+                                ["threadId"] = thread.Id,
+                                ["projectId"] = project.Id,
+                                ["selectedPath"] = task.Result?.SelectedPath ?? string.Empty,
+                            });
+                        }
+
+                        RefreshDiffReviewSourceControls();
+                        if (ReferenceEquals(thread, _activeThread) && thread.DiffReviewSource == DiffReviewSourceKind.Baseline)
+                        {
+                            ApplyGitSnapshotToUi();
+                        }
+                    });
+                }, System.Threading.Tasks.TaskScheduler.Default);
+            RefreshDiffReviewSourceControls();
+        }
+
         private void ApplyGitSnapshotToUi()
         {
-            if (_activeGitSnapshot is null)
+            RefreshDiffReviewSourceControls();
+            GitThreadSnapshot displayedSnapshot = ResolveDisplayedGitSnapshot();
+            if (displayedSnapshot is null)
             {
                 DiffBranchText.Text = "No git context";
                 DiffWorktreeText.Text = string.Empty;
                 DiffSummaryText.Text = "No working tree changes";
-                PopulateDiffFileList(null, null);
+                PopulateDiffFileList(null, null, null);
                 if (_activeThread?.Panes.OfType<DiffPaneRecord>().FirstOrDefault() is DiffPaneRecord emptyDiffPane)
                 {
                     UpdateDiffPane(emptyDiffPane, emptyDiffPane.DiffPath, null);
@@ -3681,26 +4232,26 @@ namespace SelfContainedDeployment
                 return;
             }
 
-            int totalAddedLines = _activeGitSnapshot.ChangedFiles.Sum(file => file.AddedLines);
-            int totalRemovedLines = _activeGitSnapshot.ChangedFiles.Sum(file => file.RemovedLines);
-            DiffBranchText.Text = string.IsNullOrWhiteSpace(_activeGitSnapshot.BranchName)
+            int totalAddedLines = displayedSnapshot.ChangedFiles.Sum(file => file.AddedLines);
+            int totalRemovedLines = displayedSnapshot.ChangedFiles.Sum(file => file.RemovedLines);
+            DiffBranchText.Text = string.IsNullOrWhiteSpace(displayedSnapshot.BranchName)
                 ? "Git metadata unavailable"
-                : _activeGitSnapshot.BranchName;
-            DiffWorktreeText.Text = _activeGitSnapshot.WorktreePath ?? string.Empty;
-            DiffSummaryText.Text = string.IsNullOrWhiteSpace(_activeGitSnapshot.Error)
-                ? FormatGitSummary(_activeGitSnapshot.StatusSummary, totalAddedLines, totalRemovedLines)
-                : _activeGitSnapshot.Error;
-            PopulateDiffFileList(_activeGitSnapshot.ChangedFiles, _activeGitSnapshot.SelectedPath);
+                : displayedSnapshot.BranchName;
+            DiffWorktreeText.Text = displayedSnapshot.WorktreePath ?? string.Empty;
+            DiffSummaryText.Text = string.IsNullOrWhiteSpace(displayedSnapshot.Error)
+                ? FormatGitSummary(displayedSnapshot.StatusSummary, totalAddedLines, totalRemovedLines)
+                : displayedSnapshot.Error;
+            PopulateDiffFileList(displayedSnapshot.ChangedFiles, displayedSnapshot.SelectedPath, displayedSnapshot);
 
             if (_activeThread?.Panes.OfType<DiffPaneRecord>().FirstOrDefault() is DiffPaneRecord diffPane)
             {
-                bool hasLiveSelectedDiff = !string.IsNullOrWhiteSpace(_activeGitSnapshot.SelectedPath) &&
-                    _activeGitSnapshot.ChangedFiles.Any(file => string.Equals(file.Path, _activeGitSnapshot.SelectedPath, StringComparison.Ordinal));
-                UpdateDiffPane(diffPane, hasLiveSelectedDiff ? _activeGitSnapshot.SelectedPath : null, hasLiveSelectedDiff ? _activeGitSnapshot.SelectedDiff : null);
+                bool hasSelectedDiff = !string.IsNullOrWhiteSpace(displayedSnapshot.SelectedPath) &&
+                    displayedSnapshot.ChangedFiles.Any(file => string.Equals(file.Path, displayedSnapshot.SelectedPath, StringComparison.Ordinal));
+                UpdateDiffPane(diffPane, hasSelectedDiff ? displayedSnapshot.SelectedPath : null, hasSelectedDiff ? displayedSnapshot.SelectedDiff : null);
             }
         }
 
-        private void PopulateDiffFileList(IReadOnlyList<GitChangedFile> changedFiles, string selectedPath)
+        private void PopulateDiffFileList(IReadOnlyList<GitChangedFile> changedFiles, string selectedPath, GitThreadSnapshot sourceSnapshot)
         {
             DiffFileListPanel.Children.Clear();
             IReadOnlyList<GitChangedFile> files = changedFiles ?? Array.Empty<GitChangedFile>();
@@ -3711,17 +4262,45 @@ namespace SelfContainedDeployment
                 DiffFileListPanel.Children.Add(BuildDiffFileButton(changedFile));
             }
 
-            if (_activeGitSnapshot is not null)
+            if (sourceSnapshot is not null)
             {
-                _activeGitSnapshot.SelectedPath = selectedPath;
-            }
-
-            if (_activeThread is not null)
-            {
-                _activeThread.SelectedDiffPath = selectedPath;
+                GitStatusService.SelectDiffPath(sourceSnapshot, selectedPath);
+                if (ReferenceEquals(sourceSnapshot, _activeGitSnapshot) && _activeThread is not null)
+                {
+                    _activeThread.SelectedDiffPath = sourceSnapshot.SelectedPath;
+                }
             }
 
             UpdateDiffFileSelection();
+        }
+
+        private void SelectDiffPathInCurrentReview(string selectedPath)
+        {
+            if (_activeThread is null || string.IsNullOrWhiteSpace(selectedPath))
+            {
+                return;
+            }
+
+            GitThreadSnapshot displayedSnapshot = ResolveDisplayedGitSnapshot();
+            if (displayedSnapshot is null)
+            {
+                return;
+            }
+
+            GitStatusService.SelectDiffPath(displayedSnapshot, selectedPath);
+            if (ReferenceEquals(displayedSnapshot, _activeGitSnapshot))
+            {
+                _activeThread.SelectedDiffPath = displayedSnapshot.SelectedPath;
+                UpdateDiffFileSelection();
+                AddOrSelectDiffPane(_activeProject, _activeThread, displayedSnapshot.SelectedPath, null);
+                QueueActiveThreadGitRefresh(displayedSnapshot.SelectedPath);
+            }
+            else
+            {
+                UpdateDiffFileSelection();
+                AddOrSelectDiffPane(_activeProject, _activeThread, displayedSnapshot.SelectedPath, displayedSnapshot.SelectedDiff);
+                QueueSessionSave();
+            }
         }
 
         private string ResolveSelectedDiffPathForRefresh(WorkspaceThread thread, string selectedPath = null, bool preserveSelection = false)
@@ -3851,7 +4430,7 @@ namespace SelfContainedDeployment
 
         private void UpdateDiffFileSelection()
         {
-            string selectedPath = _activeGitSnapshot?.SelectedPath;
+            string selectedPath = ResolveDisplayedGitSnapshot()?.SelectedPath;
             foreach (Button button in DiffFileListPanel.Children.OfType<Button>())
             {
                 GitChangedFile changedFile = ResolveSelectedDiffFile(button);
@@ -3952,6 +4531,16 @@ namespace SelfContainedDeployment
         {
             ApplyActionButtonState(SettingsNavButton, SettingsNavText, _showingSettings);
             ApplyActionButtonState(NewProjectButton, NewProjectText, false);
+            if (ShowOverviewButton is not null)
+            {
+                ShowOverviewButton.Background = _showingOverview
+                    ? AppBrush(ShowOverviewButton, "ShellNavActiveBrush")
+                    : new SolidColorBrush(Windows.UI.Color.FromArgb(0x00, 0x00, 0x00, 0x00));
+                ShowOverviewButton.BorderBrush = _showingOverview
+                    ? AppBrush(ShowOverviewButton, "ShellBorderBrush")
+                    : new SolidColorBrush(Windows.UI.Color.FromArgb(0x00, 0x00, 0x00, 0x00));
+                ToolTipService.SetToolTip(ShowOverviewButton, _showingOverview ? "Back to pane workspace" : "Show thread overview");
+            }
         }
 
         private void ToggleInspector()
@@ -3973,7 +4562,7 @@ namespace SelfContainedDeployment
                 return;
             }
 
-            bool showInspector = _inspectorOpen && !_showingSettings && _activeThread is not null;
+            bool showInspector = _inspectorOpen && !_showingSettings && !_showingOverview && _activeThread is not null;
 
             InspectorColumn.Width = showInspector
                 ? new GridLength(320)
@@ -4020,6 +4609,17 @@ namespace SelfContainedDeployment
                     return;
                 }
 
+                if (_showingOverview)
+                {
+                    ThreadNameBox.Text = _activeProject?.Name ?? "Thread overview";
+                    ThreadNameBox.IsReadOnly = true;
+                    ActiveDirectoryText.Visibility = Visibility.Visible;
+                    ActiveDirectoryText.Text = _activeProject is null
+                        ? "No active project"
+                        : $"{_activeProject.Threads.Count} thread{(_activeProject.Threads.Count == 1 ? string.Empty : "s")} in overview";
+                    return;
+                }
+
                 ThreadNameBox.IsReadOnly = _activeThread is null;
                 ThreadNameBox.Text = _activeThread?.Name ?? "No thread selected";
                 ActiveDirectoryText.Visibility = Visibility.Visible;
@@ -4047,6 +4647,10 @@ namespace SelfContainedDeployment
             thread.BranchName = null;
             thread.ChangedFileCount = 0;
             thread.SelectedDiffPath = null;
+            thread.BaselineSnapshot = null;
+            thread.DiffCheckpoints.Clear();
+            thread.SelectedCheckpointId = null;
+            thread.DiffReviewSource = DiffReviewSourceKind.Live;
 
             if (thread == _activeThread)
             {
@@ -4055,6 +4659,7 @@ namespace SelfContainedDeployment
             }
 
             QueueProjectTreeRefresh();
+            RefreshDiffReviewSourceControls();
             QueueSessionSave();
             LogAutomationEvent("shell", "thread.worktree.changed", $"Set thread worktree to {normalizedPath}", new Dictionary<string, string>
             {
@@ -4066,6 +4671,7 @@ namespace SelfContainedDeployment
 
         private void UpdateWorkspaceVisibility()
         {
+            RefreshDiffReviewSourceControls();
             if (_showingSettings)
             {
                 SettingsFrame.Visibility = Visibility.Visible;
@@ -4080,7 +4686,170 @@ namespace SelfContainedDeployment
             bool showEmptyState = _activeProject is not null && _activeThread is null;
             PaneWorkspaceShell.Visibility = showEmptyState ? Visibility.Collapsed : Visibility.Visible;
             EmptyThreadStatePanel.Visibility = showEmptyState ? Visibility.Visible : Visibility.Collapsed;
+            UpdateThreadOverviewVisibility();
             UpdateInspectorVisibility();
+        }
+
+        private void UpdateThreadOverviewVisibility()
+        {
+            if (ThreadOverviewPanel is null || PaneWorkspaceGrid is null)
+            {
+                return;
+            }
+
+            bool showOverview = _showingOverview && !_showingSettings && _activeProject is not null;
+            ThreadOverviewPanel.Visibility = showOverview ? Visibility.Visible : Visibility.Collapsed;
+            PaneWorkspaceGrid.Visibility = showOverview ? Visibility.Collapsed : Visibility.Visible;
+
+            if (showOverview)
+            {
+                RenderThreadOverview();
+            }
+        }
+
+        private void RenderThreadOverview()
+        {
+            if (ThreadOverviewListPanel is null)
+            {
+                return;
+            }
+
+            string renderKey = BuildThreadOverviewRenderKey();
+            if (string.Equals(renderKey, _lastThreadOverviewRenderKey, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _lastThreadOverviewRenderKey = renderKey;
+            ThreadOverviewListPanel.Children.Clear();
+
+            if (_activeProject is null)
+            {
+                ThreadOverviewMetaText.Text = "No active project";
+                return;
+            }
+
+            ThreadOverviewMetaText.Text = $"{_activeProject.Name} · {_activeProject.Threads.Count} thread{(_activeProject.Threads.Count == 1 ? string.Empty : "s")}";
+            foreach (WorkspaceThread thread in _activeProject.Threads)
+            {
+                Border card = new()
+                {
+                    Background = AppBrush(ThreadOverviewListPanel, ReferenceEquals(thread, _activeThread) ? "ShellMutedSurfaceBrush" : "ShellSurfaceBackgroundBrush"),
+                    BorderBrush = AppBrush(ThreadOverviewListPanel, ReferenceEquals(thread, _activeThread) ? "ShellPaneActiveBorderBrush" : "ShellBorderBrush"),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(8),
+                    Padding = new Thickness(12),
+                };
+                AutomationProperties.SetAutomationId(card, $"shell-overview-card-{thread.Id}");
+
+                Button button = new()
+                {
+                    Style = (Style)Application.Current.Resources["ShellNavButtonStyle"],
+                    Tag = thread.Id,
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
+                    HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                    Padding = new Thickness(0),
+                };
+                AutomationProperties.SetAutomationId(button, $"shell-overview-thread-{thread.Id}");
+                button.Click += OnOverviewThreadClicked;
+
+                Grid layout = new()
+                {
+                    RowSpacing = 8,
+                };
+                layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+                layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+                layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+                Grid titleRow = new()
+                {
+                    ColumnDefinitions =
+                    {
+                        new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) },
+                        new ColumnDefinition { Width = GridLength.Auto },
+                    },
+                    ColumnSpacing = 8,
+                };
+                TextBlock title = new()
+                {
+                    Text = thread.Name,
+                    Style = (Style)Application.Current.Resources["ShellSectionTextStyle"],
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                };
+                AutomationProperties.SetAutomationId(title, $"shell-overview-title-{thread.Id}");
+                titleRow.Children.Add(title);
+
+                TextBlock paneCount = new()
+                {
+                    Text = thread.PaneSummary,
+                    Style = (Style)Application.Current.Resources["ShellHintTextStyle"],
+                    VerticalAlignment = VerticalAlignment.Center,
+                };
+                AutomationProperties.SetAutomationId(paneCount, $"shell-overview-panes-{thread.Id}");
+                Grid.SetColumn(paneCount, 1);
+                titleRow.Children.Add(paneCount);
+                layout.Children.Add(titleRow);
+
+                TextBlock path = new()
+                {
+                    Text = FormatThreadPath(_activeProject, thread),
+                    Style = (Style)Application.Current.Resources["ShellMetaTextStyle"],
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                };
+                AutomationProperties.SetAutomationId(path, $"shell-overview-path-{thread.Id}");
+                Grid.SetRow(path, 1);
+                layout.Children.Add(path);
+
+                string branchText = string.IsNullOrWhiteSpace(thread.BranchName)
+                    ? "No git branch yet"
+                    : thread.BranchName;
+                string checkpointText = thread.DiffCheckpoints.Count == 0
+                    ? "No checkpoints"
+                    : $"{thread.DiffCheckpoints.Count} checkpoint{(thread.DiffCheckpoints.Count == 1 ? string.Empty : "s")}";
+                TextBlock meta = new()
+                {
+                    Text = $"{branchText} · {thread.ChangedFileCount} changed file{(thread.ChangedFileCount == 1 ? string.Empty : "s")} · {checkpointText}",
+                    Style = (Style)Application.Current.Resources["ShellHintTextStyle"],
+                    TextWrapping = TextWrapping.WrapWholeWords,
+                };
+                AutomationProperties.SetAutomationId(meta, $"shell-overview-meta-{thread.Id}");
+                Grid.SetRow(meta, 2);
+                layout.Children.Add(meta);
+
+                button.Content = layout;
+                card.Child = button;
+                ThreadOverviewListPanel.Children.Add(card);
+            }
+        }
+
+        private string BuildThreadOverviewRenderKey()
+        {
+            StringBuilder builder = new();
+            builder.Append(_showingOverview ? '1' : '0')
+                .Append('|')
+                .Append(_activeProject?.Id)
+                .Append('|')
+                .Append(_activeThread?.Id);
+
+            foreach (WorkspaceThread thread in _activeProject?.Threads ?? Enumerable.Empty<WorkspaceThread>())
+            {
+                builder.Append('|')
+                    .Append(thread.Id)
+                    .Append(':')
+                    .Append(thread.Name)
+                    .Append(':')
+                    .Append(thread.WorktreePath)
+                    .Append(':')
+                    .Append(thread.BranchName)
+                    .Append(':')
+                    .Append(thread.Panes.Count)
+                    .Append(':')
+                    .Append(thread.ChangedFileCount)
+                    .Append(':')
+                    .Append(thread.DiffCheckpoints.Count);
+            }
+
+            return builder.ToString();
         }
 
         private void ApplyThemeToAllTerminals(ElementTheme resolvedTheme)
@@ -5091,6 +5860,9 @@ namespace SelfContainedDeployment
                 PrimarySplitRatio = thread.PrimarySplitRatio,
                 SecondarySplitRatio = thread.SecondarySplitRatio,
                 ChangedFileCount = thread.ChangedFileCount,
+                DiffReviewSource = FormatDiffReviewSource(thread.DiffReviewSource),
+                SelectedCheckpointId = thread.SelectedCheckpointId,
+                CheckpointCount = thread.DiffCheckpoints.Count,
                 Tabs = thread.Panes.Select(tab => new NativeAutomationTabState
                 {
                     Id = tab.Id,

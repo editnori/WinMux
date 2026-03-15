@@ -124,7 +124,7 @@ These asks landed in spirit, but not to the level the original request implied.
 
 - The inspector is much cleaner than a debug panel, but it is still mostly a repo-state rail, not the fuller merged directory/diff/project inspector concept.
 - Patch preview fallback behavior is improved, but still text-and-error driven.
-- There is no thread-start baseline or checkpoint history; only the live git snapshot exists.
+- Thread-start baseline and manual checkpoint history now exist, but the review UX is still snapshot-oriented rather than a richer timeline browser.
 - The ask about Codex and Claude workflow modeling is partly reflected in replay metadata and worktree-aware threads, but there is no richer assistant-aware thread model beyond pane metadata.
 
 ### Thread rail, context actions, and performance
@@ -145,10 +145,8 @@ These asks landed in spirit, but not to the level the original request implied.
 
 These are the clearest asks that are not really done yet.
 
-- True `niri`-style thread overview / vertical workspace navigation.
-- Browser tabs inside a browser pane.
+- A more polished `niri`-style thread overview / vertical workspace navigation pass.
 - External captured app/window preview panes as first-class workspace panes.
-- Thread-start git baselines and checkpoint diff history.
 - A fuller assistant/thread model that treats Codex and Claude as first-class thread participants instead of just pane metadata and replay commands.
 - A cleaner merged inspector that can absorb directory/project context instead of only repo-state + changed files.
 - A real large-workspace performance pass with evidence, not just tactical render coalescing.
@@ -245,15 +243,12 @@ That is where the next review effort should go.
 - Fixed in this pass: diff panes now expose structured patch state and resolved line colors through native automation, plus a dedicated patch-review recording flow.
 - Fixed in this pass: diff-pane light-mode brushes now resolve through the active shell theme instead of sticking to dark-mode colors.
 - Already true in the current worktree: `README.md` and `FOUNDATION_TODO.md` now reflect the real product state.
-- Still open: diff-pane restore remembers the selected path, but there is still no durable selected-diff snapshot/history model or checkpoint timeline.
 - Newly visible during this pass: fresh WSL terminal panes can still trip a `WebView2 failed: Object reference not set to an instance of an object.` startup regression, and that is currently the main blocker on a fully green end-to-end smoke.
 
 ## Recommended Next Pass
 
 ### P0: correctness and product depth
 
-- Add thread baselines and checkpoint history.
-  Store a thread-start snapshot and explicit checkpoint snapshots, then let the inspector/diff pane switch between live state and checkpoint comparisons.
 - Close the browser identity story.
   Decide whether WinMux is only a practical imported-vault browser, or whether it is trying to approximate a signed-in browser surface more aggressively.
   Then shape the UI and docs around that decision.
@@ -264,7 +259,7 @@ That is where the next review effort should go.
 
 ### P1: shell and inspector quality
 
-- Build the true vertical thread/workspace overview.
+- Deepen the new thread/workspace overview into a more polished vertical workspace navigator.
 - Replace more of the stock `TabView` feel with a thinner custom pane strip.
 - Expand context actions for threads, projects, and panes.
 - Merge more project context into the inspector so it feels like a real companion rail, not only a git rail.
@@ -277,7 +272,6 @@ That is where the next review effort should go.
 
 ### P2: optional but aligned with the original direction
 
-- First-class browser internal tabs if the browser pane is meant to be an agent-grade working browser.
 - External captured app/window panes.
 - Richer diff presentation than raw text coloring once the history model exists.
 
@@ -285,10 +279,9 @@ That is where the next review effort should go.
 
 If this backlog is going to be reviewed and executed in order, the clean sequence is:
 
-1. thread baseline + checkpoint history
-2. browser identity and browser regression closure
-3. session replay hardening
-4. vertical workspace/thread overview
+1. browser identity and browser regression closure
+2. session replay hardening
+3. vertical workspace/thread overview polish
 5. large-workspace performance pass
 6. top-chrome and pane-strip visual cleanup
 

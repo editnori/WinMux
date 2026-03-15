@@ -17,6 +17,8 @@ namespace SelfContainedDeployment.Git
 
         public int RemovedLines { get; set; }
 
+        public string DiffText { get; set; }
+
         public string DisplayName => string.IsNullOrWhiteSpace(Path)
             ? string.Empty
             : Path.Replace('\\', '/');
@@ -91,12 +93,92 @@ namespace SelfContainedDeployment.Git
             {
                 GitChangedFile changedFile = snapshot.ChangedFiles.FirstOrDefault(file => string.Equals(file.Path, resolvedSelectedPath, StringComparison.Ordinal));
                 GitCommandResult diffResult = RunGitDiff(normalizedPath, resolvedSelectedPath, changedFile?.Status);
-                snapshot.SelectedDiff = diffResult.Ok
+                string diffText = diffResult.Ok
+                    ? diffResult.Output
+                    : NormalizeGitError(diffResult.Error);
+                if (changedFile is not null)
+                {
+                    changedFile.DiffText = diffText;
+                }
+
+                snapshot.SelectedDiff = diffText;
+            }
+
+            return snapshot;
+        }
+
+        public static GitThreadSnapshot CaptureComplete(string workingPath, string selectedPath = null)
+        {
+            GitThreadSnapshot snapshot = Capture(workingPath, selectedPath);
+            if (!string.IsNullOrWhiteSpace(snapshot.Error) || snapshot.ChangedFiles.Count == 0)
+            {
+                return snapshot;
+            }
+
+            string normalizedPath = ShellProfiles.NormalizeProjectPath(workingPath);
+            foreach (GitChangedFile changedFile in snapshot.ChangedFiles.Where(file => !string.IsNullOrWhiteSpace(file.Path)))
+            {
+                if (!string.IsNullOrWhiteSpace(changedFile.DiffText))
+                {
+                    continue;
+                }
+
+                GitCommandResult diffResult = RunGitDiff(normalizedPath, changedFile.Path, changedFile.Status);
+                changedFile.DiffText = diffResult.Ok
                     ? diffResult.Output
                     : NormalizeGitError(diffResult.Error);
             }
 
+            SelectDiffPath(snapshot, string.IsNullOrWhiteSpace(selectedPath) ? snapshot.SelectedPath : selectedPath);
             return snapshot;
+        }
+
+        public static GitThreadSnapshot CloneSnapshot(GitThreadSnapshot snapshot)
+        {
+            if (snapshot is null)
+            {
+                return null;
+            }
+
+            return new GitThreadSnapshot
+            {
+                BranchName = snapshot.BranchName,
+                RepositoryRootPath = snapshot.RepositoryRootPath,
+                WorktreePath = snapshot.WorktreePath,
+                StatusSummary = snapshot.StatusSummary,
+                DiffSummary = snapshot.DiffSummary,
+                SelectedPath = snapshot.SelectedPath,
+                SelectedDiff = snapshot.SelectedDiff,
+                Error = snapshot.Error,
+                ChangedFiles = snapshot.ChangedFiles.Select(file => new GitChangedFile
+                {
+                    Status = file.Status,
+                    Path = file.Path,
+                    AddedLines = file.AddedLines,
+                    RemovedLines = file.RemovedLines,
+                    DiffText = file.DiffText,
+                }).ToList(),
+            };
+        }
+
+        public static void SelectDiffPath(GitThreadSnapshot snapshot, string selectedPath)
+        {
+            if (snapshot is null)
+            {
+                return;
+            }
+
+            string resolvedPath = selectedPath;
+            bool selectedPathExists = !string.IsNullOrWhiteSpace(resolvedPath) &&
+                snapshot.ChangedFiles.Any(file => string.Equals(file.Path, resolvedPath, StringComparison.Ordinal));
+            if (!selectedPathExists)
+            {
+                resolvedPath = snapshot.ChangedFiles.FirstOrDefault()?.Path;
+            }
+
+            snapshot.SelectedPath = resolvedPath;
+            GitChangedFile changedFile = snapshot.ChangedFiles.FirstOrDefault(file => string.Equals(file.Path, resolvedPath, StringComparison.Ordinal));
+            snapshot.SelectedDiff = changedFile?.DiffText;
         }
 
         private static string NormalizeGitError(string error)

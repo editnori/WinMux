@@ -9,7 +9,7 @@
           AutomationProperties.AutomationId="browser-pane-root"
           Background="{ThemeResource ShellPageBackgroundBrush}">
         <Grid.RowDefinitions>
-            <RowDefinition Height="42" />
+            <RowDefinition Height="74" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
@@ -19,63 +19,128 @@
                 BorderBrush="{ThemeResource ShellBorderBrush}"
                 BorderThickness="0,0,0,1"
                 Padding="8,6,8,5">
-            <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto"
-                  ColumnSpacing="6">
-                <Button x:Name="BrowserHomeButton"
-                        AutomationProperties.AutomationId="browser-pane-home"
-                        Style="{StaticResource ShellChromeButtonStyle}"
-                        Click="OnHomeClicked"
-                        Width="30"
-                        Height="30"
-                        VerticalAlignment="Center"
-                        ToolTipService.ToolTip="Show browser start page">
-                    <FontIcon FontSize="11" Glyph="&#xE80F;" />
-                </Button>
+            <Grid RowDefinitions="Auto,Auto"
+                  RowSpacing="6">
+                <Grid ColumnDefinitions="*,Auto"
+                      ColumnSpacing="6">
+                    <ScrollViewer HorizontalScrollBarVisibility="Auto"
+                                  HorizontalScrollMode="Enabled"
+                                  VerticalScrollBarVisibility="Disabled"
+                                  VerticalScrollMode="Disabled">
+                        <StackPanel x:Name="BrowserTabStripPanel"
+                                    AutomationProperties.AutomationId="browser-pane-tab-strip"
+                                    Orientation="Horizontal"
+                                    Spacing="4" />
+                    </ScrollViewer>
 
-                <TextBox x:Name="AddressBox"
-                         Grid.Column="1"
-                         AutomationProperties.AutomationId="browser-pane-address"
-                         Style="{StaticResource ShellInlineTextBoxStyle}"
-                         Height="30"
-                         VerticalAlignment="Center"
-                         KeyDown="OnAddressBoxKeyDown"
-                         PlaceholderText="Enter a URL or localhost preview" />
+                    <Button x:Name="AddBrowserTabButton"
+                            Grid.Column="1"
+                            AutomationProperties.AutomationId="browser-pane-add-tab"
+                            Style="{StaticResource ShellChromeButtonStyle}"
+                            Click="OnAddBrowserTabClicked"
+                            Width="24"
+                            Height="24"
+                            VerticalAlignment="Center"
+                            ToolTipService.ToolTip="Open a new browser tab">
+                        <FontIcon FontSize="10" Glyph="&#xE710;" />
+                    </Button>
+                </Grid>
 
-                <Button x:Name="BrowserPagesButton"
-                        Grid.Column="2"
-                        AutomationProperties.AutomationId="browser-pane-pages"
-                        Style="{StaticResource ShellChromeButtonStyle}"
-                        Click="OnPagesClicked"
-                        Width="30"
-                        Height="30"
-                        VerticalAlignment="Center"
-                        ToolTipService.ToolTip="Show page details">
-                    <FontIcon FontSize="11" Glyph="&#xE8A5;" />
-                </Button>
+                <Grid Grid.Row="1"
+                      ColumnDefinitions="Auto,Auto,Auto,Auto,*,Auto,Auto,Auto"
+                      ColumnSpacing="6">
+                    <Button x:Name="BrowserBackButton"
+                            AutomationProperties.AutomationId="browser-pane-back"
+                            Style="{StaticResource ShellChromeButtonStyle}"
+                            Click="OnBackClicked"
+                            Width="30"
+                            Height="30"
+                            VerticalAlignment="Center"
+                            ToolTipService.ToolTip="Go back">
+                        <FontIcon FontSize="11" Glyph="&#xE72B;" />
+                    </Button>
 
-                <Button x:Name="BrowserExtensionsButton"
-                        Grid.Column="3"
-                        AutomationProperties.AutomationId="browser-pane-extensions"
-                        Style="{StaticResource ShellChromeButtonStyle}"
-                        Click="OnExtensionsClicked"
-                        Width="30"
-                        Height="30"
-                        VerticalAlignment="Center"
-                        ToolTipService.ToolTip="Show imported extensions">
-                    <FontIcon FontSize="11" Glyph="&#xE9CE;" />
-                </Button>
+                    <Button x:Name="BrowserForwardButton"
+                            Grid.Column="1"
+                            AutomationProperties.AutomationId="browser-pane-forward"
+                            Style="{StaticResource ShellChromeButtonStyle}"
+                            Click="OnForwardClicked"
+                            Width="30"
+                            Height="30"
+                            VerticalAlignment="Center"
+                            ToolTipService.ToolTip="Go forward">
+                        <FontIcon FontSize="11" Glyph="&#xE72A;" />
+                    </Button>
 
-                <Button x:Name="BrowserReloadButton"
-                        Grid.Column="4"
-                        AutomationProperties.AutomationId="browser-pane-reload"
-                        Style="{StaticResource ShellChromeButtonStyle}"
-                        Click="OnReloadClicked"
-                        Width="30"
-                        Height="30"
-                        VerticalAlignment="Center"
-                        ToolTipService.ToolTip="Reload page">
-                    <FontIcon FontSize="11" Glyph="&#xE72C;" />
-                </Button>
+                    <Button x:Name="BrowserHomeButton"
+                            Grid.Column="2"
+                            AutomationProperties.AutomationId="browser-pane-home"
+                            Style="{StaticResource ShellChromeButtonStyle}"
+                            Click="OnHomeClicked"
+                            Width="30"
+                            Height="30"
+                            VerticalAlignment="Center"
+                            ToolTipService.ToolTip="Show browser start page">
+                        <FontIcon FontSize="11" Glyph="&#xE80F;" />
+                    </Button>
+
+                    <Button x:Name="BrowserReloadButton"
+                            Grid.Column="3"
+                            AutomationProperties.AutomationId="browser-pane-reload"
+                            Style="{StaticResource ShellChromeButtonStyle}"
+                            Click="OnReloadClicked"
+                            Width="30"
+                            Height="30"
+                            VerticalAlignment="Center"
+                            ToolTipService.ToolTip="Reload page">
+                        <FontIcon FontSize="11" Glyph="&#xE72C;" />
+                    </Button>
+
+                    <TextBox x:Name="AddressBox"
+                             Grid.Column="4"
+                             AutomationProperties.AutomationId="browser-pane-address"
+                             Style="{StaticResource ShellInlineTextBoxStyle}"
+                             Height="30"
+                             VerticalAlignment="Center"
+                             KeyDown="OnAddressBoxKeyDown"
+                             PlaceholderText="Enter a URL or localhost preview" />
+
+                    <Button x:Name="BrowserPagesButton"
+                            Grid.Column="5"
+                            AutomationProperties.AutomationId="browser-pane-pages"
+                            Style="{StaticResource ShellChromeButtonStyle}"
+                            Click="OnPagesClicked"
+                            Width="30"
+                            Height="30"
+                            VerticalAlignment="Center"
+                            ToolTipService.ToolTip="Show page and tab details">
+                        <FontIcon FontSize="11" Glyph="&#xE8A5;" />
+                    </Button>
+
+                    <Button x:Name="BrowserExtensionsButton"
+                            Grid.Column="6"
+                            AutomationProperties.AutomationId="browser-pane-extensions"
+                            Style="{StaticResource ShellChromeButtonStyle}"
+                            Click="OnExtensionsClicked"
+                            Width="30"
+                            Height="30"
+                            VerticalAlignment="Center"
+                            ToolTipService.ToolTip="Show imported extensions">
+                        <FontIcon FontSize="11" Glyph="&#xE9CE;" />
+                    </Button>
+
+                    <Button x:Name="BrowserNewPaneButton"
+                            Grid.Column="7"
+                            AutomationProperties.AutomationId="browser-pane-new-pane"
+                            Style="{StaticResource ShellChromeButtonStyle}"
+                            Click="OnOpenCurrentPageInPaneClicked"
+                            Width="30"
+                            Height="30"
+                            VerticalAlignment="Center"
+                            ToolTipService.ToolTip="Open this page in another pane">
+                        <FontIcon FontSize="11" Glyph="&#xE8A7;" />
+                    </Button>
+                </Grid>
             </Grid>
         </Border>
 

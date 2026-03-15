@@ -79,11 +79,13 @@ Supported `action` values:
 - `togglePane`
 - `toggleInspector`
 - `showTerminal`
+- `showOverview`
 - `showSettings`
 - `newProject`
 - `newThread`
 - `newTab`
 - `newBrowserPane`
+- `newBrowserTab`
 - `newEditorPane`
 - `importBrowserPasswordsCsv`
 - `deleteBrowserCredential`
@@ -99,6 +101,8 @@ Supported `action` values:
 - `refreshDiff`
 - `selectDiffFile`
 - `navigateBrowser`
+- `selectBrowserTab`
+- `closeBrowserTab`
 - `setTheme`
 - `setProfile`
 - `renameThread`
@@ -120,7 +124,9 @@ Notes:
 
 - `newProject` on the semantic route creates a project directly from `value` without opening the dialog.
 - `toggleInspector` collapses or reopens the right-side inspector rail without changing the active thread.
+- `showOverview` swaps the active project into the shell's vertical thread overview surface.
 - `newBrowserPane` adds a preview pane to the active thread backed by the shared WinMux browser profile.
+- `newBrowserTab` opens a lightweight in-pane browser tab session on the selected browser pane.
 - `newEditorPane` adds a terminal-backed editor pane that launches `nvim .`.
 - `importBrowserPasswordsCsv` imports a Google Passwords CSV into the WinMux-encrypted credential store.
 - `deleteBrowserCredential` removes one imported credential from the WinMux vault by credential id.
@@ -132,6 +138,8 @@ Notes:
 - `selectDiffFile` refreshes the active thread's git snapshot, selects one changed file by relative path, and opens or updates the thread's diff pane in a dual-pane view.
 - `clearProjectThreads` removes all threads from the target project while keeping the project shell open.
 - `navigateBrowser` sends a URL to the selected browser pane; an empty `value` returns it to the built-in start page.
+- `selectBrowserTab` selects one internal browser tab by id on the selected browser pane.
+- `closeBrowserTab` closes one internal browser tab by id on the selected browser pane.
 - `deleteProject` removes a project and its threads from the live workspace; if it was the active project, WinMux activates the next surviving project.
 - `input` sends text to the selected terminal/editor pane, not to arbitrary native controls.
 - `moveTabAfter` provides a semantic pane reorder path without coordinate dragging.
@@ -170,6 +178,9 @@ These routes expose browser-pane state directly from the native app, which is no
 - URI
 - address-box text
 - initialization state
+- selected internal tab id
+- internal tab count
+- internal tab session list
 - profile seed status
 - extension import status
 - credential autofill status
@@ -199,7 +210,7 @@ Notes:
 - browser panes share one WinMux WebView2 profile even in debug mode
 - this means browser inspection no longer depends on the shared CDP target list
 - the preferred extension set is currently Claude plus uBlock Origin when found in the local Chromium profile
-- the profile can be seeded or repaired from local Chromium data, but it still does not imply live Chrome-profile reuse or Google Sync parity
+- the profile is seeded from the most relevant detected Chromium profile and still does not imply live Chrome-profile reuse or Google Sync parity
 
 ### Diff-pane inspection
 

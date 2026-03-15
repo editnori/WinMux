@@ -26,10 +26,12 @@ What exists now:
 - fixed native shell layout with a dense inline sidebar and a top pane strip
 - multiple projects, each with nested threads and per-thread pane workspaces
 - worktree-aware thread metadata, a collapsible right-side inspector rail, and workspace diff panes for active-thread patches
+- thread baselines plus manual checkpoint snapshots for diff review, with selectable live/baseline/checkpoint sources
+- a first-pass vertical thread overview surface for the active project
 - the left project rail now expands only the active project's thread list to keep large workspaces responsive
 - autosaved workspace/session replay across app relaunches
 - terminal panes backed by `TerminalControl`
-- browser preview panes backed by `WebView2` with a built-in start page and a shared WinMux browser profile
+- browser panes backed by `WebView2` with a built-in start page, lightweight in-pane tabs, and a shared WinMux browser profile
 - imported browser-password CSV support backed by a WinMux-encrypted credential store
 - Preferences management for the WinMux credential vault: import, per-site delete, clear, and manual autofill
 - editor panes backed by `TerminalControl` launching `nvim .`
@@ -42,11 +44,9 @@ What exists now:
 
 What does not exist yet:
 
-- thread overview / niri-style vertical workspace navigation
 - true ConPTY process hibernation beyond workspace replay
-- thread-start / checkpoint diff history beyond the current live git snapshot
 - true live Chrome-profile reuse and Google account sync parity inside the shared browser
-- custom pane-strip visuals and overview polish
+- custom pane-strip visuals and deeper overview polish
 
 ## Important files
 

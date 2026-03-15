@@ -34,6 +34,12 @@ namespace SelfContainedDeployment.Automation
 
         public string SelectedDiffPath { get; set; }
 
+        public string DiffReviewSource { get; set; }
+
+        public string SelectedCheckpointId { get; set; }
+
+        public int CheckpointCount { get; set; }
+
         public List<NativeAutomationProjectState> Projects { get; set; } = new();
 
         public List<NativeAutomationThreadState> Threads { get; set; } = new();
@@ -85,6 +91,12 @@ namespace SelfContainedDeployment.Automation
         public double SecondarySplitRatio { get; set; }
 
         public int ChangedFileCount { get; set; }
+
+        public string DiffReviewSource { get; set; }
+
+        public string SelectedCheckpointId { get; set; }
+
+        public int CheckpointCount { get; set; }
 
         public List<NativeAutomationTabState> Tabs { get; set; } = new();
 
@@ -323,6 +335,10 @@ namespace SelfContainedDeployment.Automation
 
         public bool Initialized { get; set; }
 
+        public string SelectedTabId { get; set; }
+
+        public int TabCount { get; set; }
+
         public string ProfileSeedStatus { get; set; }
 
         public string ExtensionImportStatus { get; set; }
@@ -330,6 +346,17 @@ namespace SelfContainedDeployment.Automation
         public string CredentialAutofillStatus { get; set; }
 
         public List<string> InstalledExtensions { get; set; } = new();
+
+        public List<NativeAutomationBrowserTabSnapshot> Tabs { get; set; } = new();
+    }
+
+    public sealed class NativeAutomationBrowserTabSnapshot
+    {
+        public string Id { get; set; }
+
+        public string Title { get; set; }
+
+        public string Uri { get; set; }
     }
 
     public sealed class NativeAutomationBrowserEvalRequest

@@ -61,6 +61,12 @@ namespace SelfContainedDeployment.Persistence
 
         public string SelectedDiffPath { get; set; }
 
+        public string DiffReviewSource { get; set; }
+
+        public string SelectedCheckpointId { get; set; }
+
+        public GitSnapshotSessionSnapshot BaselineSnapshot { get; set; }
+
         public string SelectedPaneId { get; set; }
 
         public string Layout { get; set; }
@@ -69,7 +75,54 @@ namespace SelfContainedDeployment.Persistence
 
         public double SecondarySplitRatio { get; set; }
 
+        public List<GitCheckpointSessionSnapshot> DiffCheckpoints { get; set; } = new();
+
         public List<PaneSessionSnapshot> Panes { get; set; } = new();
+    }
+
+    internal sealed class GitCheckpointSessionSnapshot
+    {
+        public string Id { get; set; }
+
+        public string Name { get; set; }
+
+        public string CapturedAt { get; set; }
+
+        public GitSnapshotSessionSnapshot Snapshot { get; set; }
+    }
+
+    internal sealed class GitSnapshotSessionSnapshot
+    {
+        public string BranchName { get; set; }
+
+        public string RepositoryRootPath { get; set; }
+
+        public string WorktreePath { get; set; }
+
+        public string StatusSummary { get; set; }
+
+        public string DiffSummary { get; set; }
+
+        public string SelectedPath { get; set; }
+
+        public string SelectedDiff { get; set; }
+
+        public string Error { get; set; }
+
+        public List<GitChangedFileSessionSnapshot> ChangedFiles { get; set; } = new();
+    }
+
+    internal sealed class GitChangedFileSessionSnapshot
+    {
+        public string Status { get; set; }
+
+        public string Path { get; set; }
+
+        public int AddedLines { get; set; }
+
+        public int RemovedLines { get; set; }
+
+        public string DiffText { get; set; }
     }
 
     internal sealed class PaneSessionSnapshot
@@ -84,6 +137,10 @@ namespace SelfContainedDeployment.Persistence
 
         public string BrowserUri { get; set; }
 
+        public string SelectedBrowserTabId { get; set; }
+
+        public List<BrowserTabSessionSnapshot> BrowserTabs { get; set; } = new();
+
         public string DiffPath { get; set; }
 
         public string ReplayTool { get; set; }
@@ -91,6 +148,15 @@ namespace SelfContainedDeployment.Persistence
         public string ReplaySessionId { get; set; }
 
         public string ReplayCommand { get; set; }
+    }
+
+    internal sealed class BrowserTabSessionSnapshot
+    {
+        public string Id { get; set; }
+
+        public string Title { get; set; }
+
+        public string Uri { get; set; }
     }
 
     internal static class WorkspaceSessionStore

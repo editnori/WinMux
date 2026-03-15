@@ -310,6 +310,19 @@ try {
     }
     Pause-Step 900
 
+    $null = Invoke-AutomationPost "/action" @{ action = "showOverview" }
+    Wait-Until -FailureMessage "Thread overview did not appear." -Condition {
+        $latestState = Invoke-AutomationGet "/state"
+        if ($latestState.activeView -eq "overview") {
+            return $latestState
+        }
+
+        return $null
+    } | Out-Null
+    Pause-Step 1000
+    $null = Invoke-AutomationPost "/action" @{ action = "showTerminal" }
+    Pause-Step 900
+
     $null = Invoke-AutomationPost "/action" @{ action = "newBrowserPane" }
     $state = Wait-Until -FailureMessage "Browser pane did not appear." -Condition {
         $latestState = Invoke-AutomationGet "/state"
@@ -332,6 +345,17 @@ try {
         return $null
     } | Out-Null
     Pause-Step 1400
+    $null = Invoke-AutomationPost "/action" @{ action = "newBrowserTab"; value = "https://example.org" }
+    Wait-Until -FailureMessage "Browser tab did not appear." -Condition {
+        $browserState = Invoke-AutomationPost "/browser-state" @{}
+        $pane = @($browserState.panes) | Select-Object -First 1
+        if ($null -ne $pane -and $pane.tabCount -ge 2) {
+            return $pane
+        }
+
+        return $null
+    } | Out-Null
+    Pause-Step 1200
 
     $null = Invoke-AutomationPost "/ui-action" @{ action = "click"; automationId = "shell-nav-settings" }
     Wait-Until -FailureMessage "Settings did not open." -Condition {

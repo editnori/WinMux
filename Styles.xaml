@@ -255,6 +255,13 @@
         <Setter Property="HorizontalContentAlignment" Value="Stretch" />
     </Style>
 
+    <Style x:Key="ShellBrowserTabButtonStyle" TargetType="Button" BasedOn="{StaticResource ShellButtonBaseStyle}">
+        <Setter Property="Height" Value="24" />
+        <Setter Property="Padding" Value="8,2" />
+        <Setter Property="CornerRadius" Value="4" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    </Style>
+
     <Style x:Key="ShellTitleTextStyle" TargetType="TextBlock" BasedOn="{StaticResource BaseTextBlockStyle}">
         <Setter Property="FontSize" Value="12" />
         <Setter Property="FontWeight" Value="SemiBold" />

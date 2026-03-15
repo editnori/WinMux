@@ -27,3 +27,5 @@ This pass is about making the app operable and debuggable before more UI work la
 - [x] Model tabs as independent terminal surfaces owned by a single thread.
 - [x] Preserve the selected tab per thread when switching projects and threads.
 - [x] Add persistence so projects, threads, profiles, and selected tabs survive relaunch.
+- [x] Add thread baselines and manual checkpoints for diff review.
+- [x] Add a first-pass thread overview surface inside the shell workspace.

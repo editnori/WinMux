@@ -8,6 +8,7 @@ This is the current feature inventory for the native WinMux shell as it exists i
 - Project-based workspace model with nested threads
 - Per-thread pane workspaces with pane-count limits and overflow-thread behavior
 - New sibling threads inherit the selected thread's worktree path when one is active
+- First-pass active-project thread overview inside the shell workspace
 - Terminal, browser, editor, and diff panes
 - Inline pane rename and thread rename flows
 - Project removal from the project context menu
@@ -19,6 +20,7 @@ This is the current feature inventory for the native WinMux shell as it exists i
 
 - ConPTY-backed shell sessions
 - WSL, PowerShell, and Command Prompt shell profile support
+- Per-pane terminal launch environment overrides for thread/project context
 - WebView2-hosted terminal renderer using the shared `Web/terminal-host.*` frontend
 - Theme propagation into the terminal renderer
 - Editor pane mode backed by terminal launch of `nvim .`
@@ -29,9 +31,10 @@ This is the current feature inventory for the native WinMux shell as it exists i
 
 - Shared WinMux WebView2 browser profile
 - Browser panes as first-class workspace panes
+- Lightweight in-pane browser tabs with selectable current page sessions
 - Built-in browser start page
 - Browser automation routes for state, eval, and screenshot
-- Browser profile seeding/repair from local Chromium data
+- Browser profile seeding/repair from the most relevant detected Chromium profile
 - Preferred extension import path
 - WinMux credential vault with Windows-protected storage
 - Google Passwords CSV import with merge behavior
@@ -41,6 +44,8 @@ This is the current feature inventory for the native WinMux shell as it exists i
 
 - Worktree-aware thread metadata
 - Active-thread git snapshot from git state, not terminal parsing
+- Thread baseline capture plus manual checkpoint snapshots for diff review
+- Review-source switching between live state, thread baseline, and named checkpoints
 - Inspector changed-file list with insertion/deletion counts
 - Diff pane opens in review layout from inspector file selection
 - Persisted selected diff path per thread
@@ -68,9 +73,7 @@ This is the current feature inventory for the native WinMux shell as it exists i
 
 ## Known gaps
 
-- No full thread checkpoint/baseline history yet
 - No side-by-side or full-file review surface yet; current review UI is a richer unified diff view
-- No browser internal tabs inside one browser pane yet
 - No true Chrome Sync/live Chrome-profile parity
-- No full vertical workspace overview yet
+- No fully polished niri-style vertical workspace navigation yet; the current overview is a first pass
 - Terminal startup still needs broader regression hardening even though the WebView2 init path has been tightened

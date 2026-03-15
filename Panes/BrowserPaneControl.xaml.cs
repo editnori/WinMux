@@ -1,6 +1,8 @@
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
 using Microsoft.Web.WebView2.Core;
 using SelfContainedDeployment.Automation;
 using SelfContainedDeployment.Browser;
@@ -23,6 +25,7 @@ namespace SelfContainedDeployment.Panes
     {
         private const string SharedBrowserProfileFolderName = "browser-profile-shared";
         private const string LegacyBrowserProfilesFolderName = "browser-profiles";
+        private const string ProfileSeedMetadataFileName = "profile-source.json";
 
         private static readonly string[] PreferredChromiumExtensionIds =
         {
@@ -42,6 +45,52 @@ namespace SelfContainedDeployment.Panes
             public int CopiedFiles { get; init; }
 
             public int SkippedFiles { get; init; }
+        }
+
+        public sealed class BrowserPaneTabSnapshot
+        {
+            public string Id { get; init; }
+
+            public string Title { get; init; }
+
+            public string Uri { get; init; }
+        }
+
+        private sealed class BrowserTabSession
+        {
+            public string Id { get; init; }
+
+            public string Title { get; set; }
+
+            public string Uri { get; set; }
+        }
+
+        private sealed class ChromiumProfileSeedSource
+        {
+            public string BrowserName { get; init; }
+
+            public string UserDataRoot { get; init; }
+
+            public string ProfileDirectoryName { get; init; }
+
+            public string ProfilePath { get; init; }
+
+            public string ProfileDisplayName { get; init; }
+
+            public string ExtensionsPath => Path.Combine(ProfilePath ?? string.Empty, "Extensions");
+        }
+
+        private sealed class ProfileSeedMetadata
+        {
+            public string BrowserName { get; set; }
+
+            public string UserDataRoot { get; set; }
+
+            public string ProfileDirectoryName { get; set; }
+
+            public string ProfileDisplayName { get; set; }
+
+            public string ImportedAtUtc { get; set; }
         }
 
         private static readonly string[] ChromiumProfileFilesToSeed =
@@ -98,9 +147,12 @@ namespace SelfContainedDeployment.Panes
         private string _profileSeedStatus = "Shared WinMux browser profile";
         private string _extensionImportStatus = "No browser extensions imported yet.";
         private string _credentialAutofillStatus = "No imported WinMux credentials.";
+        private readonly List<BrowserTabSession> _browserTabs = new();
         private readonly List<BrowserExtensionSnapshot> _installedExtensions = new();
         private readonly Dictionary<int, BrowserCredentialMatch> _credentialContextMenuMatches = new();
         private bool _credentialCaptureScriptInjected;
+        private string _selectedBrowserTabId;
+        private ChromiumProfileSeedSource _profileSeedSource;
 
         private sealed class BrowserCredentialCaptureMessage
         {
@@ -120,6 +172,9 @@ namespace SelfContainedDeployment.Panes
             PointerPressed += (_, _) => RaiseInteractionRequested();
             GotFocus += OnInteractionRequested;
             SizeChanged += OnBrowserPaneSizeChanged;
+            AddressBox.GotFocus += OnAddressBoxGotFocus;
+            RefreshBrowserTabStrip();
+            UpdateNavigationButtons();
         }
 
         public event EventHandler<string> TitleChanged;
@@ -144,6 +199,19 @@ namespace SelfContainedDeployment.Panes
         public string AddressText => AddressBox.Text ?? string.Empty;
 
         public bool IsInitialized => _initialized;
+
+        public string SelectedTabId => _selectedBrowserTabId;
+
+        public int TabCount => _browserTabs.Count;
+
+        public IReadOnlyList<BrowserPaneTabSnapshot> Tabs => _browserTabs
+            .Select(tab => new BrowserPaneTabSnapshot
+            {
+                Id = tab.Id,
+                Title = tab.Title,
+                Uri = tab.Uri,
+            })
+            .ToList();
 
         public string ProfileSeedStatus => _profileSeedStatus;
 
@@ -217,6 +285,7 @@ namespace SelfContainedDeployment.Panes
                 BrowserView.CoreWebView2.SourceChanged -= OnSourceChanged;
                 BrowserView.CoreWebView2.ContextMenuRequested -= OnContextMenuRequested;
                 BrowserView.CoreWebView2.WebMessageReceived -= OnWebMessageReceived;
+                BrowserView.CoreWebView2.NewWindowRequested -= OnNewWindowRequested;
             }
         }
 
@@ -231,15 +300,65 @@ namespace SelfContainedDeployment.Panes
             string normalized = NormalizeUri(target);
             AddressBox.Text = normalized;
             RaiseInteractionRequested();
+            EnsureBrowserTabExists();
             if (_initialized && BrowserView.CoreWebView2 is not null)
             {
+                SyncSelectedBrowserTab(uri: normalized);
                 BrowserView.CoreWebView2.Navigate(normalized);
                 LogBrowserEvent("navigate.requested", $"Navigating browser pane to {normalized}");
             }
             else
             {
-                InitialUri = normalized;
+                BrowserTabSession tab = GetSelectedBrowserTab();
+                if (tab is not null)
+                {
+                    tab.Uri = normalized;
+                    tab.Title = string.IsNullOrWhiteSpace(tab.Title) ? "New tab" : tab.Title;
+                    _currentUri = normalized;
+                }
+                else
+                {
+                    InitialUri = normalized;
+                }
+
+                RefreshBrowserTabStrip();
+                StateChanged?.Invoke(this, EventArgs.Empty);
             }
+        }
+
+        public void RestoreTabSession(IReadOnlyList<BrowserPaneTabSnapshot> tabs, string selectedTabId)
+        {
+            _browserTabs.Clear();
+            foreach (BrowserPaneTabSnapshot tab in tabs ?? Array.Empty<BrowserPaneTabSnapshot>())
+            {
+                _browserTabs.Add(new BrowserTabSession
+                {
+                    Id = string.IsNullOrWhiteSpace(tab.Id) ? Guid.NewGuid().ToString("N") : tab.Id,
+                    Title = string.IsNullOrWhiteSpace(tab.Title) ? "New tab" : tab.Title.Trim(),
+                    Uri = string.IsNullOrWhiteSpace(tab.Uri) ? "winmux://start" : tab.Uri.Trim(),
+                });
+            }
+
+            if (_browserTabs.Count == 0)
+            {
+                _selectedBrowserTabId = null;
+                if (!string.IsNullOrWhiteSpace(InitialUri))
+                {
+                    EnsureBrowserTabExists(InitialUri);
+                }
+            }
+            else
+            {
+                _selectedBrowserTabId = _browserTabs.Any(tab => string.Equals(tab.Id, selectedTabId, StringComparison.Ordinal))
+                    ? selectedTabId
+                    : _browserTabs[0].Id;
+                BrowserTabSession selected = GetSelectedBrowserTab();
+                _currentTitle = selected?.Title ?? _currentTitle;
+                _currentUri = selected?.Uri ?? _currentUri;
+            }
+
+            RefreshBrowserTabStrip();
+            UpdateNavigationButtons();
         }
 
         public async Task EnsureInitializedAsync()
@@ -331,6 +450,7 @@ namespace SelfContainedDeployment.Panes
                 core.SourceChanged += OnSourceChanged;
                 core.ContextMenuRequested += OnContextMenuRequested;
                 core.WebMessageReceived += OnWebMessageReceived;
+                core.NewWindowRequested += OnNewWindowRequested;
                 BrowserView.GotFocus += OnInteractionRequested;
                 _initialized = true;
                 LogBrowserEvent("webview.configure", "Attached browser event handlers", new Dictionary<string, string>
@@ -348,8 +468,26 @@ namespace SelfContainedDeployment.Panes
                 await RefreshInstalledExtensionsAsync(core).ConfigureAwait(true);
                 await EnsureCredentialCaptureScriptAsync(core).ConfigureAwait(true);
                 UpdateCredentialAutofillStatus();
+                EnsureBrowserTabExists(!string.IsNullOrWhiteSpace(InitialUri) ? NormalizeUri(InitialUri) : null);
+                BrowserTabSession selectedTab = GetSelectedBrowserTab();
 
-                if (!string.IsNullOrWhiteSpace(_currentUri) &&
+                if (!string.IsNullOrWhiteSpace(selectedTab?.Uri) &&
+                    !string.Equals(selectedTab.Uri, "about:blank", StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(selectedTab.Uri, "winmux://start", StringComparison.OrdinalIgnoreCase))
+                {
+                    string selectedUri = NormalizeUri(selectedTab.Uri);
+                    AddressBox.Text = selectedUri;
+                    _currentUri = selectedUri;
+                    LogBrowserEvent("webview.configure", $"Restoring browser tab to {selectedUri}", new Dictionary<string, string>
+                    {
+                        ["step"] = "navigate.selectedTab",
+                        ["uri"] = selectedUri,
+                        ["tabId"] = selectedTab.Id,
+                    });
+                    core.Navigate(selectedUri);
+                    LogBrowserEvent("navigate.requested", $"Navigating browser pane to {selectedUri}");
+                }
+                else if (!string.IsNullOrWhiteSpace(_currentUri) &&
                     !string.Equals(_currentUri, "about:blank", StringComparison.OrdinalIgnoreCase) &&
                     !string.Equals(_currentUri, "winmux://start", StringComparison.OrdinalIgnoreCase))
                 {
@@ -363,6 +501,7 @@ namespace SelfContainedDeployment.Panes
                     !string.Equals(AddressBox.Text, "about:blank", StringComparison.OrdinalIgnoreCase))
                 {
                     string pendingUri = NormalizeUri(AddressBox.Text);
+                    SyncSelectedBrowserTab(uri: pendingUri);
                     LogBrowserEvent("webview.configure", $"Preserving pending browser navigation to {pendingUri}", new Dictionary<string, string>
                     {
                         ["step"] = "navigate.preserveAddress",
@@ -383,6 +522,7 @@ namespace SelfContainedDeployment.Panes
                 {
                     string initialUri = NormalizeUri(InitialUri);
                     AddressBox.Text = initialUri;
+                    SyncSelectedBrowserTab(uri: initialUri);
                     LogBrowserEvent("webview.configure", $"Navigating browser pane to {initialUri}", new Dictionary<string, string>
                     {
                         ["step"] = "navigate.initialUri",
@@ -391,6 +531,9 @@ namespace SelfContainedDeployment.Panes
                     core.Navigate(initialUri);
                     LogBrowserEvent("navigate.requested", $"Navigating browser pane to {initialUri}");
                 }
+
+                RefreshBrowserTabStrip();
+                UpdateNavigationButtons();
             }
             catch (Exception ex)
             {
@@ -417,6 +560,221 @@ namespace SelfContainedDeployment.Panes
             throw new InvalidOperationException("Browser CoreWebView2 was null after initialization.");
         }
 
+        private void EnsureBrowserTabExists(string initialUri = null)
+        {
+            if (_browserTabs.Count == 0)
+            {
+                string normalizedUri = string.IsNullOrWhiteSpace(initialUri)
+                    ? "winmux://start"
+                    : initialUri.Trim();
+                BrowserTabSession tab = new()
+                {
+                    Id = Guid.NewGuid().ToString("N"),
+                    Title = string.Equals(normalizedUri, "winmux://start", StringComparison.OrdinalIgnoreCase) ? "Start" : "New tab",
+                    Uri = normalizedUri,
+                };
+                _browserTabs.Add(tab);
+                _selectedBrowserTabId = tab.Id;
+                _currentUri = tab.Uri;
+                _currentTitle = tab.Title;
+            }
+
+            if (!_browserTabs.Any(tab => string.Equals(tab.Id, _selectedBrowserTabId, StringComparison.Ordinal)))
+            {
+                _selectedBrowserTabId = _browserTabs[0].Id;
+            }
+        }
+
+        private BrowserTabSession GetSelectedBrowserTab()
+        {
+            EnsureBrowserTabExists();
+            return _browserTabs.FirstOrDefault(tab => string.Equals(tab.Id, _selectedBrowserTabId, StringComparison.Ordinal))
+                ?? _browserTabs[0];
+        }
+
+        private void SyncSelectedBrowserTab(string uri = null, string title = null)
+        {
+            BrowserTabSession tab = GetSelectedBrowserTab();
+            if (!string.IsNullOrWhiteSpace(uri))
+            {
+                tab.Uri = uri.Trim();
+                _currentUri = tab.Uri;
+            }
+
+            if (!string.IsNullOrWhiteSpace(title))
+            {
+                tab.Title = title.Trim();
+                _currentTitle = tab.Title;
+            }
+
+            RefreshBrowserTabStrip();
+        }
+
+        private async Task SelectBrowserTabAsync(string tabId)
+        {
+            BrowserTabSession nextTab = _browserTabs.FirstOrDefault(tab => string.Equals(tab.Id, tabId, StringComparison.Ordinal));
+            if (nextTab is null)
+            {
+                return;
+            }
+
+            _selectedBrowserTabId = nextTab.Id;
+            _currentTitle = string.IsNullOrWhiteSpace(nextTab.Title) ? "Preview" : nextTab.Title;
+            _currentUri = string.IsNullOrWhiteSpace(nextTab.Uri) ? "winmux://start" : nextTab.Uri;
+            AddressBox.Text = string.Equals(_currentUri, "winmux://start", StringComparison.OrdinalIgnoreCase) ? string.Empty : _currentUri;
+            RefreshBrowserTabStrip();
+            UpdateNavigationButtons();
+            StateChanged?.Invoke(this, EventArgs.Empty);
+
+            if (!_initialized || BrowserView.CoreWebView2 is null)
+            {
+                InitialUri = _currentUri;
+                return;
+            }
+
+            if (string.Equals(_currentUri, "winmux://start", StringComparison.OrdinalIgnoreCase))
+            {
+                await NavigateToStartPageAsync().ConfigureAwait(true);
+            }
+            else
+            {
+                BrowserView.CoreWebView2.Navigate(_currentUri);
+                LogBrowserEvent("tab.selected", $"Selected browser tab {nextTab.Id}", new Dictionary<string, string>
+                {
+                    ["tabId"] = nextTab.Id,
+                    ["uri"] = _currentUri ?? string.Empty,
+                });
+            }
+        }
+
+        private async Task AddBrowserTabAsync(string initialUri = null, string title = null, string tabId = null)
+        {
+            string normalizedUri = string.IsNullOrWhiteSpace(initialUri)
+                ? "winmux://start"
+                : NormalizeUri(initialUri);
+
+            BrowserTabSession tab = new()
+            {
+                Id = string.IsNullOrWhiteSpace(tabId) ? Guid.NewGuid().ToString("N") : tabId,
+                Title = string.IsNullOrWhiteSpace(title)
+                    ? (string.Equals(normalizedUri, "winmux://start", StringComparison.OrdinalIgnoreCase) ? "Start" : "New tab")
+                    : title.Trim(),
+                Uri = normalizedUri,
+            };
+
+            _browserTabs.Add(tab);
+            await SelectBrowserTabAsync(tab.Id).ConfigureAwait(true);
+        }
+
+        private async Task CloseBrowserTabAsync(string tabId)
+        {
+            if (_browserTabs.Count <= 1)
+            {
+                BrowserTabSession onlyTab = GetSelectedBrowserTab();
+                onlyTab.Uri = "winmux://start";
+                onlyTab.Title = "Start";
+                await SelectBrowserTabAsync(onlyTab.Id).ConfigureAwait(true);
+                return;
+            }
+
+            int index = _browserTabs.FindIndex(tab => string.Equals(tab.Id, tabId, StringComparison.Ordinal));
+            if (index < 0)
+            {
+                return;
+            }
+
+            _browserTabs.RemoveAt(index);
+            BrowserTabSession fallback = _browserTabs[Math.Clamp(index - 1, 0, _browserTabs.Count - 1)];
+            await SelectBrowserTabAsync(fallback.Id).ConfigureAwait(true);
+        }
+
+        private void RefreshBrowserTabStrip()
+        {
+            if (BrowserTabStripPanel is null)
+            {
+                return;
+            }
+
+            BrowserTabStripPanel.Children.Clear();
+            foreach (BrowserTabSession tab in _browserTabs)
+            {
+                Grid tabLayout = new()
+                {
+                    ColumnSpacing = 4,
+                };
+                tabLayout.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                tabLayout.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+                Button tabButton = new()
+                {
+                    Style = (Style)Application.Current.Resources["ShellBrowserTabButtonStyle"],
+                    Tag = tab.Id,
+                    MinWidth = 120,
+                    MaxWidth = 220,
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
+                };
+                AutomationProperties.SetAutomationId(tabButton, $"browser-pane-tab-{tab.Id}");
+                AutomationProperties.SetName(tabButton, string.IsNullOrWhiteSpace(tab.Title) ? "Browser tab" : tab.Title);
+                tabButton.Click += OnBrowserTabClicked;
+
+                TextBlock tabTitle = new()
+                {
+                    Text = string.IsNullOrWhiteSpace(tab.Title) ? "New tab" : tab.Title,
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                };
+                AutomationProperties.SetAutomationId(tabTitle, $"browser-pane-tab-title-{tab.Id}");
+                tabButton.Content = tabTitle;
+                ApplyBrowserTabButtonState(tabButton, string.Equals(tab.Id, _selectedBrowserTabId, StringComparison.Ordinal));
+                tabLayout.Children.Add(tabButton);
+
+                Button closeButton = new()
+                {
+                    Style = (Style)Application.Current.Resources["ShellChromeButtonStyle"],
+                    Tag = tab.Id,
+                    Width = 22,
+                    Height = 22,
+                    HorizontalAlignment = HorizontalAlignment.Right,
+                    Content = new FontIcon
+                    {
+                        FontSize = 9,
+                        Glyph = "\uE711",
+                    },
+                };
+                AutomationProperties.SetAutomationId(closeButton, $"browser-pane-tab-close-{tab.Id}");
+                closeButton.Click += OnBrowserTabCloseClicked;
+                Grid.SetColumn(closeButton, 1);
+                tabLayout.Children.Add(closeButton);
+                BrowserTabStripPanel.Children.Add(tabLayout);
+            }
+        }
+
+        private static void ApplyBrowserTabButtonState(Button button, bool active)
+        {
+            if (button is null)
+            {
+                return;
+            }
+
+            button.Background = (Brush)Application.Current.Resources[active ? "ShellNavActiveBrush" : "ShellMutedSurfaceBrush"];
+            button.BorderBrush = (Brush)Application.Current.Resources[active ? "ShellPaneActiveBorderBrush" : "ShellBorderBrush"];
+            button.Foreground = (Brush)Application.Current.Resources[active ? "ShellTextPrimaryBrush" : "ShellTextSecondaryBrush"];
+            button.BorderThickness = active ? new Thickness(1) : new Thickness(1);
+        }
+
+        private void UpdateNavigationButtons()
+        {
+            bool canNavigate = _initialized && BrowserView.CoreWebView2 is not null;
+            if (BrowserBackButton is not null)
+            {
+                BrowserBackButton.IsEnabled = canNavigate && BrowserView.CoreWebView2.CanGoBack;
+            }
+
+            if (BrowserForwardButton is not null)
+            {
+                BrowserForwardButton.IsEnabled = canNavigate && BrowserView.CoreWebView2.CanGoForward;
+            }
+        }
+
         private async void OnLoaded(object sender, RoutedEventArgs e)
         {
             await EnsureInitializedAsync();
@@ -432,22 +790,83 @@ namespace SelfContainedDeployment.Panes
             {
                 _ = NavigateToStartPageAsync();
             }
+
+            RefreshBrowserTabStrip();
         }
 
         private async Task NavigateToStartPageAsync()
         {
-            if (!_initialized || BrowserView.CoreWebView2 is null)
+            RaiseInteractionRequested();
+            EnsureBrowserTabExists();
+            _currentUri = "winmux://start";
+            _currentTitle = "Start";
+            AddressBox.Text = string.Empty;
+            SyncSelectedBrowserTab(uri: _currentUri, title: _currentTitle);
+            UpdateCredentialAutofillStatus();
+            if (_initialized && BrowserView.CoreWebView2 is not null)
+            {
+                BrowserView.CoreWebView2.NavigateToString(BuildStartPageHtml());
+                LogBrowserEvent("start-page.shown", "Browser start page rendered");
+            }
+
+            UpdateNavigationButtons();
+            StateChanged?.Invoke(this, EventArgs.Empty);
+            await Task.CompletedTask;
+        }
+
+        private async void OnAddBrowserTabClicked(object sender, RoutedEventArgs e)
+        {
+            RaiseInteractionRequested();
+            await AddBrowserTabAsync().ConfigureAwait(true);
+        }
+
+        private async void OnBrowserTabClicked(object sender, RoutedEventArgs e)
+        {
+            if (sender is not Button button || button.Tag is not string tabId)
             {
                 return;
             }
 
             RaiseInteractionRequested();
-            _currentUri = "winmux://start";
-            AddressBox.Text = string.Empty;
-            UpdateCredentialAutofillStatus();
-            BrowserView.CoreWebView2.NavigateToString(BuildStartPageHtml());
-            LogBrowserEvent("start-page.shown", "Browser start page rendered");
-            await Task.CompletedTask;
+            await SelectBrowserTabAsync(tabId).ConfigureAwait(true);
+        }
+
+        private async void OnBrowserTabCloseClicked(object sender, RoutedEventArgs e)
+        {
+            if (sender is not Button button || button.Tag is not string tabId)
+            {
+                return;
+            }
+
+            RaiseInteractionRequested();
+            await CloseBrowserTabAsync(tabId).ConfigureAwait(true);
+        }
+
+        private void OnAddressBoxGotFocus(object sender, RoutedEventArgs e)
+        {
+            AddressBox.SelectAll();
+        }
+
+        private void OnBackClicked(object sender, RoutedEventArgs e)
+        {
+            if (!_initialized || BrowserView.CoreWebView2 is null || !BrowserView.CoreWebView2.CanGoBack)
+            {
+                return;
+            }
+
+            RaiseInteractionRequested();
+            BrowserView.CoreWebView2.GoBack();
+        }
+
+        private void OnForwardClicked(object sender, RoutedEventArgs e)
+        {
+            if (!_initialized || BrowserView.CoreWebView2 is null || !BrowserView.CoreWebView2.CanGoForward)
+            {
+                return;
+            }
+
+            RaiseInteractionRequested();
+            BrowserView.CoreWebView2.GoForward();
         }
 
         private void OnHomeClicked(object sender, RoutedEventArgs e)
@@ -472,6 +891,17 @@ namespace SelfContainedDeployment.Panes
             BrowserView.CoreWebView2.Reload();
         }
 
+        private void OnOpenCurrentPageInPaneClicked(object sender, RoutedEventArgs e)
+        {
+            if (!string.IsNullOrWhiteSpace(_currentUri) && !string.Equals(_currentUri, "winmux://start", StringComparison.OrdinalIgnoreCase))
+            {
+                OpenPaneRequested?.Invoke(this, _currentUri);
+                return;
+            }
+
+            OpenPaneRequested?.Invoke(this, null);
+        }
+
         private void OnAddressBoxKeyDown(object sender, KeyRoutedEventArgs e)
         {
             if (e.Key != VirtualKey.Enter)
@@ -487,6 +917,8 @@ namespace SelfContainedDeployment.Panes
         private void OnPagesClicked(object sender, RoutedEventArgs e)
         {
             RaiseInteractionRequested();
+            EnsureBrowserTabExists();
+            BrowserTabSession selectedTab = GetSelectedBrowserTab();
 
             MenuFlyout flyout = new();
             flyout.Items.Add(new MenuFlyoutItem
@@ -508,6 +940,21 @@ namespace SelfContainedDeployment.Panes
             };
             duplicateCurrentPageItem.Click += (_, _) => OpenPaneRequested?.Invoke(this, _currentUri);
             flyout.Items.Add(duplicateCurrentPageItem);
+
+            MenuFlyoutItem newTabItem = new()
+            {
+                Text = "Open a new browser tab",
+            };
+            newTabItem.Click += async (_, _) => await AddBrowserTabAsync().ConfigureAwait(true);
+            flyout.Items.Add(newTabItem);
+
+            MenuFlyoutItem closeTabItem = new()
+            {
+                Text = "Close this tab",
+                IsEnabled = _browserTabs.Count > 1,
+            };
+            closeTabItem.Click += async (_, _) => await CloseBrowserTabAsync(selectedTab.Id).ConfigureAwait(true);
+            flyout.Items.Add(closeTabItem);
 
             MenuFlyoutItem blankPaneItem = new()
             {
@@ -543,9 +990,30 @@ namespace SelfContainedDeployment.Panes
                 }
             }
 
+            if (_browserTabs.Count > 0)
+            {
+                flyout.Items.Add(new MenuFlyoutSeparator());
+                flyout.Items.Add(new MenuFlyoutItem
+                {
+                    Text = "Tabs in this pane",
+                    IsEnabled = false,
+                });
+
+                foreach (BrowserTabSession tab in _browserTabs.Take(8))
+                {
+                    MenuFlyoutItem tabItem = new()
+                    {
+                        Text = string.IsNullOrWhiteSpace(tab.Title) ? "New tab" : tab.Title,
+                        Tag = tab.Id,
+                    };
+                    tabItem.Click += async (_, _) => await SelectBrowserTabAsync(tab.Id).ConfigureAwait(true);
+                    flyout.Items.Add(tabItem);
+                }
+            }
+
             flyout.Items.Add(new MenuFlyoutItem
             {
-                Text = "Each browser pane keeps one live page. Use another pane when you need a second page.",
+                Text = $"{_browserTabs.Count} tab{(_browserTabs.Count == 1 ? string.Empty : "s")} in this browser pane.",
                 IsEnabled = false,
             });
             flyout.ShowAt(BrowserPagesButton);
@@ -614,6 +1082,12 @@ namespace SelfContainedDeployment.Panes
             return await core.ExecuteScriptAsync(effectiveScript).AsTask().ConfigureAwait(true);
         }
 
+        public Task AddTabAsync(string initialUri = null) => AddBrowserTabAsync(initialUri);
+
+        public Task SelectTabAsync(string tabId) => SelectBrowserTabAsync(tabId);
+
+        public Task CloseTabAsync(string tabId = null) => CloseBrowserTabAsync(string.IsNullOrWhiteSpace(tabId) ? _selectedBrowserTabId : tabId);
+
         public async Task ManualAutofillCurrentPageAsync()
         {
             await EnsureInitializedAsync().ConfigureAwait(true);
@@ -663,7 +1137,7 @@ namespace SelfContainedDeployment.Panes
             }
 
             UpdateCredentialAutofillStatus();
-            _ = TryAutofillMatchingCredentialsAsync();
+            UpdateNavigationButtons();
             LogBrowserEvent("navigate.completed", $"Browser navigation completed for {_currentUri}", new Dictionary<string, string>
             {
                 ["uri"] = _currentUri ?? string.Empty,
@@ -683,6 +1157,7 @@ namespace SelfContainedDeployment.Panes
             }
 
             _currentTitle = title.Trim();
+            SyncSelectedBrowserTab(title: _currentTitle);
             TitleChanged?.Invoke(this, _currentTitle);
             StateChanged?.Invoke(this, EventArgs.Empty);
         }
@@ -700,8 +1175,26 @@ namespace SelfContainedDeployment.Panes
                 AddressBox.Text = _currentUri;
             }
 
+            SyncSelectedBrowserTab(uri: _currentUri);
+            UpdateNavigationButtons();
             LogBrowserEvent("source.changed", $"Browser source changed to {_currentUri}");
             StateChanged?.Invoke(this, EventArgs.Empty);
+        }
+
+        private async void OnNewWindowRequested(CoreWebView2 sender, CoreWebView2NewWindowRequestedEventArgs args)
+        {
+            string targetUri = args.Uri;
+            if (string.IsNullOrWhiteSpace(targetUri))
+            {
+                return;
+            }
+
+            args.Handled = true;
+            LogBrowserEvent("popup.redirected", $"Redirected popup to internal browser tab {targetUri}", new Dictionary<string, string>
+            {
+                ["uri"] = targetUri,
+            });
+            await AddBrowserTabAsync(targetUri).ConfigureAwait(true);
         }
 
         private async void OnWebMessageReceived(CoreWebView2 sender, CoreWebView2WebMessageReceivedEventArgs args)
@@ -1066,10 +1559,13 @@ namespace SelfContainedDeployment.Panes
                 return;
             }
 
-            string sourceRoot = ResolveChromiumUserDataRoot();
-            if (string.IsNullOrWhiteSpace(sourceRoot))
+            ProfileSeedMetadata existingMetadata = TryLoadProfileSeedMetadata(targetRoot);
+            ChromiumProfileSeedSource source = ResolveChromiumProfileSeedSource();
+            if (source is null)
             {
-                _profileSeedStatus = "No Chromium profile detected on this machine";
+                _profileSeedStatus = existingMetadata is null
+                    ? "No Chromium profile detected on this machine"
+                    : $"Reusing shared browser profile from {existingMetadata.BrowserName} · {existingMetadata.ProfileDisplayName}";
                 return;
             }
 
@@ -1077,30 +1573,38 @@ namespace SelfContainedDeployment.Panes
             {
                 using IEnumerator<string> entries = Directory.EnumerateFileSystemEntries(targetRoot).GetEnumerator();
                 bool hasExistingEntries = entries.MoveNext();
-                SeedCopySummary summary = CopyChromiumProfileSeed(sourceRoot, targetRoot, overwriteExisting: !hasExistingEntries);
+                SeedCopySummary summary = CopyChromiumProfileSeed(source, targetRoot, overwriteExisting: !hasExistingEntries);
                 string eventName;
+                string sourceLabel = FormatProfileSeedLabel(source);
 
                 if (!hasExistingEntries)
                 {
                     eventName = summary.SkippedFiles > 0 ? "profile.seeded_partial" : "profile.seeded";
                     _profileSeedStatus = summary.SkippedFiles > 0
-                        ? $"Partially seeded shared browser profile from Chrome ({summary.CopiedFiles} copied, {summary.SkippedFiles} skipped)"
-                        : $"Seeded shared browser profile from Chrome ({summary.CopiedFiles} files copied)";
+                        ? $"Partially seeded shared browser profile from {sourceLabel} ({summary.CopiedFiles} copied, {summary.SkippedFiles} skipped)"
+                        : $"Seeded shared browser profile from {sourceLabel} ({summary.CopiedFiles} files copied)";
                 }
                 else if (summary.CopiedFiles > 0)
                 {
                     eventName = "profile.seed_repaired";
-                    _profileSeedStatus = $"Completed Chrome seed for shared browser profile ({summary.CopiedFiles} copied)";
+                    _profileSeedStatus = $"Completed shared browser profile repair from {sourceLabel} ({summary.CopiedFiles} copied)";
                 }
                 else
                 {
-                    _profileSeedStatus = "Reusing shared browser profile";
+                    _profileSeedStatus = existingMetadata is null
+                        ? $"Reusing shared browser profile from {sourceLabel}"
+                        : $"Reusing shared browser profile from {existingMetadata.BrowserName} · {existingMetadata.ProfileDisplayName}";
                     return;
                 }
 
-                LogBrowserEvent(eventName, $"Seeded browser profile from {sourceRoot}", new Dictionary<string, string>
+                SaveProfileSeedMetadata(targetRoot, source);
+                _profileSeedSource = source;
+                LogBrowserEvent(eventName, $"Seeded browser profile from {source.UserDataRoot}", new Dictionary<string, string>
                 {
-                    ["sourceRoot"] = sourceRoot,
+                    ["browserName"] = source.BrowserName,
+                    ["profileDirectoryName"] = source.ProfileDirectoryName,
+                    ["sourceRoot"] = source.UserDataRoot,
+                    ["sourceProfile"] = source.ProfilePath,
                     ["targetRoot"] = targetRoot,
                     ["copiedFiles"] = summary.CopiedFiles.ToString(),
                     ["skippedFiles"] = summary.SkippedFiles.ToString(),
@@ -1109,9 +1613,12 @@ namespace SelfContainedDeployment.Panes
             catch (Exception ex)
             {
                 _profileSeedStatus = "Chrome profile seed failed";
-                LogBrowserEvent("profile.seed_failed", $"Failed to seed browser profile from {sourceRoot}: {ex.Message}", new Dictionary<string, string>
+                LogBrowserEvent("profile.seed_failed", $"Failed to seed browser profile from {source.UserDataRoot}: {ex.Message}", new Dictionary<string, string>
                 {
-                    ["sourceRoot"] = sourceRoot,
+                    ["browserName"] = source.BrowserName,
+                    ["profileDirectoryName"] = source.ProfileDirectoryName,
+                    ["sourceRoot"] = source.UserDataRoot,
+                    ["sourceProfile"] = source.ProfilePath,
                     ["targetRoot"] = targetRoot,
                     ["error"] = ex.Message,
                 });
@@ -1175,6 +1682,60 @@ namespace SelfContainedDeployment.Panes
             }
         }
 
+        private static string FormatProfileSeedLabel(ChromiumProfileSeedSource source)
+        {
+            if (source is null)
+            {
+                return "Chromium";
+            }
+
+            return string.IsNullOrWhiteSpace(source.ProfileDisplayName)
+                ? source.BrowserName ?? "Chromium"
+                : $"{source.BrowserName} · {source.ProfileDisplayName}";
+        }
+
+        private static ProfileSeedMetadata TryLoadProfileSeedMetadata(string targetRoot)
+        {
+            try
+            {
+                string metadataPath = Path.Combine(targetRoot, ProfileSeedMetadataFileName);
+                if (!File.Exists(metadataPath))
+                {
+                    return null;
+                }
+
+                string json = File.ReadAllText(metadataPath);
+                return JsonSerializer.Deserialize<ProfileSeedMetadata>(json);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static void SaveProfileSeedMetadata(string targetRoot, ChromiumProfileSeedSource source)
+        {
+            if (string.IsNullOrWhiteSpace(targetRoot) || source is null)
+            {
+                return;
+            }
+
+            ProfileSeedMetadata metadata = new()
+            {
+                BrowserName = source.BrowserName,
+                UserDataRoot = source.UserDataRoot,
+                ProfileDirectoryName = source.ProfileDirectoryName,
+                ProfileDisplayName = source.ProfileDisplayName,
+                ImportedAtUtc = DateTimeOffset.UtcNow.ToString("O"),
+            };
+
+            string metadataPath = Path.Combine(targetRoot, ProfileSeedMetadataFileName);
+            File.WriteAllText(metadataPath, JsonSerializer.Serialize(metadata, new JsonSerializerOptions
+            {
+                WriteIndented = true,
+            }));
+        }
+
         private static DateTime GetLastWriteTimeSafeUtc(string path)
         {
             try
@@ -1187,54 +1748,153 @@ namespace SelfContainedDeployment.Panes
             }
         }
 
-        private static string ResolveChromiumUserDataRoot()
+        private static ChromiumProfileSeedSource ResolveChromiumProfileSeedSource()
         {
             string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            string[] candidates =
+            (string BrowserName, string UserDataRoot)[] candidates =
             {
-                Path.Combine(localAppData, "Google", "Chrome", "User Data"),
-                Path.Combine(localAppData, "Chromium", "User Data"),
-                Path.Combine(localAppData, "BraveSoftware", "Brave-Browser", "User Data"),
+                ("Chrome", Path.Combine(localAppData, "Google", "Chrome", "User Data")),
+                ("Chromium", Path.Combine(localAppData, "Chromium", "User Data")),
+                ("Brave", Path.Combine(localAppData, "BraveSoftware", "Brave-Browser", "User Data")),
             };
 
-            foreach (string candidate in candidates)
+            List<ChromiumProfileSeedSource> sources = new();
+            foreach ((string browserName, string candidateRoot) in candidates)
             {
-                if (Directory.Exists(candidate))
+                if (!Directory.Exists(candidateRoot))
                 {
-                    return candidate;
+                    continue;
                 }
+
+                Dictionary<string, string> displayNames = TryReadProfileDisplayNames(candidateRoot);
+                string preferredProfile = TryReadLastUsedProfile(candidateRoot);
+                IEnumerable<string> profileDirectories = Directory.GetDirectories(candidateRoot)
+                    .Where(candidate =>
+                    {
+                        string name = Path.GetFileName(candidate);
+                        return string.Equals(name, "Default", StringComparison.OrdinalIgnoreCase) ||
+                               name.StartsWith("Profile ", StringComparison.OrdinalIgnoreCase);
+                    })
+                    .Where(candidate => Directory.EnumerateFileSystemEntries(candidate).Any());
+
+                List<string> orderedProfiles = profileDirectories
+                    .OrderByDescending(candidate => string.Equals(Path.GetFileName(candidate), preferredProfile, StringComparison.OrdinalIgnoreCase))
+                    .ThenByDescending(GetLastWriteTimeSafeUtc)
+                    .ToList();
+
+                if (orderedProfiles.Count == 0)
+                {
+                    continue;
+                }
+
+                string profilePath = orderedProfiles[0];
+                string profileDirectoryName = Path.GetFileName(profilePath);
+                sources.Add(new ChromiumProfileSeedSource
+                {
+                    BrowserName = browserName,
+                    UserDataRoot = candidateRoot,
+                    ProfileDirectoryName = profileDirectoryName,
+                    ProfilePath = profilePath,
+                    ProfileDisplayName = displayNames.TryGetValue(profileDirectoryName, out string displayName)
+                        ? displayName
+                        : profileDirectoryName,
+                });
             }
 
-            return null;
+            return sources
+                .OrderByDescending(candidate => GetLastWriteTimeSafeUtc(candidate.ProfilePath))
+                .ThenBy(candidate => candidate.BrowserName, StringComparer.OrdinalIgnoreCase)
+                .FirstOrDefault();
         }
 
-        private static SeedCopySummary CopyChromiumProfileSeed(string sourceRoot, string targetRoot, bool overwriteExisting)
+        private static string TryReadLastUsedProfile(string userDataRoot)
         {
-            string sourceDefault = Path.Combine(sourceRoot, "Default");
-            if (!Directory.Exists(sourceDefault))
+            try
             {
-                throw new DirectoryNotFoundException($"Chromium profile root '{sourceRoot}' does not contain a Default profile.");
+                string localStatePath = Path.Combine(userDataRoot, "Local State");
+                if (!File.Exists(localStatePath))
+                {
+                    return null;
+                }
+
+                using JsonDocument document = JsonDocument.Parse(File.ReadAllText(localStatePath));
+                if (!document.RootElement.TryGetProperty("profile", out JsonElement profileElement) ||
+                    !profileElement.TryGetProperty("last_used", out JsonElement lastUsedElement))
+                {
+                    return null;
+                }
+
+                return lastUsedElement.GetString();
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static Dictionary<string, string> TryReadProfileDisplayNames(string userDataRoot)
+        {
+            Dictionary<string, string> results = new(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                string localStatePath = Path.Combine(userDataRoot, "Local State");
+                if (!File.Exists(localStatePath))
+                {
+                    return results;
+                }
+
+                using JsonDocument document = JsonDocument.Parse(File.ReadAllText(localStatePath));
+                if (!document.RootElement.TryGetProperty("profile", out JsonElement profileElement) ||
+                    !profileElement.TryGetProperty("info_cache", out JsonElement infoCacheElement) ||
+                    infoCacheElement.ValueKind != JsonValueKind.Object)
+                {
+                    return results;
+                }
+
+                foreach (JsonProperty property in infoCacheElement.EnumerateObject())
+                {
+                    if (property.Value.ValueKind == JsonValueKind.Object &&
+                        property.Value.TryGetProperty("name", out JsonElement nameElement) &&
+                        !string.IsNullOrWhiteSpace(nameElement.GetString()))
+                    {
+                        results[property.Name] = nameElement.GetString();
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            return results;
+        }
+
+        private static SeedCopySummary CopyChromiumProfileSeed(ChromiumProfileSeedSource source, string targetRoot, bool overwriteExisting)
+        {
+            string sourceProfile = source?.ProfilePath;
+            if (string.IsNullOrWhiteSpace(sourceProfile) || !Directory.Exists(sourceProfile))
+            {
+                throw new DirectoryNotFoundException($"Chromium profile path '{sourceProfile}' was not found.");
             }
 
             SeedCopySummary summary = default;
-            CopyFileIfExists(Path.Combine(sourceRoot, "Local State"), Path.Combine(targetRoot, "Local State"), ref summary, overwriteExisting);
-            CopyFileIfExists(Path.Combine(sourceRoot, "Last Version"), Path.Combine(targetRoot, "Last Version"), ref summary, overwriteExisting);
+            CopyFileIfExists(Path.Combine(source.UserDataRoot, "Local State"), Path.Combine(targetRoot, "Local State"), ref summary, overwriteExisting);
+            CopyFileIfExists(Path.Combine(source.UserDataRoot, "Last Version"), Path.Combine(targetRoot, "Last Version"), ref summary, overwriteExisting);
 
             string targetDefault = Path.Combine(targetRoot, "Default");
             Directory.CreateDirectory(targetDefault);
 
             foreach (string relativeFile in ChromiumProfileFilesToSeed)
             {
-                CopyFileIfExists(Path.Combine(sourceDefault, relativeFile), Path.Combine(targetDefault, relativeFile), ref summary, overwriteExisting);
+                CopyFileIfExists(Path.Combine(sourceProfile, relativeFile), Path.Combine(targetDefault, relativeFile), ref summary, overwriteExisting);
             }
 
             foreach (string relativeDirectory in ChromiumProfileDirectoriesToSeed)
             {
-                CopyDirectoryIfExists(Path.Combine(sourceDefault, relativeDirectory), Path.Combine(targetDefault, relativeDirectory), ref summary, overwriteExisting);
+                CopyDirectoryIfExists(Path.Combine(sourceProfile, relativeDirectory), Path.Combine(targetDefault, relativeDirectory), ref summary, overwriteExisting);
             }
 
-            CopyFileIfExists(Path.Combine(sourceDefault, "Network", "Cookies"), Path.Combine(targetDefault, "Network", "Cookies"), ref summary, overwriteExisting);
-            CopyFileIfExists(Path.Combine(sourceDefault, "Network", "Cookies-journal"), Path.Combine(targetDefault, "Network", "Cookies-journal"), ref summary, overwriteExisting);
+            CopyFileIfExists(Path.Combine(sourceProfile, "Network", "Cookies"), Path.Combine(targetDefault, "Network", "Cookies"), ref summary, overwriteExisting);
+            CopyFileIfExists(Path.Combine(sourceProfile, "Network", "Cookies-journal"), Path.Combine(targetDefault, "Network", "Cookies-journal"), ref summary, overwriteExisting);
             return summary;
         }
 
@@ -1312,10 +1972,8 @@ namespace SelfContainedDeployment.Panes
             string extensionsRoot = Path.Combine(ResolveProfileRoot(), "Default", "Extensions");
             if (!Directory.Exists(extensionsRoot))
             {
-                string sourceRoot = ResolveChromiumUserDataRoot();
-                string fallbackExtensionsRoot = string.IsNullOrWhiteSpace(sourceRoot)
-                    ? null
-                    : Path.Combine(sourceRoot, "Default", "Extensions");
+                ChromiumProfileSeedSource source = _profileSeedSource ?? ResolveChromiumProfileSeedSource();
+                string fallbackExtensionsRoot = source?.ExtensionsPath;
 
                 if (string.IsNullOrWhiteSpace(fallbackExtensionsRoot) || !Directory.Exists(fallbackExtensionsRoot))
                 {

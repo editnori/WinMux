@@ -176,6 +176,14 @@
                                         VerticalAlignment="Center"
                                         Margin="0,0,10,0"
                                         Spacing="6">
+                                <Button x:Name="ShowOverviewButton"
+                                        AutomationProperties.AutomationId="shell-show-overview"
+                                        Style="{StaticResource ShellChromeButtonStyle}"
+                                        Click="OnShowOverviewClicked"
+                                        ToolTipService.ToolTip="Show thread overview">
+                                    <FontIcon FontSize="12" Glyph="&#xE8EF;" />
+                                </Button>
+
                                 <Button x:Name="AddBrowserPaneButton"
                                         AutomationProperties.AutomationId="shell-add-browser-pane"
                                         Style="{StaticResource ShellChromeButtonStyle}"
@@ -206,6 +214,41 @@
                               Grid.Row="1"
                               AutomationProperties.AutomationId="shell-pane-grid"
                               Background="{ThemeResource ShellPaneDividerBrush}" />
+
+                        <Border x:Name="ThreadOverviewPanel"
+                                Grid.Row="1"
+                                AutomationProperties.AutomationId="shell-thread-overview"
+                                Background="{ThemeResource ShellPageBackgroundBrush}"
+                                Visibility="Collapsed">
+                            <Grid RowDefinitions="Auto,*">
+                                <Grid Padding="18,16,18,12"
+                                      ColumnDefinitions="*,Auto"
+                                      ColumnSpacing="12">
+                                    <StackPanel Spacing="2">
+                                        <TextBlock Text="Thread Overview"
+                                                   Style="{StaticResource ShellSectionTextStyle}" />
+                                        <TextBlock x:Name="ThreadOverviewMetaText"
+                                                   Style="{StaticResource ShellHintTextStyle}"
+                                                   Text="Active project thread stack" />
+                                    </StackPanel>
+
+                                    <Button x:Name="CloseOverviewButton"
+                                            Grid.Column="1"
+                                            AutomationProperties.AutomationId="shell-close-overview"
+                                            Style="{StaticResource ShellSubItemButtonStyle}"
+                                            Click="OnCloseOverviewClicked"
+                                            Content="Back to panes" />
+                                </Grid>
+
+                                <ScrollViewer Grid.Row="1"
+                                              VerticalScrollBarVisibility="Auto"
+                                              VerticalScrollMode="Auto">
+                                    <StackPanel x:Name="ThreadOverviewListPanel"
+                                                Margin="18,0,18,18"
+                                                Spacing="10" />
+                                </ScrollViewer>
+                            </Grid>
+                        </Border>
                     </Grid>
 
                     <Border Grid.Column="1"
@@ -227,20 +270,37 @@
                                                Style="{StaticResource ShellHintTextStyle}" />
                                 </StackPanel>
 
-                                <Button x:Name="RefreshDiffButton"
-                                        Grid.Column="1"
-                                        AutomationProperties.AutomationId="shell-diff-refresh"
-                                        Click="OnRefreshDiffClicked"
-                                        Style="{StaticResource ShellSubItemButtonStyle}">
-                                    <Grid ColumnDefinitions="16,*"
-                                          ColumnSpacing="8">
-                                        <FontIcon FontSize="11"
-                                                  Glyph="&#xE72C;" />
-                                        <TextBlock Grid.Column="1"
-                                                   FontSize="12"
-                                                   Text="Refresh" />
-                                    </Grid>
-                                </Button>
+                                <StackPanel Grid.Column="1"
+                                            Orientation="Horizontal"
+                                            Spacing="6">
+                                    <Button x:Name="CaptureCheckpointButton"
+                                            AutomationProperties.AutomationId="shell-diff-capture-checkpoint"
+                                            Click="OnCaptureCheckpointClicked"
+                                            Style="{StaticResource ShellSubItemButtonStyle}">
+                                        <Grid ColumnDefinitions="16,*"
+                                              ColumnSpacing="8">
+                                            <FontIcon FontSize="11"
+                                                      Glyph="&#xE823;" />
+                                            <TextBlock Grid.Column="1"
+                                                       FontSize="12"
+                                                       Text="Checkpoint" />
+                                        </Grid>
+                                    </Button>
+
+                                    <Button x:Name="RefreshDiffButton"
+                                            AutomationProperties.AutomationId="shell-diff-refresh"
+                                            Click="OnRefreshDiffClicked"
+                                            Style="{StaticResource ShellSubItemButtonStyle}">
+                                        <Grid ColumnDefinitions="16,*"
+                                              ColumnSpacing="8">
+                                            <FontIcon FontSize="11"
+                                                      Glyph="&#xE72C;" />
+                                            <TextBlock Grid.Column="1"
+                                                       FontSize="12"
+                                                       Text="Refresh" />
+                                        </Grid>
+                                    </Button>
+                                </StackPanel>
                             </Grid>
 
                             <ScrollViewer Grid.Row="1"
@@ -248,6 +308,21 @@
                                           HorizontalScrollBarVisibility="Disabled">
                                 <StackPanel Padding="12,12,12,14"
                                             Spacing="14">
+                                    <StackPanel Spacing="6">
+                                        <TextBlock Text="REVIEW"
+                                                   Style="{StaticResource ShellInspectorLabelTextStyle}" />
+                                        <ComboBox x:Name="DiffReviewSourceComboBox"
+                                                  AutomationProperties.AutomationId="shell-diff-review-source"
+                                                  SelectionChanged="OnDiffReviewSourceSelectionChanged"
+                                                  HorizontalAlignment="Stretch"
+                                                  PlaceholderText="Live working tree" />
+                                        <TextBlock x:Name="DiffReviewSourceMetaText"
+                                                   AutomationProperties.AutomationId="shell-diff-review-meta"
+                                                   Style="{StaticResource ShellHintTextStyle}"
+                                                   Text="Live working tree"
+                                                   TextWrapping="WrapWholeWords" />
+                                    </StackPanel>
+
                                     <StackPanel Spacing="4">
                                         <TextBlock Text="BRANCH"
                                                    Style="{StaticResource ShellInspectorLabelTextStyle}" />

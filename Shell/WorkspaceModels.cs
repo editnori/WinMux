@@ -1,5 +1,6 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using SelfContainedDeployment.Git;
 using SelfContainedDeployment.Panes;
 using SelfContainedDeployment.Terminal;
 using System;
@@ -368,6 +369,31 @@ namespace SelfContainedDeployment.Shell
         Quad = 4,
     }
 
+    public enum DiffReviewSourceKind
+    {
+        Live = 1,
+        Baseline = 2,
+        Checkpoint = 3,
+    }
+
+    internal sealed class WorkspaceDiffCheckpoint
+    {
+        public WorkspaceDiffCheckpoint(string name, string id = null)
+        {
+            Id = string.IsNullOrWhiteSpace(id) ? Guid.NewGuid().ToString("N") : id;
+            Name = string.IsNullOrWhiteSpace(name) ? "Checkpoint" : name.Trim();
+            CapturedAt = DateTimeOffset.UtcNow;
+        }
+
+        public string Id { get; }
+
+        public string Name { get; set; }
+
+        public DateTimeOffset CapturedAt { get; set; }
+
+        public GitThreadSnapshot Snapshot { get; set; }
+    }
+
     public sealed class WorkspaceThread
     {
         public WorkspaceThread(WorkspaceProject project, string name, string id = null)
@@ -395,6 +421,12 @@ namespace SelfContainedDeployment.Shell
 
         public string SelectedDiffPath { get; set; }
 
+        public DiffReviewSourceKind DiffReviewSource { get; set; } = DiffReviewSourceKind.Live;
+
+        public string SelectedCheckpointId { get; set; }
+
+        internal GitThreadSnapshot BaselineSnapshot { get; set; }
+
         public string SelectedTabId
         {
             get => SelectedPaneId;
@@ -412,6 +444,8 @@ namespace SelfContainedDeployment.Shell
         public double SecondarySplitRatio { get; set; } = 0.5;
 
         public List<WorkspacePaneRecord> Panes { get; } = new();
+
+        internal List<WorkspaceDiffCheckpoint> DiffCheckpoints { get; } = new();
 
         public string PaneSummary => Panes.Count == 1 ? "1 pane" : $"{Panes.Count} panes";
 
