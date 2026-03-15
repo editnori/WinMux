@@ -9,27 +9,32 @@
           AutomationProperties.AutomationId="browser-pane-root"
           Background="{ThemeResource ShellPageBackgroundBrush}">
         <Grid.RowDefinitions>
-            <RowDefinition Height="74" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <Border Grid.Row="0"
+        <Border x:Name="BrowserChromeBorder"
+                Grid.Row="0"
                 Canvas.ZIndex="2"
                 Background="{ThemeResource ShellSurfaceBackgroundBrush}"
                 BorderBrush="{ThemeResource ShellBorderBrush}"
                 BorderThickness="0,0,0,1"
                 Padding="8,6,8,5">
-            <Grid RowDefinitions="Auto,Auto"
+            <Grid x:Name="BrowserChromeGrid"
+                  RowDefinitions="Auto,Auto"
                   RowSpacing="6">
                 <Grid ColumnDefinitions="*,Auto"
                       ColumnSpacing="6">
-                    <ScrollViewer HorizontalScrollBarVisibility="Auto"
+                    <ScrollViewer x:Name="BrowserTabStripScroller"
+                                  HorizontalScrollBarVisibility="Auto"
                                   HorizontalScrollMode="Enabled"
                                   VerticalScrollBarVisibility="Disabled"
-                                  VerticalScrollMode="Disabled">
+                                  VerticalScrollMode="Disabled"
+                                  VerticalAlignment="Center">
                         <StackPanel x:Name="BrowserTabStripPanel"
                                     AutomationProperties.AutomationId="browser-pane-tab-strip"
                                     Orientation="Horizontal"
+                                    VerticalAlignment="Center"
                                     Spacing="4" />
                     </ScrollViewer>
 

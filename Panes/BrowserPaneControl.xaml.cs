@@ -9,6 +9,7 @@ using SelfContainedDeployment.Browser;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Globalization;
 using System.Net;
 using System.Runtime.InteropServices.WindowsRuntime;
 using System.Security.Cryptography;
@@ -26,6 +27,9 @@ namespace SelfContainedDeployment.Panes
         private const string SharedBrowserProfileFolderName = "browser-profile-shared";
         private const string LegacyBrowserProfilesFolderName = "browser-profiles";
         private const string ProfileSeedMetadataFileName = "profile-source.json";
+        private const double CompactPaneWidthThreshold = 560;
+        private const double CompactPaneHeightThreshold = 320;
+        private const double CompactBrowserZoomFloor = 0.72;
 
         private static readonly string[] PreferredChromiumExtensionIds =
         {
@@ -190,6 +194,7 @@ namespace SelfContainedDeployment.Panes
             AddressBox.GotFocus += OnAddressBoxGotFocus;
             RefreshBrowserTabStrip();
             UpdateNavigationButtons();
+            UpdateAdaptiveChromeLayout();
         }
 
         public event EventHandler<string> TitleChanged;
@@ -274,9 +279,11 @@ namespace SelfContainedDeployment.Panes
 
         public void RequestLayout()
         {
+            UpdateAdaptiveChromeLayout();
             BrowserView.InvalidateMeasure();
             BrowserView.InvalidateArrange();
             BrowserView.UpdateLayout();
+            UpdateAdaptiveZoomFactor();
             _ = NotifyBrowserResizedAsync();
         }
 
@@ -711,11 +718,14 @@ namespace SelfContainedDeployment.Panes
             }
 
             BrowserTabStripPanel.Children.Clear();
+            double targetTitleWidth = ResolveBrowserTabTitleWidth();
+            bool compact = IsCompactPaneLayout();
             foreach (BrowserTabSession tab in _browserTabs)
             {
                 Grid tabLayout = new()
                 {
                     ColumnSpacing = 4,
+                    Width = targetTitleWidth + (compact ? 22 : 26),
                 };
                 tabLayout.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
                 tabLayout.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -724,8 +734,9 @@ namespace SelfContainedDeployment.Panes
                 {
                     Style = (Style)Application.Current.Resources["ShellBrowserTabButtonStyle"],
                     Tag = tab.Id,
-                    MinWidth = 120,
-                    MaxWidth = 220,
+                    Width = targetTitleWidth,
+                    MinWidth = compact ? 72 : 96,
+                    MaxWidth = compact ? 152 : 192,
                     HorizontalAlignment = HorizontalAlignment.Stretch,
                 };
                 AutomationProperties.SetAutomationId(tabButton, $"browser-pane-tab-{tab.Id}");
@@ -746,8 +757,8 @@ namespace SelfContainedDeployment.Panes
                 {
                     Style = (Style)Application.Current.Resources["ShellChromeButtonStyle"],
                     Tag = tab.Id,
-                    Width = 22,
-                    Height = 22,
+                    Width = compact ? 20 : 22,
+                    Height = compact ? 20 : 22,
                     HorizontalAlignment = HorizontalAlignment.Right,
                     Content = new FontIcon
                     {
@@ -761,6 +772,93 @@ namespace SelfContainedDeployment.Panes
                 tabLayout.Children.Add(closeButton);
                 BrowserTabStripPanel.Children.Add(tabLayout);
             }
+        }
+
+        private bool IsCompactPaneLayout()
+        {
+            double width = BrowserRoot?.ActualWidth > 0 ? BrowserRoot.ActualWidth : ActualWidth;
+            double height = BrowserRoot?.ActualHeight > 0 ? BrowserRoot.ActualHeight : ActualHeight;
+            return width > 0 && height > 0 &&
+                (width < CompactPaneWidthThreshold || height < CompactPaneHeightThreshold);
+        }
+
+        private double ResolveBrowserTabTitleWidth()
+        {
+            double width = BrowserRoot?.ActualWidth > 0 ? BrowserRoot.ActualWidth : ActualWidth;
+            if (width <= 0)
+            {
+                return 132;
+            }
+
+            bool compact = IsCompactPaneLayout();
+            double usableWidth = Math.Max(220, width - 64);
+            int divisor = Math.Max(1, Math.Min(_browserTabs.Count, compact ? 5 : 4));
+            double slotWidth = usableWidth / divisor;
+            return Math.Clamp(slotWidth - (compact ? 28 : 34), compact ? 72 : 96, compact ? 152 : 192);
+        }
+
+        private void UpdateAdaptiveChromeLayout()
+        {
+            if (BrowserChromeBorder is null || BrowserChromeGrid is null || AddressBox is null)
+            {
+                return;
+            }
+
+            bool compact = IsCompactPaneLayout();
+            BrowserChromeBorder.Padding = compact ? new Thickness(6, 4, 6, 4) : new Thickness(8, 6, 8, 5);
+            BrowserChromeGrid.RowSpacing = compact ? 4 : 6;
+            BrowserTabStripPanel.Spacing = compact ? 2 : 4;
+            BrowserTabStripScroller.VerticalAlignment = VerticalAlignment.Center;
+
+            double chromeButtonSize = compact ? 28 : 30;
+            AddressBox.Height = chromeButtonSize;
+            AddressBox.MinWidth = compact ? 120 : 180;
+
+            ApplyChromeButtonMetrics(AddBrowserTabButton, compact ? 22 : 24);
+            ApplyChromeButtonMetrics(BrowserBackButton, chromeButtonSize);
+            ApplyChromeButtonMetrics(BrowserForwardButton, chromeButtonSize);
+            ApplyChromeButtonMetrics(BrowserHomeButton, chromeButtonSize);
+            ApplyChromeButtonMetrics(BrowserReloadButton, chromeButtonSize);
+            ApplyChromeButtonMetrics(BrowserPagesButton, chromeButtonSize);
+            ApplyChromeButtonMetrics(BrowserExtensionsButton, chromeButtonSize);
+            ApplyChromeButtonMetrics(BrowserNewPaneButton, chromeButtonSize);
+
+            RefreshBrowserTabStrip();
+        }
+
+        private void ApplyChromeButtonMetrics(Button button, double size)
+        {
+            if (button is null)
+            {
+                return;
+            }
+
+            button.Width = size;
+            button.Height = size;
+        }
+
+        private void UpdateAdaptiveZoomFactor()
+        {
+            if (!_initialized || BrowserView?.CoreWebView2 is null)
+            {
+                return;
+            }
+
+            double width = BrowserRoot?.ActualWidth > 0 ? BrowserRoot.ActualWidth : ActualWidth;
+            double height = BrowserRoot?.ActualHeight > 0 ? BrowserRoot.ActualHeight : ActualHeight;
+            if (width <= 0 || height <= 0)
+            {
+                return;
+            }
+
+            double widthScale = Math.Min(1.0, width / 640d);
+            double heightScale = Math.Min(1.0, height / 420d);
+            double zoomFactor = Math.Min(widthScale, heightScale);
+            zoomFactor = zoomFactor >= 0.96 ? 1.0 : Math.Clamp(zoomFactor, CompactBrowserZoomFloor, 1.0);
+
+            string zoomText = zoomFactor.ToString("0.###", CultureInfo.InvariantCulture);
+            _ = BrowserView.CoreWebView2.ExecuteScriptAsync(
+                $"(() => {{ document.documentElement.style.zoom = '{zoomText}'; if (document.body) document.body.style.zoom = '{zoomText}'; }})()").AsTask();
         }
 
         private static void ApplyBrowserTabButtonState(Button button, bool active)
@@ -1081,6 +1179,8 @@ namespace SelfContainedDeployment.Panes
 
         private void OnBrowserPaneSizeChanged(object sender, SizeChangedEventArgs e)
         {
+            UpdateAdaptiveChromeLayout();
+            UpdateAdaptiveZoomFactor();
             _ = NotifyBrowserResizedAsync();
         }
 

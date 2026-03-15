@@ -695,7 +695,7 @@ namespace SelfContainedDeployment
 
                         if (!string.IsNullOrWhiteSpace(request.Value))
                         {
-                            AddOrSelectDiffPane(_activeProject, _activeThread, request.Value, null);
+                            AddOrSelectDiffPane(_activeProject, _activeThread, request.Value, null, ResolveDisplayedGitSnapshot());
                         }
 
                         ShowTerminalShell();
@@ -1951,7 +1951,7 @@ namespace SelfContainedDeployment
             return pane;
         }
 
-        private DiffPaneRecord AddOrSelectDiffPane(WorkspaceProject project, WorkspaceThread thread, string diffPath, string diffText)
+        private DiffPaneRecord AddOrSelectDiffPane(WorkspaceProject project, WorkspaceThread thread, string diffPath, string diffText, GitThreadSnapshot sourceSnapshot = null)
         {
             project ??= _activeProject ?? GetOrCreateProject(Environment.CurrentDirectory);
             thread = ResolveTargetThreadForNewPane(project, thread, WorkspacePaneKind.Diff);
@@ -1962,19 +1962,21 @@ namespace SelfContainedDeployment
             if (pane is null)
             {
                 pane = CreateDiffPane(project, thread, diffPath, diffText, BuildDiffPaneTitle(diffPath));
+                if (sourceSnapshot is not null)
+                {
+                    UpdateDiffPane(pane, diffPath, diffText, sourceSnapshot);
+                }
                 thread.Panes.Add(pane);
                 PromoteLayoutForPaneCount(thread);
                 created = true;
             }
             else
             {
-                UpdateDiffPane(pane, diffPath, diffText);
+                UpdateDiffPane(pane, diffPath, diffText, sourceSnapshot);
             }
 
             thread.SelectedPaneId = pane.Id;
             project.SelectedThreadId = thread.Id;
-
-            thread.LayoutPreset = WorkspaceLayoutPreset.Dual;
 
             if (thread == _activeThread)
             {
@@ -2116,7 +2118,7 @@ namespace SelfContainedDeployment
             return pane;
         }
 
-        private void UpdateDiffPane(DiffPaneRecord pane, string diffPath, string diffText)
+        private void UpdateDiffPane(DiffPaneRecord pane, string diffPath, string diffText, GitThreadSnapshot sourceSnapshot = null)
         {
             if (pane is null)
             {
@@ -2129,7 +2131,15 @@ namespace SelfContainedDeployment
                 pane.Title = BuildDiffPaneTitle(diffPath);
             }
 
-            pane.DiffPane.SetDiff(diffPath, diffText);
+            if (sourceSnapshot?.ChangedFiles?.Count > 1)
+            {
+                pane.DiffPane.SetDiffSet(sourceSnapshot.ChangedFiles, diffPath);
+            }
+            else
+            {
+                pane.DiffPane.SetDiff(diffPath, diffText);
+            }
+
             if (ReferenceEquals(FindThreadForPane(pane.Id), _activeThread))
             {
                 UpdateTabViewItem(pane);
@@ -3798,6 +3808,7 @@ namespace SelfContainedDeployment
                     AddVerticalSplitter(0, 1, rowSpan: 3);
                     AddPaneCell(visiblePanes[1], 0, 2);
                     AddHorizontalSplitter(1, 2);
+                    AddCenterSplitter(1, 1);
                     AddPaneCell(visiblePanes[2], 2, 2);
                     break;
                 default:
@@ -3807,6 +3818,7 @@ namespace SelfContainedDeployment
                     AddVerticalSplitter(0, 1, rowSpan: 3);
                     AddPaneCell(visiblePanes[1], 0, 2);
                     AddHorizontalSplitter(1, 0, columnSpan: 3);
+                    AddCenterSplitter(1, 1);
                     AddPaneCell(visiblePanes[2], 2, 0);
                     AddPaneCell(visiblePanes[3], 2, 2);
                     break;
@@ -3908,6 +3920,34 @@ namespace SelfContainedDeployment
             PaneWorkspaceGrid.Children.Add(splitter);
         }
 
+        private void AddCenterSplitter(int row, int column)
+        {
+            Border splitter = new()
+            {
+                Width = 14,
+                Height = 14,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+                Background = AppBrush(PaneWorkspaceGrid, "ShellPaneDividerBrush"),
+                BorderBrush = AppBrush(PaneWorkspaceGrid, "ShellBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(2),
+                Margin = new Thickness(-5),
+                Tag = "both",
+            };
+            AutomationProperties.SetAutomationId(splitter, $"shell-pane-splitter-both-{row}-{column}");
+            ToolTipService.SetToolTip(splitter, "Drag to resize both axes. Double-click to fit panes.");
+            splitter.PointerPressed += OnPaneSplitterPointerPressed;
+            splitter.PointerMoved += OnPaneSplitterPointerMoved;
+            splitter.PointerReleased += OnPaneSplitterPointerReleased;
+            splitter.PointerCanceled += OnPaneSplitterPointerCanceled;
+            splitter.DoubleTapped += OnPaneSplitterDoubleTapped;
+            Grid.SetRow(splitter, row);
+            Grid.SetColumn(splitter, column);
+            Canvas.SetZIndex(splitter, 3);
+            PaneWorkspaceGrid.Children.Add(splitter);
+        }
+
         private void OnPaneSplitterPointerPressed(object sender, PointerRoutedEventArgs e)
         {
             if (_activeThread is null || sender is not Border splitter || splitter.Tag is not string direction)
@@ -3940,6 +3980,13 @@ namespace SelfContainedDeployment
             if (string.Equals(_activeSplitterDirection, "vertical", StringComparison.Ordinal))
             {
                 UpdatePaneSplitRatiosFromPointer(point, adjustPrimary: true, adjustSecondary: resizeBothAxes);
+                e.Handled = true;
+                return;
+            }
+
+            if (string.Equals(_activeSplitterDirection, "both", StringComparison.Ordinal))
+            {
+                UpdatePaneSplitRatiosFromPointer(point, adjustPrimary: true, adjustSecondary: true);
                 e.Handled = true;
                 return;
             }
@@ -4464,7 +4511,11 @@ namespace SelfContainedDeployment
             {
                 bool hasSelectedDiff = !string.IsNullOrWhiteSpace(displayedSnapshot.SelectedPath) &&
                     displayedSnapshot.ChangedFiles.Any(file => string.Equals(file.Path, displayedSnapshot.SelectedPath, StringComparison.Ordinal));
-                UpdateDiffPane(diffPane, hasSelectedDiff ? displayedSnapshot.SelectedPath : null, hasSelectedDiff ? displayedSnapshot.SelectedDiff : null);
+                UpdateDiffPane(
+                    diffPane,
+                    hasSelectedDiff ? displayedSnapshot.SelectedPath : null,
+                    hasSelectedDiff ? displayedSnapshot.SelectedDiff : null,
+                    displayedSnapshot.ChangedFiles.Count > 0 ? displayedSnapshot : null);
             }
         }
 
@@ -4509,13 +4560,13 @@ namespace SelfContainedDeployment
             {
                 _activeThread.SelectedDiffPath = displayedSnapshot.SelectedPath;
                 UpdateDiffFileSelection();
-                AddOrSelectDiffPane(_activeProject, _activeThread, displayedSnapshot.SelectedPath, null);
+                AddOrSelectDiffPane(_activeProject, _activeThread, displayedSnapshot.SelectedPath, null, displayedSnapshot);
                 QueueActiveThreadGitRefresh(displayedSnapshot.SelectedPath);
             }
             else
             {
                 UpdateDiffFileSelection();
-                AddOrSelectDiffPane(_activeProject, _activeThread, displayedSnapshot.SelectedPath, displayedSnapshot.SelectedDiff);
+                AddOrSelectDiffPane(_activeProject, _activeThread, displayedSnapshot.SelectedPath, displayedSnapshot.SelectedDiff, displayedSnapshot);
                 QueueSessionSave();
             }
         }

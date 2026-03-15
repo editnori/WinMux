@@ -3,10 +3,12 @@ using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using SelfContainedDeployment.Git;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
+using Windows.Foundation;
 
 namespace SelfContainedDeployment.Panes
 {
@@ -43,8 +45,10 @@ namespace SelfContainedDeployment.Panes
         private readonly TextBlock _summaryText;
         private readonly Grid _diffLinesPanel;
         private readonly ScrollViewer _scrollViewer;
+        private readonly Dictionary<string, FrameworkElement> _sectionAnchors = new(StringComparer.Ordinal);
         private string _currentPath;
         private string _currentDiff;
+        private IReadOnlyList<GitChangedFile> _currentFiles = Array.Empty<GitChangedFile>();
 
         public DiffPaneControl()
         {
@@ -146,6 +150,12 @@ namespace SelfContainedDeployment.Panes
             _pathText.Foreground = ResolveBrush("ShellTextPrimaryBrush");
             _summaryText.Foreground = ResolveBrush("ShellTextTertiaryBrush");
             _scrollViewer.Background = ResolveBrush("ShellSurfaceBackgroundBrush");
+            if (_currentFiles.Count > 1)
+            {
+                RenderDiffSet(_currentFiles, _currentPath);
+                return;
+            }
+
             RenderDiff(_currentDiff);
         }
 
@@ -164,6 +174,7 @@ namespace SelfContainedDeployment.Panes
 
         public void SetDiff(string path, string diffText)
         {
+            _currentFiles = Array.Empty<GitChangedFile>();
             _currentPath = path ?? string.Empty;
             _currentDiff = diffText ?? string.Empty;
 
@@ -173,6 +184,38 @@ namespace SelfContainedDeployment.Panes
                 : "Patch view";
 
             RenderDiff(diffText);
+        }
+
+        internal void SetDiffSet(IReadOnlyList<GitChangedFile> files, string selectedPath)
+        {
+            List<GitChangedFile> diffFiles = files?
+                .Where(file => file is not null && !string.IsNullOrWhiteSpace(file.Path))
+                .Select(file => new GitChangedFile
+                {
+                    Status = file.Status,
+                    Path = file.Path,
+                    AddedLines = file.AddedLines,
+                    RemovedLines = file.RemovedLines,
+                    DiffText = file.DiffText,
+                })
+                .ToList()
+                ?? new List<GitChangedFile>();
+
+            if (diffFiles.Count <= 1)
+            {
+                GitChangedFile singleFile = diffFiles.FirstOrDefault();
+                SetDiff(singleFile?.Path ?? selectedPath, singleFile?.DiffText);
+                return;
+            }
+
+            _currentFiles = diffFiles;
+            _currentPath = selectedPath ?? string.Empty;
+            _currentDiff = BuildCombinedDiffText(diffFiles);
+            _pathText.Text = string.IsNullOrWhiteSpace(selectedPath)
+                ? "All changed files"
+                : selectedPath.Replace('\\', '/');
+            _summaryText.Text = $"{diffFiles.Count} files · Scroll to review the full patch";
+            RenderDiffSet(diffFiles, selectedPath);
         }
 
         internal DiffPaneRenderSnapshot GetRenderSnapshot(int maxLines = 0)
@@ -210,6 +253,7 @@ namespace SelfContainedDeployment.Panes
 
         private void RenderDiff(string diffText)
         {
+            _sectionAnchors.Clear();
             _diffLinesPanel.Children.Clear();
             _diffLinesPanel.RowDefinitions.Clear();
             if (string.IsNullOrWhiteSpace(diffText))
@@ -233,11 +277,47 @@ namespace SelfContainedDeployment.Panes
             }
 
             string[] lines = diffText.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+            RenderDiffLines(lines, 0);
+            UpdateDiffContentWidth();
+        }
+
+        private void RenderDiffSet(IReadOnlyList<GitChangedFile> files, string selectedPath)
+        {
+            _sectionAnchors.Clear();
+            _diffLinesPanel.Children.Clear();
+            _diffLinesPanel.RowDefinitions.Clear();
+
+            if (files is null || files.Count == 0)
+            {
+                RenderDiff(null);
+                return;
+            }
+
+            int rowIndex = 0;
+            foreach (GitChangedFile file in files)
+            {
+                Border sectionHeader = BuildSectionHeader(file, string.Equals(file.Path, selectedPath, StringComparison.Ordinal));
+                _sectionAnchors[file.Path] = sectionHeader;
+                AddDiffRow(sectionHeader, rowIndex++);
+
+                string[] lines = string.IsNullOrWhiteSpace(file.DiffText)
+                    ? new[] { "Patch unavailable for this file." }
+                    : file.DiffText.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+                rowIndex = RenderDiffLines(lines, rowIndex);
+            }
+
+            UpdateDiffContentWidth();
+            ScrollToPath(selectedPath);
+        }
+
+        private int RenderDiffLines(IReadOnlyList<string> lines, int startingRow)
+        {
             int oldLineNumber = 0;
             int newLineNumber = 0;
             bool hasActiveHunk = false;
+            int nextRow = startingRow;
 
-            for (int index = 0; index < lines.Length; index++)
+            for (int index = 0; index < lines.Count; index++)
             {
                 string line = lines[index];
                 string kind = ClassifyDiffLine(line);
@@ -272,12 +352,93 @@ namespace SelfContainedDeployment.Panes
                 }
 
                 FrameworkElement row = BuildDiffLineRow(leftNumber, rightNumber, line, kind);
-                _diffLinesPanel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-                Grid.SetRow(row, _diffLinesPanel.RowDefinitions.Count - 1);
-                _diffLinesPanel.Children.Add(row);
+                AddDiffRow(row, nextRow++);
             }
 
-            UpdateDiffContentWidth();
+            return nextRow;
+        }
+
+        private void AddDiffRow(FrameworkElement row, int rowIndex)
+        {
+            _diffLinesPanel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            Grid.SetRow(row, rowIndex);
+            _diffLinesPanel.Children.Add(row);
+        }
+
+        private Border BuildSectionHeader(GitChangedFile file, bool selected)
+        {
+            Border header = new()
+            {
+                Background = ResolveBrush(selected ? "ShellMutedSurfaceBrush" : "ShellSurfaceBackgroundBrush"),
+                BorderBrush = ResolveBrush(selected ? "ShellPaneActiveBorderBrush" : "ShellBorderBrush"),
+                BorderThickness = new Thickness(0, 1, 0, 0),
+                Padding = new Thickness(8, 8, 8, 6),
+                Margin = new Thickness(0, 10, 0, 2),
+            };
+
+            Grid layout = new()
+            {
+                ColumnDefinitions =
+                {
+                    new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) },
+                    new ColumnDefinition { Width = GridLength.Auto },
+                },
+                ColumnSpacing = 10,
+            };
+
+            TextBlock title = new()
+            {
+                Text = file.DisplayName,
+                FontSize = 12,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = ResolveBrush("ShellTextPrimaryBrush"),
+                TextTrimming = TextTrimming.CharacterEllipsis,
+            };
+            layout.Children.Add(title);
+
+            TextBlock stats = new()
+            {
+                Text = $"+{file.AddedLines}  -{file.RemovedLines}",
+                FontSize = 11,
+                Foreground = ResolveBrush("ShellTextTertiaryBrush"),
+                HorizontalTextAlignment = TextAlignment.Right,
+            };
+            Grid.SetColumn(stats, 1);
+            layout.Children.Add(stats);
+
+            header.Child = layout;
+            return header;
+        }
+
+        private void ScrollToPath(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path) || !_sectionAnchors.TryGetValue(path, out FrameworkElement anchor))
+            {
+                return;
+            }
+
+            DispatcherQueue?.TryEnqueue(() =>
+            {
+                _scrollViewer.UpdateLayout();
+                anchor.UpdateLayout();
+                Point point = anchor.TransformToVisual(_diffLinesPanel).TransformPoint(new Point(0, 0));
+                double offset = Math.Max(0, point.Y - 12);
+                _scrollViewer.ChangeView(null, offset, null, true);
+            });
+        }
+
+        private static string BuildCombinedDiffText(IReadOnlyList<GitChangedFile> files)
+        {
+            if (files is null || files.Count == 0)
+            {
+                return string.Empty;
+            }
+
+            return string.Join(
+                Environment.NewLine + Environment.NewLine,
+                files
+                    .Where(file => !string.IsNullOrWhiteSpace(file?.DiffText))
+                    .Select(file => file.DiffText.TrimEnd()));
         }
 
         private static string ResolveDiffLineBrushKey(string kind)
