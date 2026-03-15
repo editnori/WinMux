@@ -163,6 +163,21 @@ namespace SelfContainedDeployment.Panes
             public string Username { get; set; }
 
             public string Password { get; set; }
+
+            public string CaptureKind { get; set; }
+        }
+
+        private sealed class BrowserAutofillResult
+        {
+            public bool FilledUsername { get; set; }
+
+            public bool FilledPassword { get; set; }
+
+            public bool HasUsernameField { get; set; }
+
+            public bool HasPasswordField { get; set; }
+
+            public string BlockedReason { get; set; }
         }
 
         public BrowserPaneControl()
@@ -1212,7 +1227,9 @@ namespace SelfContainedDeployment.Panes
                     message.Username,
                     message.Password,
                     name: ProjectName,
-                    note: "Captured from WinMux browser");
+                    note: string.IsNullOrWhiteSpace(message.CaptureKind)
+                        ? "Captured from WinMux browser"
+                        : $"Captured from WinMux browser ({message.CaptureKind})");
 
                 if (!result.Ok)
                 {
@@ -1283,8 +1300,10 @@ namespace SelfContainedDeployment.Panes
 
             BrowserCredentialMatch match = BrowserCredentialStore.ResolveForUri(_currentUri);
             _credentialAutofillStatus = match is null
-                ? $"Imported WinMux credentials available ({BrowserCredentialStore.GetCredentialCount()} entries), but none match this page."
-                : $"Imported WinMux credentials matched {match.Host}.";
+                ? $"Imported WinMux credentials available ({BrowserCredentialStore.GetCredentialCount()} entries), but none exactly match this page."
+                : string.Equals(match.MatchScope, "origin", StringComparison.OrdinalIgnoreCase)
+                    ? $"Imported WinMux credentials matched this page origin ({match.Origin})."
+                    : $"Imported WinMux credentials matched this host ({match.Host}).";
         }
 
         private async Task TryAutofillMatchingCredentialsAsync()
@@ -1304,6 +1323,7 @@ namespace SelfContainedDeployment.Panes
             BrowserCredentialMatch match = BrowserCredentialStore.ResolveForUri(_currentUri);
             if (match is null)
             {
+                UpdateCredentialAutofillStatus();
                 return;
             }
 
@@ -1366,13 +1386,29 @@ namespace SelfContainedDeployment.Panes
   ];
   const passwordSelectors = [
     'input[type="password"]',
-    'input[autocomplete="current-password"]',
-    'input[autocomplete="new-password"]'
+    'input[autocomplete="current-password"]'
   ];
 
   const apply = () => {
-    const usernameField = findCandidate(usernameSelectors);
-    const passwordField = findCandidate(passwordSelectors);
+    const passwordCandidates = Array.from(document.querySelectorAll('input[type="password"], input[autocomplete="current-password"], input[autocomplete="new-password"]'))
+      .filter(candidate => isVisible(candidate) && !candidate.disabled && !candidate.readOnly);
+    const hasNewPasswordField = passwordCandidates.some(candidate => (candidate.autocomplete || '').toLowerCase() === 'new-password');
+    const currentPasswordField = passwordCandidates.find(candidate => (candidate.autocomplete || '').toLowerCase() === 'current-password') || null;
+    if (hasNewPasswordField || (passwordCandidates.length > 1 && !currentPasswordField)) {
+      return {
+        matchedHost,
+        filledUsername: false,
+        filledPassword: false,
+        hasUsernameField: false,
+        hasPasswordField: passwordCandidates.length > 0,
+        blockedReason: hasNewPasswordField ? 'new-password-form' : 'multi-password-form'
+      };
+    }
+
+    const passwordField = currentPasswordField || findCandidate(passwordSelectors);
+    const scope = passwordField?.form || document;
+    const usernameField = Array.from(scope.querySelectorAll(usernameSelectors.join(',')))
+      .find(candidate => isVisible(candidate) && !candidate.disabled && !candidate.readOnly) || null;
     const filledUsername = setValue(usernameField, usernameValue);
     const filledPassword = setValue(passwordField, passwordValue);
     return {
@@ -1380,7 +1416,8 @@ namespace SelfContainedDeployment.Panes
       filledUsername,
       filledPassword,
       hasUsernameField: !!usernameField,
-      hasPasswordField: !!passwordField
+      hasPasswordField: !!passwordField,
+      blockedReason: null
     };
   };
 
@@ -1389,9 +1426,10 @@ namespace SelfContainedDeployment.Panes
   const timer = window.setInterval(() => {
     attempts += 1;
     const result = apply();
-    if ((result.filledUsername || !result.hasUsernameField) &&
+    if (result.blockedReason ||
+        ((result.filledUsername || !result.hasUsernameField) &&
         (result.filledPassword || !result.hasPasswordField || !passwordValue) ||
-        attempts >= 20) {
+        attempts >= 20)) {
       window.clearInterval(timer);
     }
   }, 500);
@@ -1403,13 +1441,32 @@ namespace SelfContainedDeployment.Panes
             try
             {
                 string result = await BrowserView.CoreWebView2.ExecuteScriptAsync(script).AsTask().ConfigureAwait(true);
-                _credentialAutofillStatus = string.IsNullOrWhiteSpace(match.Username)
-                    ? $"Imported WinMux credentials autofilled for {match.Host}."
-                    : $"Imported WinMux credentials autofilled using {match.Username}.";
+                BrowserAutofillResult payload = JsonSerializer.Deserialize<BrowserAutofillResult>(result, new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true,
+                });
+                if (!string.IsNullOrWhiteSpace(payload?.BlockedReason))
+                {
+                    _credentialAutofillStatus = payload.BlockedReason switch
+                    {
+                        "new-password-form" => "WinMux blocked autofill on a sign-up or password-reset form.",
+                        "multi-password-form" => "WinMux blocked autofill on a multi-password form.",
+                        _ => "WinMux blocked autofill on an unsafe form.",
+                    };
+                }
+                else
+                {
+                    _credentialAutofillStatus = string.IsNullOrWhiteSpace(match.Username)
+                        ? $"Imported WinMux credentials autofilled for {match.Host}."
+                        : $"Imported WinMux credentials autofilled using {match.Username}.";
+                }
+
                 LogBrowserEvent("credentials.autofill_attempted", $"Attempted WinMux credential autofill for {match.Host}", new Dictionary<string, string>
                 {
                     ["credentialId"] = match.Id ?? string.Empty,
                     ["host"] = match.Host ?? string.Empty,
+                    ["origin"] = match.Origin ?? string.Empty,
+                    ["matchScope"] = match.MatchScope ?? string.Empty,
                     ["hasUsername"] = (!string.IsNullOrWhiteSpace(match.Username)).ToString(),
                     ["result"] = result ?? string.Empty,
                 });
@@ -1449,7 +1506,17 @@ namespace SelfContainedDeployment.Panes
 
   const gather = (root) => {
     const scope = root instanceof Element ? root : document;
-    const passwordField = scope.querySelector('input[type="password"]');
+    const passwordFields = Array.from(scope.querySelectorAll('input[type="password"]'))
+      .filter(candidate => visible(candidate) && !candidate.disabled && !candidate.readOnly);
+    if (passwordFields.length === 0) return null;
+
+    const newPasswordFields = passwordFields.filter(candidate => (candidate.autocomplete || '').toLowerCase() === 'new-password');
+    const currentPasswordField = passwordFields.find(candidate => (candidate.autocomplete || '').toLowerCase() === 'current-password') || null;
+    if (newPasswordFields.length > 0 || (passwordFields.length > 1 && !currentPasswordField)) {
+      return null;
+    }
+
+    const passwordField = currentPasswordField || passwordFields[0];
     if (!passwordField || !passwordField.value) return null;
 
     const usernameField = scope.querySelector('input[type="email"], input[autocomplete="username"], input[name*="user" i], input[name*="email" i], input[id*="user" i], input[id*="email" i], input[type="text"]');
@@ -1457,7 +1524,8 @@ namespace SelfContainedDeployment.Panes
       type: 'credentialCapture',
       url: location.href,
       username: usernameField && visible(usernameField) ? usernameField.value : '',
-      password: passwordField.value
+      password: passwordField.value,
+      captureKind: currentPasswordField ? 'current-password' : 'single-password'
     };
   };
 

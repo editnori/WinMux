@@ -39,7 +39,9 @@ This is the current feature inventory for the native WinMux shell as it exists i
 - Preferred extension import path
 - WinMux credential vault with Windows-protected storage
 - Google Passwords CSV import with merge behavior
+- Exact-origin and exact-host credential matching instead of broad subdomain suffix matching
 - Manual autofill and context-menu autofill flows
+- Signup/reset-safe credential capture and autofill blocking for unsafe multi-password forms
 
 ## Git and review
 

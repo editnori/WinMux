@@ -27,6 +27,8 @@ namespace SelfContainedDeployment.Browser
 
         public string Name { get; init; }
 
+        public string Origin { get; init; }
+
         public string Host { get; init; }
 
         public string Url { get; init; }
@@ -36,6 +38,8 @@ namespace SelfContainedDeployment.Browser
         public string Password { get; init; }
 
         public string Note { get; init; }
+
+        public string MatchScope { get; init; }
     }
 
     internal sealed class BrowserCredentialSummary
@@ -43,6 +47,8 @@ namespace SelfContainedDeployment.Browser
         public string Id { get; init; }
 
         public string Name { get; init; }
+
+        public string Origin { get; init; }
 
         public string Host { get; init; }
 
@@ -65,6 +71,8 @@ namespace SelfContainedDeployment.Browser
             public string Name { get; set; }
 
             public string Url { get; set; }
+
+            public string Origin { get; set; }
 
             public string Host { get; set; }
 
@@ -122,7 +130,7 @@ namespace SelfContainedDeployment.Browser
                     foreach (BrowserCredentialEntry entry in entries)
                     {
                         int existingIndex = envelope.Entries.FindIndex(candidate =>
-                            string.Equals(candidate.Host, entry.Host, StringComparison.OrdinalIgnoreCase) &&
+                            string.Equals(candidate.Origin, entry.Origin, StringComparison.OrdinalIgnoreCase) &&
                             string.Equals(candidate.Username ?? string.Empty, entry.Username ?? string.Empty, StringComparison.OrdinalIgnoreCase));
 
                         if (existingIndex >= 0)
@@ -172,42 +180,39 @@ namespace SelfContainedDeployment.Browser
                 return null;
             }
 
+            string origin = NormalizeOrigin(targetUri);
             string host = NormalizeHost(targetUri.Host);
-            BrowserCredentialEntry match = envelope.Entries
+            BrowserCredentialMatch match = envelope.Entries
                 .Where(entry => !string.IsNullOrWhiteSpace(entry.Password))
-                .OrderByDescending(entry => entry.Host.Equals(host, StringComparison.OrdinalIgnoreCase))
-                .ThenByDescending(entry => host.EndsWith("." + entry.Host, StringComparison.OrdinalIgnoreCase) || string.Equals(entry.Host, host, StringComparison.OrdinalIgnoreCase))
-                .ThenByDescending(entry => entry.Url?.Length ?? 0)
-                .FirstOrDefault(entry =>
+                .Select(entry => new
                 {
-                    if (string.IsNullOrWhiteSpace(entry.Host))
-                    {
-                        return false;
-                    }
-
-                    if (string.Equals(entry.Host, host, StringComparison.OrdinalIgnoreCase))
-                    {
-                        return true;
-                    }
-
-                    return host.EndsWith("." + entry.Host, StringComparison.OrdinalIgnoreCase);
-                });
+                    Entry = entry,
+                    MatchScope = ResolveMatchScope(entry, origin, host),
+                })
+                .Where(candidate => candidate.MatchScope is not null)
+                .OrderByDescending(candidate => string.Equals(candidate.MatchScope, "origin", StringComparison.Ordinal))
+                .ThenByDescending(candidate => candidate.Entry.Url?.Length ?? 0)
+                .ThenBy(candidate => candidate.Entry.Username ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+                .Select(candidate => new BrowserCredentialMatch
+                {
+                    Id = candidate.Entry.Id,
+                    Name = candidate.Entry.Name,
+                    Origin = candidate.Entry.Origin,
+                    Host = candidate.Entry.Host,
+                    Url = candidate.Entry.Url,
+                    Username = candidate.Entry.Username,
+                    Password = candidate.Entry.Password,
+                    Note = candidate.Entry.Note,
+                    MatchScope = candidate.MatchScope,
+                })
+                .FirstOrDefault();
 
             if (match is null)
             {
                 return null;
             }
 
-            return new BrowserCredentialMatch
-            {
-                Id = match.Id,
-                Name = match.Name,
-                Host = match.Host,
-                Url = match.Url,
-                Username = match.Username,
-                Password = match.Password,
-                Note = match.Note,
-            };
+            return match;
         }
 
         public static IReadOnlyList<BrowserCredentialMatch> ResolveMatchesForUri(string uri)
@@ -219,24 +224,30 @@ namespace SelfContainedDeployment.Browser
                 return Array.Empty<BrowserCredentialMatch>();
             }
 
+            string origin = NormalizeOrigin(targetUri);
             string host = NormalizeHost(targetUri.Host);
             return LoadEnvelope().Entries
                 .Where(entry => !string.IsNullOrWhiteSpace(entry.Password))
-                .Where(entry =>
-                    !string.IsNullOrWhiteSpace(entry.Host) &&
-                    (string.Equals(entry.Host, host, StringComparison.OrdinalIgnoreCase) ||
-                     host.EndsWith("." + entry.Host, StringComparison.OrdinalIgnoreCase)))
-                .OrderByDescending(entry => string.Equals(entry.Host, host, StringComparison.OrdinalIgnoreCase))
-                .ThenByDescending(entry => entry.Url?.Length ?? 0)
-                .Select(entry => new BrowserCredentialMatch
+                .Select(entry => new
                 {
-                    Id = entry.Id,
-                    Name = entry.Name,
-                    Host = entry.Host,
-                    Url = entry.Url,
-                    Username = entry.Username,
-                    Password = entry.Password,
-                    Note = entry.Note,
+                    Entry = entry,
+                    MatchScope = ResolveMatchScope(entry, origin, host),
+                })
+                .Where(candidate => candidate.MatchScope is not null)
+                .OrderByDescending(candidate => string.Equals(candidate.MatchScope, "origin", StringComparison.Ordinal))
+                .ThenByDescending(candidate => candidate.Entry.Url?.Length ?? 0)
+                .ThenBy(candidate => candidate.Entry.Username ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+                .Select(candidate => new BrowserCredentialMatch
+                {
+                    Id = candidate.Entry.Id,
+                    Name = candidate.Entry.Name,
+                    Origin = candidate.Entry.Origin,
+                    Host = candidate.Entry.Host,
+                    Url = candidate.Entry.Url,
+                    Username = candidate.Entry.Username,
+                    Password = candidate.Entry.Password,
+                    Note = candidate.Entry.Note,
+                    MatchScope = candidate.MatchScope,
                 })
                 .ToList();
         }
@@ -255,6 +266,7 @@ namespace SelfContainedDeployment.Browser
                 {
                     Id = entry.Id,
                     Name = entry.Name,
+                    Origin = entry.Origin,
                     Host = entry.Host,
                     Url = entry.Url,
                     Username = entry.Username,
@@ -323,16 +335,19 @@ namespace SelfContainedDeployment.Browser
             lock (Sync)
             {
                 BrowserCredentialEnvelope envelope = LoadEnvelopeCore();
+                string normalizedUrl = NormalizeCredentialUrl(parsedUri);
+                string origin = NormalizeOrigin(parsedUri);
                 string host = NormalizeHost(parsedUri.Host);
                 int existingIndex = envelope.Entries.FindIndex(entry =>
-                    string.Equals(entry.Host, host, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(entry.Origin, origin, StringComparison.OrdinalIgnoreCase) &&
                     string.Equals(entry.Username ?? string.Empty, username ?? string.Empty, StringComparison.OrdinalIgnoreCase));
 
                 BrowserCredentialEntry next = new()
                 {
-                    Id = BuildCredentialId(url, username, password),
+                    Id = BuildCredentialId(origin, username),
                     Name = string.IsNullOrWhiteSpace(name) ? host : name.Trim(),
-                    Url = url,
+                    Url = normalizedUrl,
+                    Origin = origin,
                     Host = host,
                     Username = username?.Trim() ?? string.Empty,
                     Password = password,
@@ -356,8 +371,8 @@ namespace SelfContainedDeployment.Browser
                     Ok = true,
                     ImportedCount = 1,
                     Message = existingIndex >= 0
-                        ? $"Updated saved browser credential for {host}."
-                        : $"Saved browser credential for {host}.",
+                        ? $"Updated saved browser credential for {origin}."
+                        : $"Saved browser credential for {origin}.",
                 };
             }
         }
@@ -405,9 +420,10 @@ namespace SelfContainedDeployment.Browser
 
                 entries.Add(new BrowserCredentialEntry
                 {
-                    Id = BuildCredentialId(url, ReadColumn(row, columnIndex, "username"), password),
+                    Id = BuildCredentialId(NormalizeOrigin(parsedUri), ReadColumn(row, columnIndex, "username")),
                     Name = ReadColumn(row, columnIndex, "name"),
-                    Url = url,
+                    Url = NormalizeCredentialUrl(parsedUri),
+                    Origin = NormalizeOrigin(parsedUri),
                     Host = NormalizeHost(parsedUri.Host),
                     Username = ReadColumn(row, columnIndex, "username"),
                     Password = password,
@@ -434,6 +450,61 @@ namespace SelfContainedDeployment.Browser
         private static string NormalizeHost(string host)
         {
             return (host ?? string.Empty).Trim().Trim('.').ToLowerInvariant();
+        }
+
+        private static string NormalizeOrigin(Uri uri)
+        {
+            if (uri is null)
+            {
+                return string.Empty;
+            }
+
+            UriBuilder builder = new(uri.Scheme, NormalizeHost(uri.Host))
+            {
+                Port = uri.IsDefaultPort ? -1 : uri.Port,
+                Path = string.Empty,
+                Query = string.Empty,
+                Fragment = string.Empty,
+            };
+            return builder.Uri.GetLeftPart(UriPartial.Authority).TrimEnd('/');
+        }
+
+        private static string NormalizeCredentialUrl(Uri uri)
+        {
+            if (uri is null)
+            {
+                return string.Empty;
+            }
+
+            UriBuilder builder = new(uri)
+            {
+                Host = NormalizeHost(uri.Host),
+                Port = uri.IsDefaultPort ? -1 : uri.Port,
+                Fragment = string.Empty,
+            };
+            return builder.Uri.AbsoluteUri;
+        }
+
+        private static string ResolveMatchScope(BrowserCredentialEntry entry, string targetOrigin, string targetHost)
+        {
+            if (entry is null || string.IsNullOrWhiteSpace(entry.Password))
+            {
+                return null;
+            }
+
+            if (!string.IsNullOrWhiteSpace(entry.Origin) &&
+                string.Equals(entry.Origin, targetOrigin, StringComparison.OrdinalIgnoreCase))
+            {
+                return "origin";
+            }
+
+            if (!string.IsNullOrWhiteSpace(entry.Host) &&
+                string.Equals(entry.Host, targetHost, StringComparison.OrdinalIgnoreCase))
+            {
+                return "host";
+            }
+
+            return null;
         }
 
         private static BrowserCredentialEnvelope LoadEnvelope()
@@ -469,7 +540,23 @@ namespace SelfContainedDeployment.Browser
             {
                 if (string.IsNullOrWhiteSpace(entry.Id))
                 {
-                    entry.Id = BuildCredentialId(entry.Url, entry.Username, entry.Password);
+                    entry.Id = BuildCredentialId(
+                        entry.Origin ?? NormalizeOrigin(Uri.TryCreate(entry.Url, UriKind.Absolute, out Uri parsedIdUri) ? parsedIdUri : null),
+                        entry.Username);
+                    updated = true;
+                }
+
+                if (string.IsNullOrWhiteSpace(entry.Origin) &&
+                    Uri.TryCreate(entry.Url, UriKind.Absolute, out Uri parsedOriginUri))
+                {
+                    entry.Origin = NormalizeOrigin(parsedOriginUri);
+                    updated = true;
+                }
+
+                if (string.IsNullOrWhiteSpace(entry.Host) &&
+                    Uri.TryCreate(entry.Url, UriKind.Absolute, out Uri parsedHostUri))
+                {
+                    entry.Host = NormalizeHost(parsedHostUri.Host);
                     updated = true;
                 }
             }
@@ -495,9 +582,9 @@ namespace SelfContainedDeployment.Browser
             File.WriteAllBytes(storePath, protectedBytes);
         }
 
-        private static string BuildCredentialId(string url, string username, string password)
+        private static string BuildCredentialId(string origin, string username)
         {
-            string value = $"{url ?? string.Empty}\n{username ?? string.Empty}\n{password ?? string.Empty}";
+            string value = $"{origin ?? string.Empty}\n{username ?? string.Empty}";
             byte[] bytes = Encoding.UTF8.GetBytes(value);
             byte[] hash = SHA256.HashData(bytes);
             return Convert.ToHexString(hash[..12]).ToLowerInvariant();
