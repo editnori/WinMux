@@ -99,6 +99,7 @@ namespace SelfContainedDeployment.Panes
         private string _extensionImportStatus = "No browser extensions imported yet.";
         private string _credentialAutofillStatus = "No imported WinMux credentials.";
         private readonly List<BrowserExtensionSnapshot> _installedExtensions = new();
+        private readonly Dictionary<int, BrowserCredentialMatch> _credentialContextMenuMatches = new();
 
         public BrowserPaneControl()
         {
@@ -197,6 +198,7 @@ namespace SelfContainedDeployment.Panes
                 BrowserView.CoreWebView2.NavigationCompleted -= OnNavigationCompleted;
                 BrowserView.CoreWebView2.DocumentTitleChanged -= OnDocumentTitleChanged;
                 BrowserView.CoreWebView2.SourceChanged -= OnSourceChanged;
+                BrowserView.CoreWebView2.ContextMenuRequested -= OnContextMenuRequested;
             }
         }
 
@@ -309,6 +311,7 @@ namespace SelfContainedDeployment.Panes
                 core.DocumentTitleChanged += OnDocumentTitleChanged;
                 core.NavigationCompleted += OnNavigationCompleted;
                 core.SourceChanged += OnSourceChanged;
+                core.ContextMenuRequested += OnContextMenuRequested;
                 BrowserView.GotFocus += OnInteractionRequested;
                 _initialized = true;
                 LogBrowserEvent("webview.configure", "Attached browser event handlers", new Dictionary<string, string>
@@ -481,6 +484,23 @@ namespace SelfContainedDeployment.Panes
             autofillItem.Click += async (_, _) => await ManualAutofillCurrentPageAsync().ConfigureAwait(true);
             flyout.Items.Add(autofillItem);
 
+            IReadOnlyList<BrowserCredentialMatch> matches = BrowserCredentialStore.ResolveMatchesForUri(_currentUri);
+            if (matches.Count > 0)
+            {
+                flyout.Items.Add(new MenuFlyoutSeparator());
+                foreach (BrowserCredentialMatch match in matches.Take(6))
+                {
+                    MenuFlyoutItem credentialItem = new()
+                    {
+                        Text = string.IsNullOrWhiteSpace(match.Username)
+                            ? $"Autofill {match.Host}"
+                            : $"Autofill {match.Username}",
+                    };
+                    credentialItem.Click += async (_, _) => await AutofillCredentialAsync(match).ConfigureAwait(true);
+                    flyout.Items.Add(credentialItem);
+                }
+            }
+
             flyout.Items.Add(new MenuFlyoutItem
             {
                 Text = "Each browser pane keeps one live page. Use another pane when you need a second page.",
@@ -633,6 +653,44 @@ namespace SelfContainedDeployment.Panes
             LogBrowserEvent("source.changed", $"Browser source changed to {_currentUri}");
         }
 
+        private void OnContextMenuRequested(CoreWebView2 sender, CoreWebView2ContextMenuRequestedEventArgs args)
+        {
+            IReadOnlyList<BrowserCredentialMatch> matches = BrowserCredentialStore.ResolveMatchesForUri(_currentUri);
+            if (matches.Count == 0)
+            {
+                return;
+            }
+
+            _credentialContextMenuMatches.Clear();
+            CoreWebView2ContextMenuItem submenu = sender.Environment.CreateContextMenuItem(
+                "Autofill with WinMux",
+                null,
+                CoreWebView2ContextMenuItemKind.Submenu);
+
+            foreach (BrowserCredentialMatch match in matches.Take(6))
+            {
+                CoreWebView2ContextMenuItem item = sender.Environment.CreateContextMenuItem(
+                    string.IsNullOrWhiteSpace(match.Username) ? match.Host : $"{match.Username}  •  {match.Host}",
+                    null,
+                    CoreWebView2ContextMenuItemKind.Command);
+                _credentialContextMenuMatches[item.CommandId] = match;
+                item.CustomItemSelected += OnCredentialContextMenuItemSelected;
+                submenu.Children.Add(item);
+            }
+
+            args.MenuItems.Insert(0, submenu);
+        }
+
+        private async void OnCredentialContextMenuItemSelected(CoreWebView2ContextMenuItem sender, object args)
+        {
+            if (!_credentialContextMenuMatches.TryGetValue(sender.CommandId, out BrowserCredentialMatch match))
+            {
+                return;
+            }
+
+            await AutofillCredentialAsync(match).ConfigureAwait(true);
+        }
+
         private void UpdateCredentialAutofillStatus()
         {
             if (BrowserCredentialStore.GetCredentialCount() == 0)
@@ -663,6 +721,16 @@ namespace SelfContainedDeployment.Panes
 
             BrowserCredentialMatch match = BrowserCredentialStore.ResolveForUri(_currentUri);
             if (match is null)
+            {
+                return;
+            }
+
+            await AutofillCredentialAsync(match).ConfigureAwait(true);
+        }
+
+        private async Task AutofillCredentialAsync(BrowserCredentialMatch match)
+        {
+            if (!_initialized || BrowserView.CoreWebView2 is null || match is null)
             {
                 return;
             }
@@ -753,9 +821,12 @@ namespace SelfContainedDeployment.Panes
             try
             {
                 string result = await BrowserView.CoreWebView2.ExecuteScriptAsync(script).AsTask().ConfigureAwait(true);
-                _credentialAutofillStatus = $"Imported WinMux credentials autofilled for {match.Host}.";
+                _credentialAutofillStatus = string.IsNullOrWhiteSpace(match.Username)
+                    ? $"Imported WinMux credentials autofilled for {match.Host}."
+                    : $"Imported WinMux credentials autofilled using {match.Username}.";
                 LogBrowserEvent("credentials.autofill_attempted", $"Attempted WinMux credential autofill for {match.Host}", new Dictionary<string, string>
                 {
+                    ["credentialId"] = match.Id ?? string.Empty,
                     ["host"] = match.Host ?? string.Empty,
                     ["hasUsername"] = (!string.IsNullOrWhiteSpace(match.Username)).ToString(),
                     ["result"] = result ?? string.Empty,

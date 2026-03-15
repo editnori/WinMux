@@ -30,9 +30,7 @@ namespace SelfContainedDeployment
                 .First(button => string.Equals((string)button.Tag, SampleConfig.DefaultShellProfileId, System.StringComparison.OrdinalIgnoreCase))
                 .IsChecked = true;
 
-            paneLimitBox.Items.Cast<ComboBoxItem>()
-                .First(item => string.Equals((string)item.Tag, SampleConfig.MaxPaneCountPerThread.ToString(), System.StringComparison.Ordinal))
-                .IsSelected = true;
+            paneLimitBox.SelectedIndex = Math.Clamp(SampleConfig.MaxPaneCountPerThread, 2, 4) - 2;
 
             RefreshBrowserCredentialVault();
 

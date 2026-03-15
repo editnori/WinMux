@@ -195,6 +195,37 @@ namespace SelfContainedDeployment.Browser
             };
         }
 
+        public static IReadOnlyList<BrowserCredentialMatch> ResolveMatchesForUri(string uri)
+        {
+            if (!Uri.TryCreate(uri, UriKind.Absolute, out Uri targetUri) ||
+                !(targetUri.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) ||
+                  targetUri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)))
+            {
+                return Array.Empty<BrowserCredentialMatch>();
+            }
+
+            string host = NormalizeHost(targetUri.Host);
+            return LoadEnvelope().Entries
+                .Where(entry => !string.IsNullOrWhiteSpace(entry.Password))
+                .Where(entry =>
+                    !string.IsNullOrWhiteSpace(entry.Host) &&
+                    (string.Equals(entry.Host, host, StringComparison.OrdinalIgnoreCase) ||
+                     host.EndsWith("." + entry.Host, StringComparison.OrdinalIgnoreCase)))
+                .OrderByDescending(entry => string.Equals(entry.Host, host, StringComparison.OrdinalIgnoreCase))
+                .ThenByDescending(entry => entry.Url?.Length ?? 0)
+                .Select(entry => new BrowserCredentialMatch
+                {
+                    Id = entry.Id,
+                    Name = entry.Name,
+                    Host = entry.Host,
+                    Url = entry.Url,
+                    Username = entry.Username,
+                    Password = entry.Password,
+                    Note = entry.Note,
+                })
+                .ToList();
+        }
+
         public static int GetCredentialCount()
         {
             return LoadEnvelope().Entries.Count;
