@@ -720,15 +720,19 @@ namespace SelfContainedDeployment.Panes
             BrowserTabStripPanel.Children.Clear();
             double targetTitleWidth = ResolveBrowserTabTitleWidth();
             bool compact = IsCompactPaneLayout();
+            bool showInlineCloseButtons = !compact || _browserTabs.Count <= 2;
             foreach (BrowserTabSession tab in _browserTabs)
             {
                 Grid tabLayout = new()
                 {
-                    ColumnSpacing = 4,
-                    Width = targetTitleWidth + (compact ? 22 : 26),
+                    ColumnSpacing = showInlineCloseButtons ? 4 : 0,
+                    Width = targetTitleWidth + (showInlineCloseButtons ? (compact ? 20 : 26) : 0),
                 };
                 tabLayout.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                tabLayout.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                if (showInlineCloseButtons)
+                {
+                    tabLayout.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                }
 
                 Button tabButton = new()
                 {
@@ -738,6 +742,7 @@ namespace SelfContainedDeployment.Panes
                     MinWidth = compact ? 72 : 96,
                     MaxWidth = compact ? 152 : 192,
                     HorizontalAlignment = HorizontalAlignment.Stretch,
+                    Padding = compact ? new Thickness(6, 1, 6, 1) : new Thickness(8, 2, 8, 2),
                 };
                 AutomationProperties.SetAutomationId(tabButton, $"browser-pane-tab-{tab.Id}");
                 AutomationProperties.SetName(tabButton, string.IsNullOrWhiteSpace(tab.Title) ? "Browser tab" : tab.Title);
@@ -753,23 +758,27 @@ namespace SelfContainedDeployment.Panes
                 ApplyBrowserTabButtonState(tabButton, string.Equals(tab.Id, _selectedBrowserTabId, StringComparison.Ordinal));
                 tabLayout.Children.Add(tabButton);
 
-                Button closeButton = new()
+                if (showInlineCloseButtons)
                 {
-                    Style = (Style)Application.Current.Resources["ShellChromeButtonStyle"],
-                    Tag = tab.Id,
-                    Width = compact ? 20 : 22,
-                    Height = compact ? 20 : 22,
-                    HorizontalAlignment = HorizontalAlignment.Right,
-                    Content = new FontIcon
+                    Button closeButton = new()
                     {
-                        FontSize = 9,
-                        Glyph = "\uE711",
-                    },
-                };
-                AutomationProperties.SetAutomationId(closeButton, $"browser-pane-tab-close-{tab.Id}");
-                closeButton.Click += OnBrowserTabCloseClicked;
-                Grid.SetColumn(closeButton, 1);
-                tabLayout.Children.Add(closeButton);
+                        Style = (Style)Application.Current.Resources["ShellChromeButtonStyle"],
+                        Tag = tab.Id,
+                        Width = compact ? 20 : 22,
+                        Height = compact ? 20 : 22,
+                        HorizontalAlignment = HorizontalAlignment.Right,
+                        Content = new FontIcon
+                        {
+                            FontSize = 9,
+                            Glyph = "\uE711",
+                        },
+                    };
+                    AutomationProperties.SetAutomationId(closeButton, $"browser-pane-tab-close-{tab.Id}");
+                    closeButton.Click += OnBrowserTabCloseClicked;
+                    Grid.SetColumn(closeButton, 1);
+                    tabLayout.Children.Add(closeButton);
+                }
+
                 BrowserTabStripPanel.Children.Add(tabLayout);
             }
         }
@@ -791,10 +800,10 @@ namespace SelfContainedDeployment.Panes
             }
 
             bool compact = IsCompactPaneLayout();
-            double usableWidth = Math.Max(220, width - 64);
-            int divisor = Math.Max(1, Math.Min(_browserTabs.Count, compact ? 5 : 4));
+            double usableWidth = Math.Max(220, width - (compact ? 32 : 64));
+            int divisor = Math.Max(1, Math.Min(_browserTabs.Count, compact ? 3 : 4));
             double slotWidth = usableWidth / divisor;
-            return Math.Clamp(slotWidth - (compact ? 28 : 34), compact ? 72 : 96, compact ? 152 : 192);
+            return Math.Clamp(slotWidth - (compact ? 10 : 34), compact ? 90 : 96, compact ? 176 : 192);
         }
 
         private void UpdateAdaptiveChromeLayout()

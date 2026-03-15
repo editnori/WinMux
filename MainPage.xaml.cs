@@ -2021,7 +2021,7 @@ namespace SelfContainedDeployment
             project ??= _activeProject ?? GetOrCreateProject(Environment.CurrentDirectory);
             thread = ResolveTargetThreadForNewPane(project, thread, WorkspacePaneKind.Editor);
 
-            string startupInput = "nvim .\r";
+            string startupInput = "nvim -i NONE .\r";
             TerminalPaneRecord pane = CreateTerminalPane(project, thread, WorkspacePaneKind.Editor, startupInput, "Editor");
             thread.Panes.Add(pane);
             thread.SelectedPaneId = pane.Id;
@@ -2282,7 +2282,7 @@ namespace SelfContainedDeployment
             {
                 "browser" => CreateBrowserPane(project, thread, snapshot.BrowserUri, string.IsNullOrWhiteSpace(snapshot.Title) ? "Preview" : snapshot.Title, snapshot.Id),
                 "diff" => CreateDiffPane(project, thread, snapshot.DiffPath, diffText: null, string.IsNullOrWhiteSpace(snapshot.Title) ? BuildDiffPaneTitle(snapshot.DiffPath) : snapshot.Title, snapshot.Id),
-                "editor" => CreateTerminalPane(project, thread, WorkspacePaneKind.Editor, "nvim .\r", string.IsNullOrWhiteSpace(snapshot.Title) ? "Editor" : snapshot.Title, snapshot.Id),
+                "editor" => CreateTerminalPane(project, thread, WorkspacePaneKind.Editor, "nvim -i NONE .\r", string.IsNullOrWhiteSpace(snapshot.Title) ? "Editor" : snapshot.Title, snapshot.Id),
                 _ => CreateTerminalPane(
                     project,
                     thread,
@@ -4329,8 +4329,11 @@ namespace SelfContainedDeployment
             int requestId = ++_latestGitRefreshRequestId;
             string worktreePath = thread.WorktreePath ?? project?.RootPath;
 
+            bool captureComplete = thread.Panes.OfType<DiffPaneRecord>().Any();
             GitThreadSnapshot snapshot = await System.Threading.Tasks.Task
-                .Run(() => GitStatusService.Capture(worktreePath, targetPath))
+                .Run(() => captureComplete
+                    ? GitStatusService.CaptureComplete(worktreePath, targetPath)
+                    : GitStatusService.Capture(worktreePath, targetPath))
                 .ConfigureAwait(true);
 
             if (requestId != _latestGitRefreshRequestId ||
