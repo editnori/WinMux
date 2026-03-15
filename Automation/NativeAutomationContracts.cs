@@ -260,6 +260,10 @@ namespace SelfContainedDeployment.Automation
 
         public int CursorY { get; set; }
 
+        public int ViewportY { get; set; }
+
+        public int BufferLength { get; set; }
+
         public string Selection { get; set; }
 
         public string VisibleText { get; set; }

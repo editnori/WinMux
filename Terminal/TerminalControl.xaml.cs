@@ -1,5 +1,6 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Dispatching;
 using Microsoft.Web.WebView2.Core;
 using SelfContainedDeployment.Automation;
 using System;
@@ -36,6 +37,7 @@ namespace SelfContainedDeployment.Terminal
         private ElementTheme _themePreference = ElementTheme.Default;
         private readonly StringBuilder _outputBuffer = new();
         private readonly Dictionary<string, TaskCompletionSource<NativeAutomationTerminalSnapshot>> _inspectionRequests = new();
+        private readonly DispatcherQueueTimer _fitTimer;
 
         public event EventHandler<string> SessionTitleChanged;
         public event EventHandler RendererReady;
@@ -49,6 +51,10 @@ namespace SelfContainedDeployment.Terminal
             ActualThemeChanged += OnActualThemeChanged;
             SizeChanged += OnTerminalSizeChanged;
             PointerPressed += (_, _) => RaiseInteractionRequested();
+            _fitTimer = DispatcherQueue.CreateTimer();
+            _fitTimer.IsRepeating = false;
+            _fitTimer.Interval = TimeSpan.FromMilliseconds(45);
+            _fitTimer.Tick += OnFitTimerTick;
             ApplyBackgroundColor();
         }
 
@@ -354,8 +360,13 @@ namespace SelfContainedDeployment.Terminal
 
         public void RequestFit()
         {
-            PostMessage(new HostMessage { Type = "fit" });
-            LogTerminalEvent("fit.requested", "Renderer fit requested");
+            if (_disposed)
+            {
+                return;
+            }
+
+            _fitTimer.Stop();
+            _fitTimer.Start();
         }
 
         public async Task<NativeAutomationTerminalSnapshot> GetTerminalSnapshotAsync()
@@ -539,7 +550,24 @@ namespace SelfContainedDeployment.Terminal
 
         private void OnTerminalSizeChanged(object sender, SizeChangedEventArgs e)
         {
+            if (e.NewSize.Width <= 1 || e.NewSize.Height <= 1)
+            {
+                return;
+            }
+
             RequestFit();
+        }
+
+        private void OnFitTimerTick(DispatcherQueueTimer sender, object args)
+        {
+            _fitTimer.Stop();
+            if (_disposed || !_webViewInitialized || TerminalView.CoreWebView2 is null)
+            {
+                return;
+            }
+
+            PostMessage(new HostMessage { Type = "fit" });
+            LogTerminalEvent("fit.requested", "Renderer fit requested");
         }
 
         private string ResolveProcessWorkingDirectory()
@@ -590,6 +618,8 @@ namespace SelfContainedDeployment.Terminal
                 Started = _started,
                 Cols = _cols,
                 Rows = _rows,
+                ViewportY = 0,
+                BufferLength = 0,
                 BufferTail = buffer,
             };
         }
@@ -619,6 +649,8 @@ namespace SelfContainedDeployment.Terminal
                 Rows = Math.Max(1, message.Rows),
                 CursorX = message.CursorX,
                 CursorY = message.CursorY,
+                ViewportY = Math.Max(0, message.ViewportY),
+                BufferLength = Math.Max(0, message.BufferLength),
                 Selection = message.Selection,
                 VisibleText = message.VisibleText,
                 BufferTail = string.IsNullOrWhiteSpace(message.BufferTail) ? BuildFallbackTerminalSnapshot().BufferTail : message.BufferTail,
@@ -766,6 +798,8 @@ namespace SelfContainedDeployment.Terminal
             public string RequestId { get; set; }
             public int CursorX { get; set; }
             public int CursorY { get; set; }
+            public int ViewportY { get; set; }
+            public int BufferLength { get; set; }
             public string Selection { get; set; }
             public string VisibleText { get; set; }
             public string BufferTail { get; set; }

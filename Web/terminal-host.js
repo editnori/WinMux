@@ -7,6 +7,12 @@
     const selectAllMenuItem = document.getElementById("terminal-menu-select-all");
     const statusLine = document.getElementById("status-line");
     let fitFrame = 0;
+    let fitSettleFrame = 0;
+    let pendingForcedFit = false;
+    let lastMeasuredWidth = 0;
+    let lastMeasuredHeight = 0;
+    let lastPostedCols = 0;
+    let lastPostedRows = 0;
     const darkTheme = {
         background: "#09090b",
         foreground: "#f4f4f5",
@@ -56,7 +62,7 @@
 
     const term = new Terminal({
         allowTransparency: false,
-        convertEol: true,
+        convertEol: false,
         cursorBlink: true,
         cursorStyle: "bar",
         fontFamily: '"Cascadia Mono", Consolas, "Courier New", monospace',
@@ -117,23 +123,50 @@
         }
     }
 
-    function fitTerminal() {
+    function fitTerminal(force = false) {
+        const rect = termRoot.getBoundingClientRect();
+        const width = Math.round(rect.width);
+        const height = Math.round(rect.height);
+        if (width <= 2 || height <= 2) {
+            return;
+        }
+
+        if (!force && width === lastMeasuredWidth && height === lastMeasuredHeight) {
+            return;
+        }
+
         fitAddon.fit();
-        post({
-            type: "resize",
-            cols: term.cols,
-            rows: term.rows,
-        });
+        lastMeasuredWidth = width;
+        lastMeasuredHeight = height;
+
+        if (force || term.cols !== lastPostedCols || term.rows !== lastPostedRows) {
+            lastPostedCols = term.cols;
+            lastPostedRows = term.rows;
+            post({
+                type: "resize",
+                cols: term.cols,
+                rows: term.rows,
+            });
+        }
     }
 
-    function scheduleFit() {
+    function scheduleFit(force = false) {
+        pendingForcedFit = pendingForcedFit || force;
         if (fitFrame) {
             cancelAnimationFrame(fitFrame);
+        }
+        if (fitSettleFrame) {
+            cancelAnimationFrame(fitSettleFrame);
         }
 
         fitFrame = requestAnimationFrame(() => {
             fitFrame = 0;
-            fitTerminal();
+            fitSettleFrame = requestAnimationFrame(() => {
+                fitSettleFrame = 0;
+                const shouldForceFit = pendingForcedFit;
+                pendingForcedFit = false;
+                fitTerminal(shouldForceFit);
+            });
         });
     }
 
@@ -274,7 +307,7 @@
                 window.setTimeout(() => term.focus(), 0);
                 break;
             case "fit":
-                scheduleFit();
+                scheduleFit(true);
                 break;
             case "inspect":
                 post({
@@ -284,6 +317,8 @@
                     rows: term.rows,
                     cursorX: term.buffer.active.cursorX,
                     cursorY: term.buffer.active.cursorY,
+                    viewportY: term.buffer.active.viewportY,
+                    bufferLength: term.buffer.active.length,
                     selection: term.getSelection(),
                     visibleText: getVisibleText(),
                     bufferTail: getBufferTail(),
@@ -343,10 +378,11 @@
 
     function getVisibleText() {
         const active = term.buffer.active;
-        const start = Math.max(0, active.length - term.rows);
+        const start = Math.max(0, active.viewportY);
+        const end = Math.min(active.length, start + term.rows);
         const lines = [];
 
-        for (let i = start; i < active.length; i++) {
+        for (let i = start; i < end; i++) {
             const line = active.getLine(i);
             if (line) {
                 lines.push(line.translateToString(true));
@@ -449,9 +485,7 @@
     window.addEventListener("blur", hideContextMenu);
     window.addEventListener("resize", () => {
         hideContextMenu();
-        scheduleFit();
     });
-    new ResizeObserver(() => scheduleFit()).observe(document.body);
     new ResizeObserver(() => scheduleFit()).observe(termRoot);
 
     requestAnimationFrame(() => {

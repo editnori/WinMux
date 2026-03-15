@@ -82,6 +82,26 @@ function Wait-Until {
     throw $FailureMessage
 }
 
+function Get-LeadingBlankLineCount {
+    param([string]$Text)
+
+    if ([string]::IsNullOrEmpty($Text)) {
+        return 0
+    }
+
+    $count = 0
+    foreach ($line in ($Text -split "`n")) {
+        if ([string]::IsNullOrWhiteSpace($line)) {
+            $count++
+        }
+        else {
+            break
+        }
+    }
+
+    return $count
+}
+
 function Get-ProjectById {
     param(
         [object]$State,
@@ -176,6 +196,31 @@ try {
     }
     Add-Check "terminal-state" "$($selectedSnapshot.cols)x$($selectedSnapshot.rows) cursor=($($selectedSnapshot.cursorX),$($selectedSnapshot.cursorY))"
 
+    $resizeStartCols = $selectedSnapshot.cols
+    $resizeStartRows = $selectedSnapshot.rows
+    $resizeStartLeadingBlanks = Get-LeadingBlankLineCount $selectedSnapshot.visibleText
+    $setPaneSplit = Invoke-AutomationPost "/action" @{ action = "setPaneSplit"; value = "0.31,0.69" }
+    Assert-True ($setPaneSplit.ok -eq $true) "setPaneSplit action failed."
+
+    $resizedSnapshot = Wait-Until -FailureMessage "Terminal pane did not report a stable resized state." -Condition {
+        $terminalState = Invoke-AutomationPost "/terminal-state" @{ tabId = $state.activeTabId }
+        $snapshot = @($terminalState.tabs) | Where-Object { $_.tabId -eq $state.activeTabId } | Select-Object -First 1
+        if ($null -eq $snapshot) {
+            return $null
+        }
+
+        if ($snapshot.rendererReady -eq $true -and
+            $snapshot.started -eq $true -and
+            ($snapshot.cols -ne $resizeStartCols -or $snapshot.rows -ne $resizeStartRows)) {
+            return $snapshot
+        }
+
+        return $null
+    }
+    $resizeEndLeadingBlanks = Get-LeadingBlankLineCount $resizedSnapshot.visibleText
+    Assert-True (($resizeEndLeadingBlanks - $resizeStartLeadingBlanks) -le 1) "Terminal pane added too many leading blank lines after resize."
+    Add-Check "pane-split-resize" "$($resizeStartCols)x$($resizeStartRows) -> $($resizedSnapshot.cols)x$($resizedSnapshot.rows), leading blanks $resizeStartLeadingBlanks -> $resizeEndLeadingBlanks"
+
     $browserTabCountBefore = @($activeThread.tabs).Count
     $newBrowserPaneResponse = Invoke-AutomationPost "/action" @{ action = "newBrowserPane" }
     Assert-True ($newBrowserPaneResponse.ok -eq $true) "newBrowserPane action failed."
@@ -268,6 +313,18 @@ try {
     Assert-True ($showTerminalResponse.ok -eq $true) "Could not return to terminal view."
 
     $state = Invoke-AutomationGet "/state"
+    $lightTerminalTree = Wait-Until -FailureMessage "Selected thread did not expose a light-theme selected state." -Condition {
+        $tree = Invoke-AutomationGet "/ui-tree"
+        $selectedThread = @($tree.interactiveNodes) | Where-Object { $_.automationId -eq "shell-thread-$($state.activeThreadId)" -and $_.selected -eq $true } | Select-Object -First 1
+        if ($null -ne $selectedThread) {
+            return $selectedThread
+        }
+
+        return $null
+    }
+    Assert-True ($lightTerminalTree.background -eq "#FFE7E7EB") "Selected light-theme thread row used the wrong background color."
+    Add-Check "light-thread-selection" $lightTerminalTree.background
+
     $activeProject = Get-ProjectById -State $state -ProjectId $state.projectId
     $duplicateSourceThreadId = $state.activeThreadId
     $threadCountBeforeDuplicate = @($activeProject.threads).Count
