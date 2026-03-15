@@ -925,6 +925,23 @@ namespace SelfContainedDeployment
             }
         }
 
+        private void OnProjectOverviewMenuClicked(object sender, RoutedEventArgs e)
+        {
+            if (sender is not MenuFlyoutItem item || item.Tag is not string projectId)
+            {
+                return;
+            }
+
+            WorkspaceProject project = FindProject(projectId);
+            if (project is null)
+            {
+                return;
+            }
+
+            ActivateProject(project);
+            ShowThreadOverview();
+        }
+
         private void OnClearProjectThreadsMenuClicked(object sender, RoutedEventArgs e)
         {
             if (sender is MenuFlyoutItem item && item.Tag is string projectId)
@@ -3247,6 +3264,15 @@ namespace SelfContainedDeployment
                 };
                 projectNewThreadItem.Click += OnProjectNewThreadMenuClicked;
                 projectMenu.Items.Add(projectNewThreadItem);
+                MenuFlyoutItem projectOverviewItem = new()
+                {
+                    Text = "Thread overview",
+                    Tag = project.Id,
+                    IsEnabled = project.Threads.Count > 0,
+                };
+                AutomationProperties.SetAutomationId(projectOverviewItem, $"shell-project-overview-{project.Id}");
+                projectOverviewItem.Click += OnProjectOverviewMenuClicked;
+                projectMenu.Items.Add(projectOverviewItem);
                 MenuFlyoutItem clearThreadsItem = new()
                 {
                     Text = "Clear all threads",
@@ -4722,16 +4748,6 @@ namespace SelfContainedDeployment
         {
             ApplyActionButtonState(SettingsNavButton, SettingsNavText, _showingSettings);
             ApplyActionButtonState(NewProjectButton, NewProjectText, false);
-            if (ShowOverviewButton is not null)
-            {
-                ShowOverviewButton.Background = _showingOverview
-                    ? AppBrush(ShowOverviewButton, "ShellNavActiveBrush")
-                    : new SolidColorBrush(Windows.UI.Color.FromArgb(0x00, 0x00, 0x00, 0x00));
-                ShowOverviewButton.BorderBrush = _showingOverview
-                    ? AppBrush(ShowOverviewButton, "ShellBorderBrush")
-                    : new SolidColorBrush(Windows.UI.Color.FromArgb(0x00, 0x00, 0x00, 0x00));
-                ToolTipService.SetToolTip(ShowOverviewButton, _showingOverview ? "Back to pane workspace" : "Show thread overview");
-            }
         }
 
         private void ToggleInspector()
@@ -4987,12 +5003,6 @@ namespace SelfContainedDeployment
                     Spacing = 4,
                 };
 
-                StackPanel titleStack = new()
-                {
-                    Orientation = Orientation.Horizontal,
-                    Spacing = 6,
-                };
-
                 TextBlock title = new()
                 {
                     Text = thread.Name,
@@ -5000,14 +5010,7 @@ namespace SelfContainedDeployment
                     TextTrimming = TextTrimming.CharacterEllipsis,
                 };
                 AutomationProperties.SetAutomationId(title, $"shell-overview-title-{thread.Id}");
-                titleStack.Children.Add(title);
-
-                if (isActiveThread)
-                {
-                    titleStack.Children.Add(BuildOverviewTag(titleStack, "Active", "ShellPaneActiveBorderBrush", $"shell-overview-active-{thread.Id}", emphasized: true));
-                }
-
-                headingStack.Children.Add(titleStack);
+                headingStack.Children.Add(title);
 
                 TextBlock path = new()
                 {
@@ -5166,39 +5169,20 @@ namespace SelfContainedDeployment
             return $"{kind} {compact}";
         }
 
-        private Border BuildOverviewTag(FrameworkElement owner, string text, string accentBrushKey, string automationId, bool emphasized = false)
-        {
-            Border chip = new()
-            {
-                Background = AppBrush(owner, emphasized ? "ShellNavActiveBrush" : "ShellSurfaceBackgroundBrush"),
-                BorderBrush = AppBrush(owner, emphasized ? "ShellPaneActiveBorderBrush" : "ShellBorderBrush"),
-                BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(999),
-                Padding = new Thickness(7, 2, 7, 2),
-                VerticalAlignment = VerticalAlignment.Center,
-            };
-            if (!string.IsNullOrWhiteSpace(automationId))
-            {
-                AutomationProperties.SetAutomationId(chip, automationId);
-            }
-
-            chip.Child = new TextBlock
-            {
-                Text = text,
-                FontSize = 10,
-                FontWeight = emphasized ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal,
-                Foreground = AppBrush(chip, emphasized ? "ShellTextPrimaryBrush" : accentBrushKey),
-            };
-            return chip;
-        }
-
         private static string BuildThreadRailMeta(WorkspaceProject project, WorkspaceThread thread)
         {
             string threadLocation = string.IsNullOrWhiteSpace(thread.BranchName)
                 ? ShellProfiles.DeriveName(thread.WorktreePath ?? project.RootPath)
                 : $"{thread.BranchName} · {ShellProfiles.DeriveName(thread.WorktreePath ?? project.RootPath)}";
             int visibleCount = Math.Min(thread.VisiblePaneCapacity, thread.Panes.Count);
-            return $"{threadLocation} · {thread.Panes.Count} panes · {visibleCount} visible";
+            string paneState = thread.Panes.Count switch
+            {
+                0 => "empty",
+                _ when visibleCount == thread.Panes.Count => $"{thread.Panes.Count} panes",
+                _ => $"{visibleCount}/{thread.Panes.Count} visible",
+            };
+
+            return $"{threadLocation} · {paneState}";
         }
 
         private static string BuildOverviewMeta(WorkspaceThread thread)
