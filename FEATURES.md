@@ -9,9 +9,11 @@ This is the current feature inventory for the native WinMux shell as it exists i
 - Per-thread pane workspaces with pane-count limits and overflow-thread behavior
 - New sibling threads inherit the selected thread's worktree path when one is active
 - First-pass active-project thread overview inside the shell workspace
+- Workspace-map overview cards with branch/change/checkpoint chips and visible-pane summaries
 - Terminal, browser, editor, and diff panes
 - Fit visible panes action plus splitter double-click rebalance
 - Shift-drag splitter support to resize both pane axes together in multi-row layouts
+- Pane-strip workspace summary showing current pane count/layout/visible capacity
 - Inline pane rename and thread rename flows
 - Project removal from the project context menu
 - Right-side inspector rail for active thread repo state

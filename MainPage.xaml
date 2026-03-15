@@ -175,46 +175,65 @@
                                         HorizontalAlignment="Right"
                                         VerticalAlignment="Center"
                                         Margin="0,0,10,0"
-                                        Spacing="6">
-                                <Button x:Name="ShowOverviewButton"
-                                        AutomationProperties.AutomationId="shell-show-overview"
-                                        Style="{StaticResource ShellChromeButtonStyle}"
-                                        Click="OnShowOverviewClicked"
-                                        ToolTipService.ToolTip="Show thread overview">
-                                    <FontIcon FontSize="12" Glyph="&#xE8EF;" />
-                                </Button>
+                                        Spacing="10">
+                                <TextBlock x:Name="PaneStripMetaText"
+                                           AutomationProperties.AutomationId="shell-pane-strip-meta"
+                                           Style="{StaticResource ShellMetaTextStyle}"
+                                           MaxWidth="220"
+                                           Text="3 panes · dual · 2 visible"
+                                           TextTrimming="CharacterEllipsis"
+                                           TextWrapping="NoWrap"
+                                           VerticalAlignment="Center"
+                                           Visibility="Collapsed" />
 
-                                <Button x:Name="AddBrowserPaneButton"
-                                        AutomationProperties.AutomationId="shell-add-browser-pane"
-                                        Style="{StaticResource ShellChromeButtonStyle}"
-                                        Click="OnAddBrowserPaneClicked"
-                                        ToolTipService.ToolTip="Add browser pane">
-                                    <FontIcon FontSize="12" Glyph="&#xE774;" />
-                                </Button>
+                                <Border Background="{ThemeResource ShellMutedSurfaceBrush}"
+                                        BorderBrush="{ThemeResource ShellBorderBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="999"
+                                        Padding="4,2">
+                                    <StackPanel Orientation="Horizontal"
+                                                Spacing="4">
+                                        <Button x:Name="ShowOverviewButton"
+                                                AutomationProperties.AutomationId="shell-show-overview"
+                                                Style="{StaticResource ShellChromeButtonStyle}"
+                                                Click="OnShowOverviewClicked"
+                                                ToolTipService.ToolTip="Show thread overview">
+                                            <FontIcon FontSize="12" Glyph="&#xE8EF;" />
+                                        </Button>
 
-                                <Button x:Name="AddEditorPaneButton"
-                                        AutomationProperties.AutomationId="shell-add-editor-pane"
-                                        Style="{StaticResource ShellChromeButtonStyle}"
-                                        Click="OnAddEditorPaneClicked"
-                                        ToolTipService.ToolTip="Add editor pane">
-                                    <FontIcon FontSize="12" Glyph="&#xE70F;" />
-                                </Button>
+                                        <Button x:Name="AddBrowserPaneButton"
+                                                AutomationProperties.AutomationId="shell-add-browser-pane"
+                                                Style="{StaticResource ShellChromeButtonStyle}"
+                                                Click="OnAddBrowserPaneClicked"
+                                                ToolTipService.ToolTip="Add browser pane">
+                                            <FontIcon FontSize="12" Glyph="&#xE774;" />
+                                        </Button>
 
-                                <Button x:Name="FitPanesButton"
-                                        AutomationProperties.AutomationId="shell-fit-panes"
-                                        Style="{StaticResource ShellChromeButtonStyle}"
-                                        Click="OnFitPanesClicked"
-                                        ToolTipService.ToolTip="Fit visible panes">
-                                    <FontIcon FontSize="12" Glyph="&#xE9A8;" />
-                                </Button>
+                                        <Button x:Name="AddEditorPaneButton"
+                                                AutomationProperties.AutomationId="shell-add-editor-pane"
+                                                Style="{StaticResource ShellChromeButtonStyle}"
+                                                Click="OnAddEditorPaneClicked"
+                                                ToolTipService.ToolTip="Add editor pane">
+                                            <FontIcon FontSize="12" Glyph="&#xE70F;" />
+                                        </Button>
 
-                                <Button x:Name="ToggleInspectorButton"
-                                        AutomationProperties.AutomationId="shell-toggle-inspector"
-                                        Style="{StaticResource ShellChromeButtonStyle}"
-                                        Click="OnToggleInspectorClicked"
-                                        ToolTipService.ToolTip="Hide inspector">
-                                    <FontIcon FontSize="12" Glyph="&#xE7F8;" />
-                                </Button>
+                                        <Button x:Name="FitPanesButton"
+                                                AutomationProperties.AutomationId="shell-fit-panes"
+                                                Style="{StaticResource ShellChromeButtonStyle}"
+                                                Click="OnFitPanesClicked"
+                                                ToolTipService.ToolTip="Fit visible panes">
+                                            <FontIcon FontSize="12" Glyph="&#xE9A8;" />
+                                        </Button>
+
+                                        <Button x:Name="ToggleInspectorButton"
+                                                AutomationProperties.AutomationId="shell-toggle-inspector"
+                                                Style="{StaticResource ShellChromeButtonStyle}"
+                                                Click="OnToggleInspectorClicked"
+                                                ToolTipService.ToolTip="Hide inspector">
+                                            <FontIcon FontSize="12" Glyph="&#xE7F8;" />
+                                        </Button>
+                                    </StackPanel>
+                                </Border>
                             </StackPanel>
                         </Grid>
 
@@ -233,19 +252,28 @@
                                       ColumnDefinitions="*,Auto"
                                       ColumnSpacing="12">
                                     <StackPanel Spacing="2">
-                                        <TextBlock Text="Thread Overview"
+                                        <TextBlock Text="Workspace map"
                                                    Style="{StaticResource ShellSectionTextStyle}" />
                                         <TextBlock x:Name="ThreadOverviewMetaText"
                                                    Style="{StaticResource ShellHintTextStyle}"
                                                    Text="Active project thread stack" />
                                     </StackPanel>
 
-                                    <Button x:Name="CloseOverviewButton"
-                                            Grid.Column="1"
-                                            AutomationProperties.AutomationId="shell-close-overview"
-                                            Style="{StaticResource ShellSubItemButtonStyle}"
-                                            Click="OnCloseOverviewClicked"
-                                            Content="Back to panes" />
+                                    <StackPanel Grid.Column="1"
+                                                Orientation="Horizontal"
+                                                Spacing="8">
+                                        <Button x:Name="OverviewNewThreadButton"
+                                                AutomationProperties.AutomationId="shell-overview-new-thread"
+                                                Style="{StaticResource ShellSubItemButtonStyle}"
+                                                Click="OnOverviewNewThreadClicked"
+                                                Content="New thread" />
+
+                                        <Button x:Name="CloseOverviewButton"
+                                                AutomationProperties.AutomationId="shell-close-overview"
+                                                Style="{StaticResource ShellSubItemButtonStyle}"
+                                                Click="OnCloseOverviewClicked"
+                                                Content="Back to panes" />
+                                    </StackPanel>
                                 </Grid>
 
                                 <ScrollViewer Grid.Row="1"
