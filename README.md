@@ -1,20 +1,16 @@
-# Native Terminal Starter
+# WinMux
 
-This repo is a native Windows starter app based on the official unpackaged WinUI 3 Windows App SDK sample.
+WinMux is a native Windows terminal-first workspace shell built with WinUI 3, Windows App SDK, ConPTY, and WebView2.
 
-It is meant to be the first checkpoint for a future terminal app:
+The app is no longer a starter shell. The current repo includes:
 
-- native WinUI 3 shell
-- unpackaged startup
-- self-contained Windows App SDK deployment
-- no Electron
-- no Tauri
-
-## Current status
-
-The app builds successfully on this machine through the Windows `dotnet` toolchain.
-
-It is still a starter shell, not a full terminal yet. The next real engineering step is wiring a ConPTY-backed terminal host into the main content area.
+- multi-project workspaces with nested threads
+- per-thread pane workspaces with terminal, browser, editor, and diff panes
+- worktree-aware thread metadata and a collapsible right-side inspector rail
+- autosaved workspace/session restore across relaunch
+- replay-command capture for Codex and Claude terminal sessions
+- a shared WinMux browser profile plus an encrypted WinMux credential vault
+- native automation routes for shell state, UI trees, UI actions, browser state/eval/screenshot, terminal inspection, events, screenshots, render traces, and recording
 
 ## Build
 
@@ -28,8 +24,29 @@ It is still a starter shell, not a full terminal yet. The next real engineering 
 & "C:\Program Files\dotnet\dotnet.exe" run --project .\SelfContainedDeployment.csproj -p:Platform=x64
 ```
 
-## Next steps
+## Debug And Automation
 
-1. Add a terminal host page backed by ConPTY.
-2. Add a split layout for terminal plus side workspace.
-3. Add WebView2 only after the terminal host is stable.
+Install repo-local tooling with Bun:
+
+```bash
+bun install
+```
+
+Useful entrypoints:
+
+```bash
+bun run webview2:start
+bun run native:health
+bun run native:state
+bun run native:ui-tree
+bun run native:terminal-state
+bun run native:browser-state
+bun run native:smoke
+```
+
+## Key Docs
+
+- `AGENTS.md`: current product shape and guardrails
+- `AUTOMATION_REFERENCE.md`: native automation surface
+- `WEBVIEW2_PLAYWRIGHT.md`: WebView2 debug workflow
+- `ASKS_AUDIT.md`: current ask-by-ask audit and prioritized next pass

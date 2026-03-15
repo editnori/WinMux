@@ -58,6 +58,10 @@ def main() -> int:
     eval_parser.add_argument("script", help="JavaScript expression or statement to evaluate.")
     eval_parser.add_argument("--pane-id", default="", help="Optional pane id to evaluate against.")
 
+    screenshot_parser = subparsers.add_parser("screenshot", help="Capture a screenshot from the selected WinMux browser pane.")
+    screenshot_parser.add_argument("--pane-id", default="", help="Optional pane id to capture.")
+    screenshot_parser.add_argument("--path", default="", help="Optional output path to request from WinMux.")
+
     args = parser.parse_args()
 
     try:
@@ -65,10 +69,14 @@ def main() -> int:
             url = require_url("WINMUX_BROWSER_STATE_URL")
             payload = {"paneId": args.pane_id}
             path = "/browser-state"
-        else:
+        elif args.command == "eval":
             url = require_url("WINMUX_BROWSER_EVAL_URL")
             payload = {"paneId": args.pane_id, "script": args.script}
             path = "/browser-eval"
+        else:
+            url = require_url("WINMUX_BROWSER_SCREENSHOT_URL")
+            payload = {"paneId": args.pane_id, "path": args.path}
+            path = "/browser-screenshot"
         try:
             result = post_json_via_powershell(path, payload)
         except (FileNotFoundError, subprocess.CalledProcessError, json.JSONDecodeError):

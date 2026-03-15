@@ -120,6 +120,45 @@ function Get-ThreadById {
     return @($Project.threads) | Where-Object { $_.id -eq $ThreadId } | Select-Object -First 1
 }
 
+function Invoke-Git {
+    param(
+        [Parameter(ValueFromRemainingArguments = $true)]
+        [string[]]$Arguments
+    )
+
+    $output = & git @Arguments 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "Git command failed: git $($Arguments -join ' ')`n$output"
+    }
+
+    return $output
+}
+
+function Initialize-SmokeGitRepo {
+    param([string]$Path)
+
+    New-Item -ItemType Directory -Path $Path -Force | Out-Null
+    Invoke-Git -C $Path init | Out-Null
+    Invoke-Git -C $Path config user.email "winmux-smoke@example.com" | Out-Null
+    Invoke-Git -C $Path config user.name "WinMux Smoke" | Out-Null
+
+    @(
+        "alpha"
+        "beta"
+        "gamma"
+    ) | Set-Content -Path (Join-Path $Path "notes.txt")
+
+    Invoke-Git -C $Path add notes.txt | Out-Null
+    Invoke-Git -C $Path commit -m "Initial snapshot" | Out-Null
+
+    @(
+        "alpha"
+        "beta updated"
+        "gamma"
+        "delta added"
+    ) | Set-Content -Path (Join-Path $Path "notes.txt")
+}
+
 try {
     $health = Invoke-AutomationGet "/health"
     Assert-True ($health.ok -eq $true) "Automation health check failed."
@@ -190,19 +229,36 @@ try {
     Assert-True ($activeThread.tabs[0].id -eq $originalSecondTabId -and $activeThread.tabs[1].id -eq $originalFirstTabId) "moveTabAfter did not reorder the tab list."
     Add-Check "move-tab-after" "semantic tab reorder is available"
 
-    $selectedSnapshot = Wait-Until -FailureMessage "terminal-state reported a tab that is not ready." -Condition {
-        $terminalState = Invoke-AutomationPost "/terminal-state" @{ tabId = $state.activeTabId }
-        $snapshot = @($terminalState.tabs) | Where-Object { $_.tabId -eq $state.activeTabId } | Select-Object -First 1
-        if ($null -eq $snapshot) {
-            return $null
-        }
-
-        if ($snapshot.rendererReady -eq $true -and $snapshot.started -eq $true) {
-            return $snapshot
+    $readyTerminal = Wait-Until -FailureMessage "terminal-state reported no ready terminal tabs on the active thread." -Condition {
+        $latestState = Invoke-AutomationGet "/state"
+        $latestProject = Get-ProjectById -State $latestState -ProjectId $latestState.projectId
+        $latestThread = Get-ThreadById -Project $latestProject -ThreadId $latestState.activeThreadId
+        $terminalTabs = @($latestThread.tabs) | Where-Object { $_.kind -eq "terminal" }
+        foreach ($terminalTab in $terminalTabs) {
+            $terminalState = Invoke-AutomationPost "/terminal-state" @{ tabId = $terminalTab.id }
+            $snapshot = @($terminalState.tabs) | Where-Object { $_.tabId -eq $terminalTab.id } | Select-Object -First 1
+            if ($null -ne $snapshot -and $snapshot.rendererReady -eq $true -and $snapshot.started -eq $true) {
+                return [pscustomobject]@{
+                    state = $latestState
+                    tabId = $terminalTab.id
+                    snapshot = $snapshot
+                }
+            }
         }
 
         return $null
+    } -Attempts 40 -DelayMilliseconds 300
+    $state = $readyTerminal.state
+    $terminalTabId = $readyTerminal.tabId
+    if ($state.activeTabId -ne $terminalTabId) {
+        $selectReadyTerminal = Invoke-AutomationPost "/action" @{
+            action = "selectTab"
+            tabId = $terminalTabId
+        }
+        Assert-True ($selectReadyTerminal.ok -eq $true) "Could not select the ready terminal tab."
+        $state = Invoke-AutomationGet "/state"
     }
+    $selectedSnapshot = $readyTerminal.snapshot
     Add-Check "terminal-state" "$($selectedSnapshot.cols)x$($selectedSnapshot.rows) cursor=($($selectedSnapshot.cursorX),$($selectedSnapshot.cursorY))"
 
     $resizeStartCols = $selectedSnapshot.cols
@@ -212,8 +268,8 @@ try {
     Assert-True ($setPaneSplit.ok -eq $true) "setPaneSplit action failed."
 
     $resizedSnapshot = Wait-Until -FailureMessage "Terminal pane did not report a stable resized state." -Condition {
-        $terminalState = Invoke-AutomationPost "/terminal-state" @{ tabId = $state.activeTabId }
-        $snapshot = @($terminalState.tabs) | Where-Object { $_.tabId -eq $state.activeTabId } | Select-Object -First 1
+        $terminalState = Invoke-AutomationPost "/terminal-state" @{ tabId = $terminalTabId }
+        $snapshot = @($terminalState.tabs) | Where-Object { $_.tabId -eq $terminalTabId } | Select-Object -First 1
         if ($null -eq $snapshot) {
             return $null
         }
@@ -225,7 +281,7 @@ try {
         }
 
         return $null
-    }
+    } -Attempts 30 -DelayMilliseconds 300
     $resizeEndLeadingBlanks = Get-LeadingBlankLineCount $resizedSnapshot.visibleText
     Assert-True (($resizeEndLeadingBlanks - $resizeStartLeadingBlanks) -le 1) "Terminal pane added too many leading blank lines after resize."
     Add-Check "pane-split-resize" "$($resizeStartCols)x$($resizeStartRows) -> $($resizedSnapshot.cols)x$($resizedSnapshot.rows), leading blanks $resizeStartLeadingBlanks -> $resizeEndLeadingBlanks"
@@ -443,7 +499,7 @@ try {
     $activeProject = Get-ProjectById -State $state -ProjectId $state.projectId
     Add-Check "delete-thread" "thread removed while project remained with $(@($activeProject.threads).Count) thread(s)"
 
-    New-Item -ItemType Directory -Path $tempProjectPath -Force | Out-Null
+    Initialize-SmokeGitRepo -Path $tempProjectPath
 
     $newProjectDialog = Invoke-AutomationPost "/ui-action" @{
         action = "click"
@@ -490,6 +546,75 @@ try {
     }
     $tempProjectId = $state.projectId
     Add-Check "new-project-dialog" "new project added at $tempProjectPath"
+
+    $refreshTempDiff = Invoke-AutomationPost "/action" @{
+        action = "refreshDiff"
+    }
+    Assert-True ($refreshTempDiff.ok -eq $true) "Could not refresh the temporary project's diff state."
+
+    $state = Wait-Until -FailureMessage "Temporary git project did not report the expected changed file." -Condition {
+        $latestState = Invoke-AutomationGet "/state"
+        if ($latestState.projectPath -eq $tempProjectPath -and
+            $latestState.changedFileCount -ge 1 -and
+            $latestState.selectedDiffPath -eq "notes.txt") {
+            return $latestState
+        }
+
+        return $null
+    }
+
+    $openPatchReview = Invoke-AutomationPost "/action" @{
+        action = "selectDiffFile"
+        value = "notes.txt"
+    }
+    Assert-True ($openPatchReview.ok -eq $true) "Could not open the temporary project's patch review pane."
+
+    $state = Wait-Until -FailureMessage "Temporary project diff pane did not become the active pane." -Condition {
+        $latestState = Invoke-AutomationGet "/state"
+        $latestProject = Get-ProjectById -State $latestState -ProjectId $latestState.projectId
+        $latestThread = Get-ThreadById -Project $latestProject -ThreadId $latestState.activeThreadId
+        $activePane = @($latestThread.panes) | Where-Object { $_.id -eq $latestState.activeTabId } | Select-Object -First 1
+        if ($latestState.projectPath -eq $tempProjectPath -and
+            $null -ne $activePane -and
+            $activePane.kind -eq "diff" -and
+            $latestThread.layout -eq "dual") {
+            return $latestState
+        }
+
+        return $null
+    }
+
+    $diffSnapshot = Wait-Until -FailureMessage "Diff-state did not expose the rendered patch lines for notes.txt." -Condition {
+        $diffState = Invoke-AutomationPost "/diff-state" @{
+            paneId = $state.activeTabId
+            maxLines = 80
+        }
+        $snapshot = @($diffState.panes) | Where-Object { $_.paneId -eq $state.activeTabId } | Select-Object -First 1
+        if ($null -eq $snapshot) {
+            return $null
+        }
+
+        if ($snapshot.path -eq "notes.txt" -and $snapshot.hasDiff -eq $true -and @($snapshot.lines).Count -gt 0) {
+            return $snapshot
+        }
+
+        return $null
+    }
+
+    $removedLine = @($diffSnapshot.lines) | Where-Object { $_.text -eq "-beta" -and $_.kind -eq "deletion" } | Select-Object -First 1
+    $addedLine = @($diffSnapshot.lines) | Where-Object { $_.text -eq "+beta updated" -and $_.kind -eq "addition" } | Select-Object -First 1
+    $hunkLine = @($diffSnapshot.lines) | Where-Object { $_.kind -eq "hunk" -and $_.text -like "@@*" } | Select-Object -First 1
+    $metadataLine = @($diffSnapshot.lines) | Where-Object { $_.kind -eq "metadata" -and $_.text -eq "--- a/notes.txt" } | Select-Object -First 1
+
+    Assert-True ($null -ne $removedLine) "Patch review did not render the deleted line for notes.txt."
+    Assert-True ($null -ne $addedLine) "Patch review did not render the added line for notes.txt."
+    Assert-True ($null -ne $hunkLine) "Patch review did not render a hunk header for notes.txt."
+    Assert-True ($null -ne $metadataLine) "Patch review did not render diff metadata for notes.txt."
+    Assert-True ($removedLine.foreground -eq "#FFDC2626") "Patch review used the wrong light-theme color for deleted lines."
+    Assert-True ($addedLine.foreground -eq "#FF16A34A") "Patch review used the wrong light-theme color for added lines."
+    Assert-True ($hunkLine.foreground -eq "#FF2563EB") "Patch review used the wrong light-theme color for hunk headers."
+    Assert-True ($metadataLine.foreground -eq "#FF52525B") "Patch review used the wrong light-theme color for metadata lines."
+    Add-Check "patch-render" "notes.txt rendered $($diffSnapshot.lineCount) line(s) with expected add/remove/hunk colors"
 
     $threadIdToDelete = $state.activeThreadId
     $deleteLastThread = Invoke-AutomationPost "/action" @{

@@ -163,6 +163,12 @@ namespace SelfContainedDeployment.Automation
                         await WriteJsonAsync(stream, 200, browserState).ConfigureAwait(false);
                         break;
 
+                    case ("POST", "/diff-state"):
+                        var diffStateRequest = ReadJson<NativeAutomationDiffStateRequest>(request.Body);
+                        var diffState = await InvokeOnUiThreadAsync(() => _window.GetDiffState(diffStateRequest)).ConfigureAwait(false);
+                        await WriteJsonAsync(stream, 200, diffState).ConfigureAwait(false);
+                        break;
+
                     case ("POST", "/browser-eval"):
                         var browserEvalRequest = ReadJson<NativeAutomationBrowserEvalRequest>(request.Body);
                         var browserEval = await InvokeOnUiThreadAsync(() => _window.EvaluateBrowserAsync(browserEvalRequest)).ConfigureAwait(false);

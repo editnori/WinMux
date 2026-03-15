@@ -6,6 +6,7 @@ using SelfContainedDeployment.Automation;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -27,8 +28,10 @@ namespace SelfContainedDeployment.Terminal
         private static readonly Regex ClaudeResumeRegex = new(@"claude\s+--resume\s+([0-9a-f-]+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
         private static readonly Regex CodexResumeInlineRegex = new(@"^codex\s+resume\s+([0-9a-f-]+)\s*(.*)$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
         private static readonly Regex ClaudeResumeInlineRegex = new(@"^claude\s+--resume\s+([0-9a-f-]+)\s*(.*)$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        private static readonly Regex AnsiEscapeRegex = new(@"\u001B(?:\[[0-9;?]*[ -/]*[@-~]|\][^\u0007]*\u0007)", RegexOptions.Compiled);
 
         private ConPtyConnection _connection;
+        private Task _initializationTask;
         private bool _rendererReady;
         private bool _webViewInitialized;
         private bool _started;
@@ -67,6 +70,7 @@ namespace SelfContainedDeployment.Terminal
             _fitTimer.Interval = TimeSpan.FromMilliseconds(45);
             _fitTimer.Tick += OnFitTimerTick;
             ApplyBackgroundColor();
+            UpdateStartupMask();
         }
 
         public string ShellCommand { get; set; }
@@ -101,27 +105,103 @@ namespace SelfContainedDeployment.Terminal
 
         private async void OnLoaded(object sender, RoutedEventArgs e)
         {
+            UpdateStartupMask();
+            await EnsureInitializedAsync();
+        }
+
+        private async Task EnsureInitializedAsync()
+        {
             if (_webViewInitialized || _disposed)
             {
                 return;
             }
 
+            Task initializationTask = _initializationTask;
+            if (initializationTask is null)
+            {
+                initializationTask = InitializeTerminalWebViewAsync();
+                _initializationTask = initializationTask;
+            }
+
             try
             {
-                CoreWebView2Environment environment = await GetEnvironmentAsync();
-                await TerminalView.EnsureCoreWebView2Async(environment);
-                TerminalView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
-                TerminalView.CoreWebView2.Settings.IsStatusBarEnabled = false;
-                TerminalView.CoreWebView2.Settings.AreDevToolsEnabled = true;
-                TerminalView.CoreWebView2.Settings.AreBrowserAcceleratorKeysEnabled = true;
-                TerminalView.CoreWebView2.WebMessageReceived += OnWebMessageReceived;
+                await initializationTask.ConfigureAwait(true);
+            }
+            catch
+            {
+                if (ReferenceEquals(_initializationTask, initializationTask))
+                {
+                    _initializationTask = null;
+                }
+
+                throw;
+            }
+        }
+
+        private async Task InitializeTerminalWebViewAsync()
+        {
+            try
+            {
+                try
+                {
+                    CoreWebView2Environment environment = await GetEnvironmentAsync().ConfigureAwait(true);
+                    if (_disposed)
+                    {
+                        return;
+                    }
+
+                    await TerminalView.EnsureCoreWebView2Async(environment).AsTask().ConfigureAwait(true);
+                }
+                catch (Exception ex)
+                {
+                    LogTerminalEvent("webview.profile_failed", "Terminal shared WebView2 environment failed; retrying with default profile.", new Dictionary<string, string>
+                    {
+                        ["exceptionType"] = ex.GetType().FullName ?? string.Empty,
+                        ["message"] = ex.Message ?? string.Empty,
+                    });
+                    await TerminalView.EnsureCoreWebView2Async().AsTask().ConfigureAwait(true);
+                }
+
+                if (_disposed)
+                {
+                    return;
+                }
 
                 string rendererPath = ResolveRendererPath();
                 TerminalView.Source = new Uri(rendererPath);
+
+                CoreWebView2 core = await WaitForCoreWebView2Async().ConfigureAwait(true);
+                CoreWebView2Settings settings = core.Settings;
+                if (settings is not null)
+                {
+                    settings.AreDefaultContextMenusEnabled = false;
+                    settings.IsStatusBarEnabled = false;
+                    settings.AreDevToolsEnabled = true;
+                    settings.AreBrowserAcceleratorKeysEnabled = true;
+                }
+
+                core.WebMessageReceived -= OnWebMessageReceived;
+                core.WebMessageReceived += OnWebMessageReceived;
+
                 _webViewInitialized = true;
+                LogTerminalEvent("webview.initialized", "Terminal WebView2 initialized", new Dictionary<string, string>
+                {
+                    ["rendererPath"] = rendererPath,
+                });
             }
             catch (Exception ex)
             {
+                lock (EnvironmentSync)
+                {
+                    SharedEnvironmentTask = null;
+                }
+
+                LogTerminalEvent("webview.initialization_failed", "Terminal WebView2 initialization failed", new Dictionary<string, string>
+                {
+                    ["exceptionType"] = ex.GetType().FullName ?? string.Empty,
+                    ["message"] = ex.Message ?? string.Empty,
+                    ["details"] = ex.ToString(),
+                });
                 ShowStatus($"WebView2 failed: {ex.Message}", keepVisible: true);
             }
         }
@@ -157,7 +237,6 @@ namespace SelfContainedDeployment.Terminal
                     PostCurrentTheme();
                     RendererReady?.Invoke(this, EventArgs.Empty);
                     EnsureStarted();
-                    HideStartupMask();
                     break;
                 case "resize":
                     _cols = Math.Max(1, message.Cols);
@@ -232,6 +311,7 @@ namespace SelfContainedDeployment.Terminal
             }
 
             _started = true;
+            UpdateStartupMask();
 
             try
             {
@@ -272,7 +352,10 @@ namespace SelfContainedDeployment.Terminal
 
                 AppendOutput(text);
                 UpdateReplayCommandFromOutput();
-                HideStartupMask();
+                if (ContainsDisplayText(text))
+                {
+                    HideStartupMask();
+                }
                 PostMessage(new HostMessage { Type = "output", Data = text });
                 HideStatus();
             });
@@ -878,6 +961,68 @@ namespace SelfContainedDeployment.Terminal
             TerminalView.DefaultBackgroundColor = backgroundColor;
         }
 
+        private void UpdateStartupMask()
+        {
+            if (StartupTitleText is not null)
+            {
+                StartupTitleText.Text = ResolveStartupTitle();
+            }
+
+            if (StartupDetailText is not null)
+            {
+                string detail = DisplayWorkingDirectory;
+                if (string.IsNullOrWhiteSpace(detail))
+                {
+                    detail = InitialWorkingDirectory;
+                }
+
+                if (string.IsNullOrWhiteSpace(detail))
+                {
+                    detail = "Preparing terminal host…";
+                }
+
+                StartupDetailText.Text = detail;
+            }
+        }
+
+        private string ResolveStartupTitle()
+        {
+            string command = ShellCommand ?? string.Empty;
+            if (command.Contains("wsl.exe", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Starting WSL shell";
+            }
+
+            if (command.Contains("powershell", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Starting PowerShell";
+            }
+
+            if (command.Contains("cmd.exe", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Starting Command Prompt";
+            }
+
+            return "Starting terminal";
+        }
+
+        private static bool ContainsDisplayText(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return false;
+            }
+
+            string sanitized = AnsiEscapeRegex.Replace(text, string.Empty);
+            sanitized = new string(sanitized.Where(character =>
+                !char.IsControl(character) ||
+                character == '\r' ||
+                character == '\n' ||
+                character == '\t').ToArray());
+
+            return sanitized.Any(character => !char.IsWhiteSpace(character));
+        }
+
         private void HideStartupMask()
         {
             if (StartupMask is not null)
@@ -905,7 +1050,11 @@ namespace SelfContainedDeployment.Terminal
         {
             lock (EnvironmentSync)
             {
-                SharedEnvironmentTask ??= CreateEnvironmentAsync();
+                if (SharedEnvironmentTask is null || SharedEnvironmentTask.IsFaulted || SharedEnvironmentTask.IsCanceled)
+                {
+                    SharedEnvironmentTask = CreateEnvironmentAsync();
+                }
+
                 return SharedEnvironmentTask;
             }
         }
@@ -926,6 +1075,21 @@ namespace SelfContainedDeployment.Terminal
             }
 
             return await CoreWebView2Environment.CreateWithOptionsAsync(null, userDataFolder, options);
+        }
+
+        private async Task<CoreWebView2> WaitForCoreWebView2Async()
+        {
+            for (int attempt = 0; attempt < 20; attempt++)
+            {
+                if (TerminalView.CoreWebView2 is not null)
+                {
+                    return TerminalView.CoreWebView2;
+                }
+
+                await Task.Delay(50).ConfigureAwait(true);
+            }
+
+            throw new InvalidOperationException("Terminal WebView2 core was not created.");
         }
 
         private void PostMessage(HostMessage message)

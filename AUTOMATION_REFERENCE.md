@@ -17,6 +17,7 @@ Native automation server:
 - `POST /desktop-action`
 - `POST /terminal-state`
 - `POST /browser-state`
+- `POST /diff-state`
 - `POST /browser-eval`
 - `POST /browser-screenshot`
 - `POST /recording/start`
@@ -51,6 +52,7 @@ bun run native:desktop-action -- '{"action":"focusWindow","titleContains":"WinMu
 bun run native:desktop-uia-action -- '{"action":"invoke","titleContains":"Browse for Folder","name":"OK"}'
 bun run native:terminal-state
 bun run native:browser-state
+bun run native:diff-state
 bun run native:browser-eval -- "<pane-id>" "document.title"
 bun run native:browser-screenshot -- "<pane-id>"
 bun run native:agent-browser-smoke
@@ -58,6 +60,7 @@ bun run native:recording-start -- '{"fps":24,"maxDurationMs":5000,"keepFrames":f
 bun run native:recording-stop
 bun run native:demo-recording
 bun run native:demo-recording:cinematic
+bun run native:patch-review-recording
 bun run native:new-project-recording
 bun run native:render-trace
 bun run native:screenshot
@@ -147,6 +150,7 @@ Each thread entry also includes:
 
 - `worktreePath`
 - `branchName`
+- `selectedDiffPath`
 - `changedFileCount`
 
 Notes:
@@ -197,6 +201,42 @@ Notes:
 - the preferred extension set is currently Claude plus uBlock Origin when found in the local Chromium profile
 - the profile can be seeded or repaired from local Chromium data, but it still does not imply live Chrome-profile reuse or Google Sync parity
 
+### Diff-pane inspection
+
+`POST /diff-state` returns structured patch-review state directly from the native diff pane.
+
+Returned fields per pane:
+
+- `paneId`
+- `threadId`
+- `projectId`
+- `title`
+- `path`
+- `summary`
+- `rawText`
+- `hasDiff`
+- `lineCount`
+- `lines`
+
+Each diff line includes:
+
+- `index`
+- `kind`
+- `text`
+- `foreground`
+
+Request fields:
+
+- `paneId`
+- `maxLines`
+
+Notes:
+
+- this is the native source of truth for patch-review validation now
+- line `kind` is normalized to `metadata`, `hunk`, `addition`, `deletion`, `context`, or `empty`
+- `foreground` is the resolved shell color, so light-mode and dark-mode diff audits can assert actual rendered brush choices
+- diff panes now expose inner semantic ids such as `shell-diff-pane-header-<pane-id>`, `shell-diff-pane-path-<pane-id>`, `shell-diff-pane-summary-<pane-id>`, and `shell-diff-pane-content-<pane-id>`
+
 ### Terminal-side browser bridge
 
 WinMux also exposes browser automation into terminal panes and WSL shells through environment variables and a small helper script.
@@ -218,7 +258,7 @@ The bridge is currently verified by:
 Notes:
 
 - WSL terminal agents should use the helper bridge instead of assuming direct CDP access to browser panes
-- the helper currently supports browser-state and browser-eval style queries against the live WinMux browser pane
+- the helper currently supports browser-state, browser-eval, and browser-screenshot style queries against the live WinMux browser pane
 
 ### Generic UI actions
 
@@ -258,6 +298,21 @@ Notes:
 - `setText` works on `TextBox` and `ComboBox`.
 - `invokeMenuItem` works on controls that expose a `ContextFlyout`.
 - `hover`, `press`, and `normalState` drive WinUI visual states for inspection. They are useful for checking hover and pressed styling even though they are not full pointer simulation.
+
+Examples of WinMux semantic automation ids now exposed on dynamic shell content:
+
+- `shell-project-title-<project-id>`
+- `shell-project-meta-<project-id>`
+- `shell-thread-title-<thread-id>`
+- `shell-thread-meta-<thread-id>`
+- `shell-tab-header-<pane-id>`
+- `shell-tab-kind-<pane-id>`
+- `shell-tab-title-<pane-id>`
+- `shell-diff-file-<path-key>`
+- `shell-diff-file-status-<path-key>`
+- `shell-diff-file-name-<path-key>`
+- `shell-diff-file-meta-<path-key>`
+- `shell-diff-file-metrics-<path-key>`
 - `doubleClick` is supported for app-owned cases such as thread rename.
 
 ### Desktop window automation
@@ -512,6 +567,8 @@ Important behavior:
 
 `bun run native:new-project-recording` isolates the new-project dialog flow, keeps frames by default, and validates the missing-directory WSL startup path.
 
+`bun run native:patch-review-recording` creates a temporary git project, opens a real diff pane for `notes.txt`, waits for structured diff-state to report rendered hunk/add/remove lines, then saves a screenshot plus native recording artifacts.
+
 The demo currently covers:
 
 - pane collapse and expand
@@ -663,8 +720,8 @@ The remaining limitation is that this is focus-driven keyboard injection, not se
 
 These are not automation gaps, they are app-feature gaps:
 
-- split panes inside a tab
-- persisted workspace/session restore
+- true ConPTY process hibernation beyond workspace replay
+- thread-start / checkpoint diff history beyond the current live git snapshot
 
 ## What I Ideally Want Next
 

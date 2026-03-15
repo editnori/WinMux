@@ -13,7 +13,33 @@
 
         <Border x:Name="StartupMask"
                 AutomationProperties.AutomationId="terminal-startup-mask"
-                Background="{ThemeResource ShellPageBackgroundBrush}" />
+                Background="{ThemeResource ShellPageBackgroundBrush}">
+            <Grid>
+                <Border MaxWidth="360"
+                        Padding="18,16"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        Background="{ThemeResource ShellMutedSurfaceBrush}"
+                        BorderBrush="{ThemeResource ShellBorderBrush}"
+                        BorderThickness="1"
+                        CornerRadius="6">
+                    <StackPanel Spacing="10">
+                        <ProgressRing x:Name="StartupProgressRing"
+                                      Width="24"
+                                      Height="24"
+                                      HorizontalAlignment="Left"
+                                      IsActive="True" />
+                        <TextBlock x:Name="StartupTitleText"
+                                   Style="{StaticResource ShellSectionTextStyle}"
+                                   Text="Starting terminal" />
+                        <TextBlock x:Name="StartupDetailText"
+                                   Style="{StaticResource ShellHintTextStyle}"
+                                   TextWrapping="WrapWholeWords"
+                                   Text="/mnt/c/Users/lqassem/native-terminal-starter" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+        </Border>
 
         <Border x:Name="StatusBadge"
                 AutomationProperties.AutomationId="terminal-status-badge"

@@ -265,7 +265,7 @@ namespace SelfContainedDeployment.Shell
                 "export WINMUX_BROWSER_STATE_URL=\"$WINMUX_AUTOMATION_URL/browser-state\"; " +
                 "export WINMUX_BROWSER_EVAL_URL=\"$WINMUX_AUTOMATION_URL/browser-eval\"; " +
                 "export WINMUX_BROWSER_SCREENSHOT_URL=\"$WINMUX_AUTOMATION_URL/browser-screenshot\"; " +
-                "exec \"${SHELL:-bash}\" -l";
+                "exec \"${SHELL:-bash}\" -il";
 
             if (TryParseWslSharePath(normalizedPath, out WslSharePath wslSharePath))
             {
@@ -392,6 +392,8 @@ namespace SelfContainedDeployment.Shell
         public int ChangedFileCount { get; set; }
 
         public string SelectedPaneId { get; set; }
+
+        public string SelectedDiffPath { get; set; }
 
         public string SelectedTabId
         {

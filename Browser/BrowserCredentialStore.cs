@@ -116,14 +116,29 @@ namespace SelfContainedDeployment.Browser
                     };
                 }
 
-                BrowserCredentialEnvelope envelope = new()
+                lock (Sync)
                 {
-                    ImportedAtUtc = DateTimeOffset.UtcNow,
-                    SourcePath = csvPath,
-                    Entries = entries,
-                };
+                    BrowserCredentialEnvelope envelope = LoadEnvelopeCore();
+                    foreach (BrowserCredentialEntry entry in entries)
+                    {
+                        int existingIndex = envelope.Entries.FindIndex(candidate =>
+                            string.Equals(candidate.Host, entry.Host, StringComparison.OrdinalIgnoreCase) &&
+                            string.Equals(candidate.Username ?? string.Empty, entry.Username ?? string.Empty, StringComparison.OrdinalIgnoreCase));
 
-                SaveEnvelope(envelope);
+                        if (existingIndex >= 0)
+                        {
+                            envelope.Entries[existingIndex] = entry;
+                        }
+                        else
+                        {
+                            envelope.Entries.Add(entry);
+                        }
+                    }
+
+                    envelope.ImportedAtUtc = DateTimeOffset.UtcNow;
+                    envelope.SourcePath = csvPath;
+                    SaveEnvelopeCore(envelope);
+                }
 
                 return new BrowserCredentialImportResult
                 {

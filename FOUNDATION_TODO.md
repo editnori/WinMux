@@ -9,7 +9,9 @@ This pass is about making the app operable and debuggable before more UI work la
 - [x] Expose semantic actions for pane toggle, theme changes, thread switching, tab switching, and screenshot capture.
 - [x] Add Bun entrypoints for `health`, `state`, `action`, and `screenshot`.
 - [x] Add richer control-level automation with UI-tree snapshots, generic UI actions, terminal inspection, and annotated screenshots.
-- [ ] Add a few higher-level scripted flows on top of the generic automation layer.
+- [x] Add a few higher-level scripted flows on top of the generic automation layer.
+- [x] Expose structured diff-pane inspection and a deterministic patch-review recording flow.
+- [ ] Fix the current terminal `WebView2 failed: Object reference not set to an instance of an object.` startup regression seen on fresh WSL terminal panes during automation runs.
 
 ## 2. Light mode
 
@@ -24,4 +26,4 @@ This pass is about making the app operable and debuggable before more UI work la
 - [x] Model threads as nested conversation/session buckets inside each project.
 - [x] Model tabs as independent terminal surfaces owned by a single thread.
 - [x] Preserve the selected tab per thread when switching projects and threads.
-- [ ] Add persistence so projects, threads, profiles, and selected tabs survive relaunch.
+- [x] Add persistence so projects, threads, profiles, and selected tabs survive relaunch.

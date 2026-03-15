@@ -59,6 +59,8 @@ namespace SelfContainedDeployment.Persistence
 
         public string BranchName { get; set; }
 
+        public string SelectedDiffPath { get; set; }
+
         public string SelectedPaneId { get; set; }
 
         public string Layout { get; set; }
@@ -99,26 +101,27 @@ namespace SelfContainedDeployment.Persistence
             WriteIndented = true,
         };
 
-        private static readonly string SessionDirectory = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "WinMux");
+        private static readonly string SessionDirectory = ResolveSessionDirectory();
 
-        private static readonly string SessionPath = Path.Combine(SessionDirectory, "workspace-session.json");
+        private static readonly string SessionPath = ResolveSessionPath(SessionDirectory);
 
-        public static WorkspaceSessionSnapshot Load()
+        public static WorkspaceSessionSnapshot Load(out string error)
         {
             try
             {
                 if (!File.Exists(SessionPath))
                 {
+                    error = null;
                     return null;
                 }
 
                 string json = File.ReadAllText(SessionPath);
+                error = null;
                 return JsonSerializer.Deserialize<WorkspaceSessionSnapshot>(json, JsonOptions);
             }
-            catch
+            catch (Exception ex)
             {
+                error = ex.Message;
                 return null;
             }
         }
@@ -147,6 +150,41 @@ namespace SelfContainedDeployment.Persistence
         }
 
         public static string GetSessionPath() => SessionPath;
+
+        private static string ResolveSessionDirectory()
+        {
+            string overridePath = Environment.GetEnvironmentVariable("WINMUX_SESSION_DIRECTORY");
+            if (!string.IsNullOrWhiteSpace(overridePath))
+            {
+                return Path.GetFullPath(overridePath.Trim());
+            }
+
+            string sessionPathOverride = Environment.GetEnvironmentVariable("WINMUX_SESSION_PATH");
+            if (!string.IsNullOrWhiteSpace(sessionPathOverride))
+            {
+                string fullPath = Path.GetFullPath(sessionPathOverride.Trim());
+                string directory = Path.GetDirectoryName(fullPath);
+                if (!string.IsNullOrWhiteSpace(directory))
+                {
+                    return directory;
+                }
+            }
+
+            return Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "WinMux");
+        }
+
+        private static string ResolveSessionPath(string sessionDirectory)
+        {
+            string sessionPathOverride = Environment.GetEnvironmentVariable("WINMUX_SESSION_PATH");
+            if (!string.IsNullOrWhiteSpace(sessionPathOverride))
+            {
+                return Path.GetFullPath(sessionPathOverride.Trim());
+            }
+
+            return Path.Combine(sessionDirectory, "workspace-session.json");
+        }
 
         public static ElementTheme ParseTheme(string theme)
         {

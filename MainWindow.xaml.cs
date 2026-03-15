@@ -88,6 +88,11 @@ namespace SelfContainedDeployment
             return MainPage?.GetBrowserState(request) ?? new NativeAutomationBrowserStateResponse();
         }
 
+        public NativeAutomationDiffStateResponse GetDiffState(NativeAutomationDiffStateRequest request)
+        {
+            return MainPage?.GetDiffState(request) ?? new NativeAutomationDiffStateResponse();
+        }
+
         public Task<NativeAutomationBrowserEvalResponse> EvaluateBrowserAsync(NativeAutomationBrowserEvalRequest request)
         {
             return MainPage?.EvaluateBrowserAsync(request) ?? Task.FromResult(new NativeAutomationBrowserEvalResponse

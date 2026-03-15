@@ -66,6 +66,8 @@ namespace SelfContainedDeployment.Automation
 
         public string BranchName { get; set; }
 
+        public string SelectedDiffPath { get; set; }
+
         public string SelectedTabId { get; set; }
 
         public int TabCount { get; set; }
@@ -368,6 +370,54 @@ namespace SelfContainedDeployment.Automation
         public int Width { get; set; }
 
         public int Height { get; set; }
+    }
+
+    public sealed class NativeAutomationDiffStateRequest
+    {
+        public string PaneId { get; set; }
+
+        public int MaxLines { get; set; }
+    }
+
+    public sealed class NativeAutomationDiffStateResponse
+    {
+        public string SelectedPaneId { get; set; }
+
+        public List<NativeAutomationDiffSnapshot> Panes { get; set; } = new();
+    }
+
+    public sealed class NativeAutomationDiffSnapshot
+    {
+        public string PaneId { get; set; }
+
+        public string ThreadId { get; set; }
+
+        public string ProjectId { get; set; }
+
+        public string Title { get; set; }
+
+        public string Path { get; set; }
+
+        public string Summary { get; set; }
+
+        public string RawText { get; set; }
+
+        public bool HasDiff { get; set; }
+
+        public int LineCount { get; set; }
+
+        public List<NativeAutomationDiffLine> Lines { get; set; } = new();
+    }
+
+    public sealed class NativeAutomationDiffLine
+    {
+        public int Index { get; set; }
+
+        public string Kind { get; set; }
+
+        public string Text { get; set; }
+
+        public string Foreground { get; set; }
     }
 
     public sealed class NativeAutomationEventsResponse

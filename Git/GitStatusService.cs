@@ -271,40 +271,41 @@ namespace SelfContainedDeployment.Git
         {
             string normalizedStatus = status?.Trim() ?? string.Empty;
             selectedPath = NormalizeTrackedPath(selectedPath);
+            string quotedSelectedPath = QuoteShellArgument(selectedPath);
             if (string.Equals(normalizedStatus, "??", StringComparison.Ordinal))
             {
-                const string untrackedScript = "if [ -e \"$1\" ]; then git --no-optional-locks -c core.quotepath=false diff --no-index -- /dev/null -- \"$1\"; code=$?; if [ $code -le 1 ]; then exit 0; fi; exit $code; fi";
-                return RunWslShell(workingPath, untrackedScript, selectedPath);
+                string untrackedScript = $"if [ -e {quotedSelectedPath} ]; then git --no-optional-locks -c core.quotepath=false diff --no-index -- /dev/null -- {quotedSelectedPath}; code=$?; if [ $code -le 1 ]; then exit 0; fi; exit $code; fi";
+                return RunWslShell(workingPath, untrackedScript);
             }
 
             if (normalizedStatus.IndexOf('A') >= 0 ||
                 normalizedStatus.IndexOf('R') >= 0 ||
                 normalizedStatus.IndexOf('C') >= 0)
             {
-                const string stagedFirstScript = "git --no-optional-locks -c core.quotepath=false diff --cached -- \"$1\"";
-                GitCommandResult stagedDiff = RunWslShell(workingPath, stagedFirstScript, selectedPath);
+                string stagedFirstScript = $"git --no-optional-locks -c core.quotepath=false diff --cached -- {quotedSelectedPath}";
+                GitCommandResult stagedDiff = RunWslShell(workingPath, stagedFirstScript);
                 if (stagedDiff.Ok && !string.IsNullOrWhiteSpace(stagedDiff.Output))
                 {
                     return stagedDiff;
                 }
             }
 
-            const string headScript = "git --no-optional-locks -c core.quotepath=false diff HEAD -- \"$1\"";
-            GitCommandResult headDiff = RunWslShell(workingPath, headScript, selectedPath);
+            string headScript = $"git --no-optional-locks -c core.quotepath=false diff HEAD -- {quotedSelectedPath}";
+            GitCommandResult headDiff = RunWslShell(workingPath, headScript);
             if (headDiff.Ok && !string.IsNullOrWhiteSpace(headDiff.Output))
             {
                 return headDiff;
             }
 
-            const string cachedScript = "git --no-optional-locks -c core.quotepath=false diff --cached -- \"$1\"";
-            GitCommandResult cachedDiff = RunWslShell(workingPath, cachedScript, selectedPath);
+            string cachedScript = $"git --no-optional-locks -c core.quotepath=false diff --cached -- {quotedSelectedPath}";
+            GitCommandResult cachedDiff = RunWslShell(workingPath, cachedScript);
             if (cachedDiff.Ok && !string.IsNullOrWhiteSpace(cachedDiff.Output))
             {
                 return cachedDiff;
             }
 
-            const string workingTreeScript = "git --no-optional-locks -c core.quotepath=false diff -- \"$1\"";
-            GitCommandResult workingTreeDiff = RunWslShell(workingPath, workingTreeScript, selectedPath);
+            string workingTreeScript = $"git --no-optional-locks -c core.quotepath=false diff -- {quotedSelectedPath}";
+            GitCommandResult workingTreeDiff = RunWslShell(workingPath, workingTreeScript);
             if (workingTreeDiff.Ok || string.IsNullOrWhiteSpace(workingTreeDiff.Error))
             {
                 return workingTreeDiff;
@@ -330,7 +331,13 @@ namespace SelfContainedDeployment.Git
             return normalized;
         }
 
-        private static GitCommandResult RunWslShell(string workingPath, string shellScript, string argument = null)
+        private static string QuoteShellArgument(string value)
+        {
+            string normalized = value ?? string.Empty;
+            return $"'{normalized.Replace("'", "'\"'\"'", StringComparison.Ordinal)}'";
+        }
+
+        private static GitCommandResult RunWslShell(string workingPath, string shellScript)
         {
             string linuxPath = ShellProfiles.ResolveDisplayPath(workingPath, ShellProfileIds.Wsl);
             ProcessStartInfo startInfo = new()
@@ -346,11 +353,6 @@ namespace SelfContainedDeployment.Git
             startInfo.ArgumentList.Add("sh");
             startInfo.ArgumentList.Add("-lc");
             startInfo.ArgumentList.Add(shellScript);
-            startInfo.ArgumentList.Add("winmux");
-            if (!string.IsNullOrWhiteSpace(argument))
-            {
-                startInfo.ArgumentList.Add(argument);
-            }
 
             using Process process = Process.Start(startInfo);
             if (process is null)
