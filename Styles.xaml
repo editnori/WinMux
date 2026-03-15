@@ -27,6 +27,9 @@
             <SolidColorBrush x:Key="ShellTextSecondaryBrush" Color="#A1A1AA" />
             <SolidColorBrush x:Key="ShellTextTertiaryBrush" Color="#71717A" />
             <SolidColorBrush x:Key="ShellSuccessBrush" Color="#4ADE80" />
+            <SolidColorBrush x:Key="ShellWarningBrush" Color="#FBBF24" />
+            <SolidColorBrush x:Key="ShellDangerBrush" Color="#F87171" />
+            <SolidColorBrush x:Key="ShellInfoBrush" Color="#60A5FA" />
 
             <SolidColorBrush x:Key="TabViewBackground" Color="#111214" />
             <SolidColorBrush x:Key="TabViewItemHeaderBackground" Color="#111214" />
@@ -73,6 +76,9 @@
             <SolidColorBrush x:Key="ShellTextSecondaryBrush" Color="#A1A1AA" />
             <SolidColorBrush x:Key="ShellTextTertiaryBrush" Color="#71717A" />
             <SolidColorBrush x:Key="ShellSuccessBrush" Color="#4ADE80" />
+            <SolidColorBrush x:Key="ShellWarningBrush" Color="#FBBF24" />
+            <SolidColorBrush x:Key="ShellDangerBrush" Color="#F87171" />
+            <SolidColorBrush x:Key="ShellInfoBrush" Color="#60A5FA" />
 
             <SolidColorBrush x:Key="TabViewBackground" Color="#111214" />
             <SolidColorBrush x:Key="TabViewItemHeaderBackground" Color="#111214" />
@@ -119,6 +125,9 @@
             <SolidColorBrush x:Key="ShellTextSecondaryBrush" Color="#52525B" />
             <SolidColorBrush x:Key="ShellTextTertiaryBrush" Color="#71717A" />
             <SolidColorBrush x:Key="ShellSuccessBrush" Color="#16A34A" />
+            <SolidColorBrush x:Key="ShellWarningBrush" Color="#CA8A04" />
+            <SolidColorBrush x:Key="ShellDangerBrush" Color="#DC2626" />
+            <SolidColorBrush x:Key="ShellInfoBrush" Color="#2563EB" />
 
             <SolidColorBrush x:Key="TabViewBackground" Color="#FFFFFF" />
             <SolidColorBrush x:Key="TabViewItemHeaderBackground" Color="#F8F8F9" />
@@ -270,6 +279,13 @@
 
     <Style x:Key="ShellHintTextStyle" TargetType="TextBlock" BasedOn="{StaticResource BaseTextBlockStyle}">
         <Setter Property="FontSize" Value="11" />
+        <Setter Property="Foreground" Value="{ThemeResource ShellTextTertiaryBrush}" />
+    </Style>
+
+    <Style x:Key="ShellInspectorLabelTextStyle" TargetType="TextBlock" BasedOn="{StaticResource BaseTextBlockStyle}">
+        <Setter Property="FontSize" Value="10" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="CharacterSpacing" Value="80" />
         <Setter Property="Foreground" Value="{ThemeResource ShellTextTertiaryBrush}" />
     </Style>
 

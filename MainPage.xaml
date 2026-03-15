@@ -213,32 +213,113 @@
                             Background="{ThemeResource ShellSurfaceBackgroundBrush}"
                             BorderBrush="{ThemeResource ShellBorderBrush}"
                             BorderThickness="1,0,0,0">
-                        <Border Padding="12,10,12,12">
-                            <StackPanel>
+                        <Grid RowDefinitions="Auto,*">
+                            <Grid Padding="12,10,12,10"
+                                  BorderBrush="{ThemeResource ShellBorderBrush}"
+                                  BorderThickness="0,0,0,1"
+                                  ColumnDefinitions="*,Auto"
+                                  ColumnSpacing="12">
+                                <StackPanel Spacing="2">
+                                    <TextBlock Text="Inspector"
+                                               Style="{StaticResource ShellSectionTextStyle}" />
+                                    <TextBlock Text="Active thread repo state"
+                                               Style="{StaticResource ShellHintTextStyle}" />
+                                </StackPanel>
+
                                 <Button x:Name="RefreshDiffButton"
+                                        Grid.Column="1"
                                         AutomationProperties.AutomationId="shell-diff-refresh"
                                         Click="OnRefreshDiffClicked"
-                                        Content="Refresh diff" />
-                                <TextBlock Text="Inspector"
-                                           Style="{StaticResource ShellSectionTextStyle}" />
-                                <TextBlock x:Name="DiffBranchText"
-                                           AutomationProperties.AutomationId="shell-diff-branch"
-                                           Text="No git context" />
-                                <TextBlock x:Name="DiffWorktreeText"
-                                           AutomationProperties.AutomationId="shell-diff-worktree" />
-                                <TextBlock x:Name="DiffSummaryText"
-                                           AutomationProperties.AutomationId="shell-diff-summary"
-                                           Text="No working tree changes" />
-                                <ListView x:Name="DiffFileListView"
-                                          AutomationProperties.AutomationId="shell-diff-file-list"
-                                          SelectionMode="Single"
-                                          SelectionChanged="OnDiffFileSelectionChanged" />
-                                <TextBox x:Name="DiffPreviewBox"
-                                         AutomationProperties.AutomationId="shell-diff-preview"
-                                         IsReadOnly="True"
-                                         AcceptsReturn="True" />
-                            </StackPanel>
-                        </Border>
+                                        Style="{StaticResource ShellSubItemButtonStyle}">
+                                    <Grid ColumnDefinitions="16,*"
+                                          ColumnSpacing="8">
+                                        <FontIcon FontSize="11"
+                                                  Glyph="&#xE72C;" />
+                                        <TextBlock Grid.Column="1"
+                                                   FontSize="12"
+                                                   Text="Refresh" />
+                                    </Grid>
+                                </Button>
+                            </Grid>
+
+                            <ScrollViewer Grid.Row="1"
+                                          VerticalScrollBarVisibility="Auto"
+                                          HorizontalScrollBarVisibility="Disabled">
+                                <StackPanel Padding="12,12,12,14"
+                                            Spacing="14">
+                                    <StackPanel Spacing="4">
+                                        <TextBlock Text="BRANCH"
+                                                   Style="{StaticResource ShellInspectorLabelTextStyle}" />
+                                        <TextBlock x:Name="DiffBranchText"
+                                                   AutomationProperties.AutomationId="shell-diff-branch"
+                                                   Style="{StaticResource ShellBodyTextStyle}"
+                                                   Text="No git context" />
+                                    </StackPanel>
+
+                                    <StackPanel Spacing="4">
+                                        <TextBlock Text="ROOT"
+                                                   Style="{StaticResource ShellInspectorLabelTextStyle}" />
+                                        <TextBlock x:Name="DiffWorktreeText"
+                                                   AutomationProperties.AutomationId="shell-diff-worktree"
+                                                   Style="{StaticResource ShellHintTextStyle}"
+                                                   TextWrapping="WrapWholeWords" />
+                                    </StackPanel>
+
+                                    <StackPanel Spacing="4">
+                                        <TextBlock Text="CHANGES"
+                                                   Style="{StaticResource ShellInspectorLabelTextStyle}" />
+                                        <TextBlock x:Name="DiffSummaryText"
+                                                   AutomationProperties.AutomationId="shell-diff-summary"
+                                                   Style="{StaticResource ShellHintTextStyle}"
+                                                   Text="No working tree changes"
+                                                   TextWrapping="WrapWholeWords" />
+                                    </StackPanel>
+
+                                    <StackPanel Spacing="8">
+                                        <TextBlock Text="CHANGED FILES"
+                                                   Style="{StaticResource ShellInspectorLabelTextStyle}" />
+                                        <Border Background="{ThemeResource ShellMutedSurfaceBrush}"
+                                                BorderBrush="{ThemeResource ShellBorderBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="4">
+                                            <ScrollViewer MaxHeight="244"
+                                                          VerticalScrollBarVisibility="Auto"
+                                                          HorizontalScrollBarVisibility="Disabled">
+                                                <StackPanel x:Name="DiffFileListPanel"
+                                                            AutomationProperties.AutomationId="shell-diff-file-list"
+                                                            Padding="4"
+                                                            Spacing="2" />
+                                            </ScrollViewer>
+                                        </Border>
+                                        <TextBlock x:Name="DiffEmptyText"
+                                                   Style="{StaticResource ShellHintTextStyle}"
+                                                   Text="No changed files in this thread."
+                                                   Visibility="Collapsed" />
+                                    </StackPanel>
+
+                                    <StackPanel Spacing="8">
+                                        <TextBlock Text="DIFF PREVIEW"
+                                                   Style="{StaticResource ShellInspectorLabelTextStyle}" />
+                                        <Border Background="{ThemeResource ShellMutedSurfaceBrush}"
+                                                BorderBrush="{ThemeResource ShellBorderBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="4"
+                                                Padding="10">
+                                            <ScrollViewer MaxHeight="420"
+                                                          VerticalScrollBarVisibility="Auto"
+                                                          HorizontalScrollBarVisibility="Auto">
+                                                <RichTextBlock x:Name="DiffPreviewBlock"
+                                                               AutomationProperties.AutomationId="shell-diff-preview"
+                                                               FontFamily="Consolas"
+                                                               FontSize="12"
+                                                               IsTextSelectionEnabled="True"
+                                                               TextWrapping="NoWrap" />
+                                            </ScrollViewer>
+                                        </Border>
+                                    </StackPanel>
+                                </StackPanel>
+                            </ScrollViewer>
+                        </Grid>
                     </Border>
 
                     <Frame x:Name="SettingsFrame"

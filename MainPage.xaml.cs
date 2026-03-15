@@ -4,6 +4,7 @@ using Microsoft.UI.Xaml.Automation.Peers;
 using Microsoft.UI.Xaml.Automation.Provider;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
+using Microsoft.UI.Xaml.Documents;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Dispatching;
@@ -46,7 +47,6 @@ namespace SelfContainedDeployment
         private bool _showingSettings;
         private bool _suppressTabSelectionChanged;
         private bool _suppressThreadNameSync;
-        private bool _suppressDiffSelectionChanged;
         private string _inlineRenamingPaneId;
         private bool _restoringSession;
         private bool _inspectorOpen = true;
@@ -885,16 +885,30 @@ namespace SelfContainedDeployment
 
         private void OnDiffFileSelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            if (_suppressDiffSelectionChanged)
+            GitChangedFile changedFile = ResolveSelectedDiffFile(sender is ListView view ? view.SelectedItem : null);
+            if (_activeGitSnapshot is null || changedFile is null)
             {
                 return;
             }
 
-            if (_activeGitSnapshot is null || DiffFileListView.SelectedItem is not GitChangedFile changedFile)
+            QueueActiveThreadGitRefresh(changedFile.Path);
+        }
+
+        private void OnDiffFileButtonClicked(object sender, RoutedEventArgs e)
+        {
+            if (sender is not Button button)
             {
                 return;
             }
 
+            GitChangedFile changedFile = ResolveSelectedDiffFile(button);
+            if (_activeGitSnapshot is null || changedFile is null)
+            {
+                return;
+            }
+
+            _activeGitSnapshot.SelectedPath = changedFile.Path;
+            UpdateDiffFileSelection();
             QueueActiveThreadGitRefresh(changedFile.Path);
         }
 
@@ -3211,8 +3225,8 @@ namespace SelfContainedDeployment
                 DiffBranchText.Text = "No git context";
                 DiffWorktreeText.Text = string.Empty;
                 DiffSummaryText.Text = "No working tree changes";
-                DiffFileListView.ItemsSource = null;
-                DiffPreviewBox.Text = string.Empty;
+                PopulateDiffFileList(null, null);
+                RenderDiffPreview(string.Empty);
                 return;
             }
 
@@ -3225,14 +3239,135 @@ namespace SelfContainedDeployment
                     ? _activeGitSnapshot.StatusSummary
                     : $"{_activeGitSnapshot.StatusSummary}\n{_activeGitSnapshot.DiffSummary}")
                 : _activeGitSnapshot.Error;
-            DiffFileListView.ItemsSource = _activeGitSnapshot.ChangedFiles;
-            _suppressDiffSelectionChanged = true;
-            DiffFileListView.SelectedItem = !string.IsNullOrWhiteSpace(_activeGitSnapshot.SelectedPath)
-                ? _activeGitSnapshot.ChangedFiles.FirstOrDefault(file => string.Equals(file.Path, _activeGitSnapshot.SelectedPath, StringComparison.Ordinal))
-                : null;
-            _suppressDiffSelectionChanged = false;
+            PopulateDiffFileList(_activeGitSnapshot.ChangedFiles, _activeGitSnapshot.SelectedPath);
+            RenderDiffPreview(_activeGitSnapshot.SelectedDiff ?? string.Empty);
+        }
 
-            DiffPreviewBox.Text = _activeGitSnapshot.SelectedDiff ?? string.Empty;
+        private void PopulateDiffFileList(IReadOnlyList<GitChangedFile> changedFiles, string selectedPath)
+        {
+            DiffFileListPanel.Children.Clear();
+            IReadOnlyList<GitChangedFile> files = changedFiles ?? Array.Empty<GitChangedFile>();
+            DiffEmptyText.Visibility = files.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+
+            foreach (GitChangedFile changedFile in files)
+            {
+                DiffFileListPanel.Children.Add(BuildDiffFileButton(changedFile));
+            }
+
+            if (_activeGitSnapshot is not null)
+            {
+                _activeGitSnapshot.SelectedPath = selectedPath;
+            }
+
+            UpdateDiffFileSelection();
+        }
+
+        private Button BuildDiffFileButton(GitChangedFile changedFile)
+        {
+            Button button = new()
+            {
+                Style = (Style)Application.Current.Resources["ShellButtonBaseStyle"],
+                Tag = changedFile,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                Padding = new Thickness(8, 6, 8, 6),
+                MinHeight = 40,
+            };
+            button.Click += OnDiffFileButtonClicked;
+            AutomationProperties.SetName(button, changedFile.DisplayName);
+
+            Grid layout = new()
+            {
+                ColumnSpacing = 8,
+            };
+            layout.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            layout.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+            TextBlock statusText = new()
+            {
+                Text = ResolveGitStatusSymbol(changedFile.Status),
+                FontSize = 12,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Width = 14,
+                VerticalAlignment = VerticalAlignment.Top,
+                HorizontalTextAlignment = TextAlignment.Center,
+                Foreground = AppBrush(button, ResolveGitStatusBrushKey(changedFile.Status)),
+            };
+            layout.Children.Add(statusText);
+
+            StackPanel textStack = new()
+            {
+                Spacing = 0,
+            };
+            Grid.SetColumn(textStack, 1);
+
+            textStack.Children.Add(new TextBlock
+            {
+                Text = changedFile.DisplayName,
+                FontSize = 12,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+            });
+
+            textStack.Children.Add(new TextBlock
+            {
+                Text = ResolveGitStatusDescription(changedFile.Status),
+                FontSize = 11,
+                Opacity = 0.74,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+            });
+
+            layout.Children.Add(textStack);
+            button.Content = layout;
+            return button;
+        }
+
+        private void UpdateDiffFileSelection()
+        {
+            string selectedPath = _activeGitSnapshot?.SelectedPath;
+            foreach (Button button in DiffFileListPanel.Children.OfType<Button>())
+            {
+                GitChangedFile changedFile = ResolveSelectedDiffFile(button);
+                ApplyDiffFileButtonState(button, string.Equals(changedFile?.Path, selectedPath, StringComparison.Ordinal));
+            }
+        }
+
+        private void RenderDiffPreview(string diffText)
+        {
+            DiffPreviewBlock.Blocks.Clear();
+            if (string.IsNullOrWhiteSpace(diffText))
+            {
+                Paragraph emptyParagraph = new();
+                emptyParagraph.Inlines.Add(new Run
+                {
+                    Text = "Select a changed file to inspect its diff.",
+                    Foreground = AppBrush(DiffPreviewBlock, "ShellTextTertiaryBrush"),
+                });
+                DiffPreviewBlock.Blocks.Add(emptyParagraph);
+                return;
+            }
+
+            Paragraph paragraph = new()
+            {
+                Margin = new Thickness(0),
+            };
+
+            string[] lines = diffText.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+            for (int index = 0; index < lines.Length; index++)
+            {
+                string line = lines[index];
+                paragraph.Inlines.Add(new Run
+                {
+                    Text = line,
+                    Foreground = AppBrush(DiffPreviewBlock, ResolveDiffLineBrushKey(line)),
+                });
+
+                if (index < lines.Length - 1)
+                {
+                    paragraph.Inlines.Add(new LineBreak());
+                }
+            }
+
+            DiffPreviewBlock.Blocks.Add(paragraph);
         }
 
         private void FocusSelectedPane()
@@ -4423,10 +4558,20 @@ namespace SelfContainedDeployment
                 (ElementTheme.Light, "ShellBorderBrush") => Windows.UI.Color.FromArgb(0xFF, 0xE4, 0xE4, 0xE7),
                 (ElementTheme.Light, "ShellTextPrimaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0x18, 0x18, 0x1B),
                 (ElementTheme.Light, "ShellTextSecondaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0x52, 0x52, 0x5B),
+                (ElementTheme.Light, "ShellTextTertiaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0x71, 0x71, 0x7A),
+                (ElementTheme.Light, "ShellSuccessBrush") => Windows.UI.Color.FromArgb(0xFF, 0x16, 0xA3, 0x4A),
+                (ElementTheme.Light, "ShellWarningBrush") => Windows.UI.Color.FromArgb(0xFF, 0xCA, 0x8A, 0x04),
+                (ElementTheme.Light, "ShellDangerBrush") => Windows.UI.Color.FromArgb(0xFF, 0xDC, 0x26, 0x26),
+                (ElementTheme.Light, "ShellInfoBrush") => Windows.UI.Color.FromArgb(0xFF, 0x25, 0x63, 0xEB),
                 (ElementTheme.Dark, "ShellNavActiveBrush") => Windows.UI.Color.FromArgb(0xFF, 0x1F, 0x22, 0x28),
                 (ElementTheme.Dark, "ShellBorderBrush") => Windows.UI.Color.FromArgb(0xFF, 0x23, 0x25, 0x2B),
                 (ElementTheme.Dark, "ShellTextPrimaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0xFA, 0xFA, 0xFA),
                 (ElementTheme.Dark, "ShellTextSecondaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0xA1, 0xA1, 0xAA),
+                (ElementTheme.Dark, "ShellTextTertiaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0x71, 0x71, 0x7A),
+                (ElementTheme.Dark, "ShellSuccessBrush") => Windows.UI.Color.FromArgb(0xFF, 0x4A, 0xDE, 0x80),
+                (ElementTheme.Dark, "ShellWarningBrush") => Windows.UI.Color.FromArgb(0xFF, 0xFB, 0xBF, 0x24),
+                (ElementTheme.Dark, "ShellDangerBrush") => Windows.UI.Color.FromArgb(0xFF, 0xF8, 0x71, 0x71),
+                (ElementTheme.Dark, "ShellInfoBrush") => Windows.UI.Color.FromArgb(0xFF, 0x60, 0xA5, 0xFA),
                 _ => default,
             };
 
@@ -4436,6 +4581,120 @@ namespace SelfContainedDeployment
             }
 
             return (Brush)Application.Current.Resources[key];
+        }
+
+        private static GitChangedFile ResolveSelectedDiffFile(object selectedItem)
+        {
+            return selectedItem switch
+            {
+                GitChangedFile changedFile => changedFile,
+                Button button when button.Tag is GitChangedFile changedFile => changedFile,
+                ListViewItem item when item.Tag is GitChangedFile changedFile => changedFile,
+                _ => null,
+            };
+        }
+
+        private static void ApplyDiffFileButtonState(Button button, bool active)
+        {
+            button.Background = active ? AppBrush(button, "ShellNavActiveBrush") : null;
+            button.BorderBrush = active ? AppBrush(button, "ShellBorderBrush") : null;
+            button.Foreground = active ? AppBrush(button, "ShellTextPrimaryBrush") : AppBrush(button, "ShellTextSecondaryBrush");
+        }
+
+        private static string ResolveGitStatusSymbol(string status)
+        {
+            status = status?.Trim() ?? string.Empty;
+            if (status.IndexOf('A') >= 0 || status == "??")
+            {
+                return "+";
+            }
+
+            if (status.IndexOf('D') >= 0)
+            {
+                return "-";
+            }
+
+            if (status.IndexOf('R') >= 0)
+            {
+                return "R";
+            }
+
+            return "~";
+        }
+
+        private static string ResolveGitStatusDescription(string status)
+        {
+            status = status?.Trim() ?? string.Empty;
+            if (status.IndexOf('A') >= 0 || status == "??")
+            {
+                return "Added";
+            }
+
+            if (status.IndexOf('D') >= 0)
+            {
+                return "Deleted";
+            }
+
+            if (status.IndexOf('R') >= 0)
+            {
+                return "Renamed";
+            }
+
+            return "Modified";
+        }
+
+        private static string ResolveGitStatusBrushKey(string status)
+        {
+            status = status?.Trim() ?? string.Empty;
+            if (status.IndexOf('A') >= 0 || status == "??")
+            {
+                return "ShellSuccessBrush";
+            }
+
+            if (status.IndexOf('D') >= 0)
+            {
+                return "ShellDangerBrush";
+            }
+
+            if (status.IndexOf('R') >= 0)
+            {
+                return "ShellInfoBrush";
+            }
+
+            return "ShellWarningBrush";
+        }
+
+        private static string ResolveDiffLineBrushKey(string line)
+        {
+            if (string.IsNullOrEmpty(line))
+            {
+                return "ShellTextSecondaryBrush";
+            }
+
+            if (line.StartsWith("+", StringComparison.Ordinal) && !line.StartsWith("+++", StringComparison.Ordinal))
+            {
+                return "ShellSuccessBrush";
+            }
+
+            if (line.StartsWith("-", StringComparison.Ordinal) && !line.StartsWith("---", StringComparison.Ordinal))
+            {
+                return "ShellDangerBrush";
+            }
+
+            if (line.StartsWith("@@", StringComparison.Ordinal))
+            {
+                return "ShellInfoBrush";
+            }
+
+            if (line.StartsWith("diff ", StringComparison.Ordinal) ||
+                line.StartsWith("index ", StringComparison.Ordinal) ||
+                line.StartsWith("---", StringComparison.Ordinal) ||
+                line.StartsWith("+++", StringComparison.Ordinal))
+            {
+                return "ShellTextSecondaryBrush";
+            }
+
+            return "ShellTextPrimaryBrush";
         }
 
         private static void ApplyActionButtonState(Button button, TextBlock label, bool active)
