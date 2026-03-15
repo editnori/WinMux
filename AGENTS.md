@@ -35,7 +35,7 @@ What exists now:
 - browser panes backed by `WebView2` with a built-in start page, lightweight in-pane tabs, and a shared WinMux browser profile
 - imported browser-password CSV support backed by a WinMux-encrypted credential store
 - Preferences management for the WinMux credential vault: import, per-site delete, clear, and manual autofill
-- editor panes backed by `TerminalControl` launching `nvim .`
+- editor panes backed by `TerminalControl` launching `hx .`
 - ConPTY process bridge in C#
 - shared renderer under `Web/` hosted inside `WebView2`
 - WebView2 CDP debug workflow for Playwright-style inspection

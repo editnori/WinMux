@@ -28,7 +28,7 @@ This is the current feature inventory for the native WinMux shell as it exists i
 - WebView2-hosted terminal renderer using the shared `Web/terminal-host.*` frontend
 - Hardened renderer startup handshake so fresh WSL tabs cannot miss the initial renderer `ready` signal
 - Theme propagation into the terminal renderer
-- Editor pane mode backed by terminal launch of `nvim .`
+- Editor pane mode backed by terminal launch of `hx .`
 - Replay metadata capture for Codex and Claude resume commands
 - Session restore that can replay stored resume commands on relaunch
 - Failed restored replay panes stay in the workspace as ended tabs instead of disappearing on the next autosave
