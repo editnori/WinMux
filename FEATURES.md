@@ -10,6 +10,8 @@ This is the current feature inventory for the native WinMux shell as it exists i
 - New sibling threads inherit the selected thread's worktree path when one is active
 - First-pass active-project thread overview inside the shell workspace
 - Terminal, browser, editor, and diff panes
+- Fit visible panes action plus splitter double-click rebalance
+- Shift-drag splitter support to resize both pane axes together in multi-row layouts
 - Inline pane rename and thread rename flows
 - Project removal from the project context menu
 - Right-side inspector rail for active thread repo state
@@ -50,6 +52,7 @@ This is the current feature inventory for the native WinMux shell as it exists i
 - Active-thread git snapshot from git state, not terminal parsing
 - Thread baseline capture plus manual checkpoint snapshots for diff review
 - Review-source switching between live state, thread baseline, and named checkpoints
+- Review-source controls stay hidden until a thread has baseline/checkpoint choices
 - Inspector changed-file list with insertion/deletion counts
 - Diff pane opens in review layout from inspector file selection
 - Persisted selected diff path per thread

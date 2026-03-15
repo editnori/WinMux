@@ -660,6 +660,11 @@ namespace SelfContainedDeployment
                         SetPaneSplit(request.ThreadId, request.Value);
                         ShowTerminalShell();
                         break;
+                    case "fitpanes":
+                    case "fitvisiblepanes":
+                        EqualizeVisiblePaneSplits(ResolveActionThread(request), equalizePrimary: true, equalizeSecondary: true, reason: "automation");
+                        ShowTerminalShell();
+                        break;
                     case "setthreadworktree":
                         SetThreadWorktree(request.ThreadId, request.Value);
                         ShowTerminalShell();
@@ -1052,6 +1057,11 @@ namespace SelfContainedDeployment
             AddEditorPane(_activeProject, _activeThread);
         }
 
+        private void OnFitPanesClicked(object sender, RoutedEventArgs e)
+        {
+            EqualizeVisiblePaneSplits(_activeThread, equalizePrimary: true, equalizeSecondary: true, reason: "button");
+        }
+
         private void OnToggleInspectorClicked(object sender, RoutedEventArgs e)
         {
             ToggleInspector();
@@ -1282,13 +1292,14 @@ namespace SelfContainedDeployment
 
         private void RefreshDiffReviewSourceControls()
         {
-            if (DiffReviewSourceComboBox is null || DiffReviewSourceMetaText is null || CaptureCheckpointButton is null)
+            if (DiffReviewSourceComboBox is null || DiffReviewSourceMetaText is null || CaptureCheckpointButton is null || DiffReviewSourceSection is null)
             {
                 return;
             }
 
             if (_activeThread is null)
             {
+                DiffReviewSourceSection.Visibility = Visibility.Collapsed;
                 _suppressDiffReviewSourceSelectionChanged = true;
                 DiffReviewSourceComboBox.ItemsSource = null;
                 DiffReviewSourceComboBox.SelectedItem = null;
@@ -1311,6 +1322,7 @@ namespace SelfContainedDeployment
             DiffReviewSourceComboBox.SelectedItem = selectedOption;
             _suppressDiffReviewSourceSelectionChanged = false;
 
+            DiffReviewSourceSection.Visibility = options.Count > 1 ? Visibility.Visible : Visibility.Collapsed;
             DiffReviewSourceComboBox.IsEnabled = options.Count > 1;
             CaptureCheckpointButton.IsEnabled = !_capturingDiffCheckpoint;
             DiffReviewSourceMetaText.Text = BuildDiffReviewSourceMeta(_activeThread, selectedOption);
@@ -1326,13 +1338,13 @@ namespace SelfContainedDeployment
             return selectedOption.Kind switch
             {
                 DiffReviewSourceKind.Live => thread.BaselineSnapshot is null
-                    ? "Live working tree. Baseline will be captured on the first successful git refresh."
-                    : $"Live working tree · {thread.DiffCheckpoints.Count} checkpoint{(thread.DiffCheckpoints.Count == 1 ? string.Empty : "s")}",
-                DiffReviewSourceKind.Baseline => "Thread baseline captured when this thread first resolved git state.",
+                    ? "Current working tree"
+                    : $"Current working tree · {thread.DiffCheckpoints.Count} checkpoint{(thread.DiffCheckpoints.Count == 1 ? string.Empty : "s")}",
+                DiffReviewSourceKind.Baseline => "Thread-start snapshot",
                 DiffReviewSourceKind.Checkpoint => thread.DiffCheckpoints.FirstOrDefault(checkpoint => string.Equals(checkpoint.Id, selectedOption.CheckpointId, StringComparison.Ordinal)) is WorkspaceDiffCheckpoint checkpoint
-                    ? $"Captured {checkpoint.CapturedAt.LocalDateTime:g}"
+                    ? $"Checkpoint · {checkpoint.CapturedAt.LocalDateTime:g}"
                     : "Saved checkpoint",
-                _ => "Live working tree",
+                _ => "Current working tree",
             };
         }
 
@@ -3791,10 +3803,12 @@ namespace SelfContainedDeployment
                 Tag = "vertical",
             };
             AutomationProperties.SetAutomationId(splitter, $"shell-pane-splitter-vertical-{row}-{column}");
+            ToolTipService.SetToolTip(splitter, "Drag to resize. Hold Shift to resize both axes. Double-click to fit panes.");
             splitter.PointerPressed += OnPaneSplitterPointerPressed;
             splitter.PointerMoved += OnPaneSplitterPointerMoved;
             splitter.PointerReleased += OnPaneSplitterPointerReleased;
             splitter.PointerCanceled += OnPaneSplitterPointerCanceled;
+            splitter.DoubleTapped += OnPaneSplitterDoubleTapped;
             Grid.SetRow(splitter, row);
             Grid.SetColumn(splitter, column);
             Grid.SetRowSpan(splitter, rowSpan);
@@ -3812,10 +3826,12 @@ namespace SelfContainedDeployment
                 Tag = "horizontal",
             };
             AutomationProperties.SetAutomationId(splitter, $"shell-pane-splitter-horizontal-{row}-{column}");
+            ToolTipService.SetToolTip(splitter, "Drag to resize. Hold Shift to resize both axes. Double-click to fit panes.");
             splitter.PointerPressed += OnPaneSplitterPointerPressed;
             splitter.PointerMoved += OnPaneSplitterPointerMoved;
             splitter.PointerReleased += OnPaneSplitterPointerReleased;
             splitter.PointerCanceled += OnPaneSplitterPointerCanceled;
+            splitter.DoubleTapped += OnPaneSplitterDoubleTapped;
             Grid.SetRow(splitter, row);
             Grid.SetColumn(splitter, column);
             Grid.SetColumnSpan(splitter, columnSpan);
@@ -3849,41 +3865,26 @@ namespace SelfContainedDeployment
             }
 
             Point point = e.GetCurrentPoint(PaneWorkspaceGrid).Position;
+            bool resizeBothAxes = (e.KeyModifiers & Windows.System.VirtualKeyModifiers.Shift) == Windows.System.VirtualKeyModifiers.Shift;
 
-            if (string.Equals(_activeSplitterDirection, "vertical", StringComparison.Ordinal) && PaneWorkspaceGrid.ColumnDefinitions.Count >= 3)
+            if (string.Equals(_activeSplitterDirection, "vertical", StringComparison.Ordinal))
             {
-                double leftWidth = PaneWorkspaceGrid.ColumnDefinitions[0].ActualWidth;
-                double rightWidth = PaneWorkspaceGrid.ColumnDefinitions[2].ActualWidth;
-                double totalWidth = leftWidth + rightWidth;
-                if (totalWidth <= 0)
-                {
-                    return;
-                }
-
-                double nextLeftWidth = Math.Clamp((totalWidth * _splitterStartPrimaryRatio) + (point.X - _splitterDragOriginX), totalWidth * MinPaneSplitRatio, totalWidth * MaxPaneSplitRatio);
-                _activeThread.PrimarySplitRatio = ClampPaneSplitRatio(nextLeftWidth / totalWidth);
-                PaneWorkspaceGrid.ColumnDefinitions[0].Width = new GridLength(_activeThread.PrimarySplitRatio, GridUnitType.Star);
-                PaneWorkspaceGrid.ColumnDefinitions[2].Width = new GridLength(1 - _activeThread.PrimarySplitRatio, GridUnitType.Star);
+                UpdatePaneSplitRatiosFromPointer(point, adjustPrimary: true, adjustSecondary: resizeBothAxes);
                 e.Handled = true;
                 return;
             }
 
-            if (string.Equals(_activeSplitterDirection, "horizontal", StringComparison.Ordinal) && PaneWorkspaceGrid.RowDefinitions.Count >= 3)
+            if (string.Equals(_activeSplitterDirection, "horizontal", StringComparison.Ordinal))
             {
-                double topHeight = PaneWorkspaceGrid.RowDefinitions[0].ActualHeight;
-                double bottomHeight = PaneWorkspaceGrid.RowDefinitions[2].ActualHeight;
-                double totalHeight = topHeight + bottomHeight;
-                if (totalHeight <= 0)
-                {
-                    return;
-                }
-
-                double nextTopHeight = Math.Clamp((totalHeight * _splitterStartSecondaryRatio) + (point.Y - _splitterDragOriginY), totalHeight * MinPaneSplitRatio, totalHeight * MaxPaneSplitRatio);
-                _activeThread.SecondarySplitRatio = ClampPaneSplitRatio(nextTopHeight / totalHeight);
-                PaneWorkspaceGrid.RowDefinitions[0].Height = new GridLength(_activeThread.SecondarySplitRatio, GridUnitType.Star);
-                PaneWorkspaceGrid.RowDefinitions[2].Height = new GridLength(1 - _activeThread.SecondarySplitRatio, GridUnitType.Star);
+                UpdatePaneSplitRatiosFromPointer(point, adjustPrimary: resizeBothAxes, adjustSecondary: true);
                 e.Handled = true;
             }
+        }
+
+        private void OnPaneSplitterDoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
+        {
+            EqualizeVisiblePaneSplits(_activeThread, equalizePrimary: true, equalizeSecondary: true, reason: "splitter");
+            e.Handled = true;
         }
 
         private void OnPaneSplitterPointerReleased(object sender, PointerRoutedEventArgs e)
@@ -3952,6 +3953,88 @@ namespace SelfContainedDeployment
                 ["projectId"] = _activeProject?.Id ?? string.Empty,
                 ["primarySplitRatio"] = _activeThread.PrimarySplitRatio.ToString("0.000"),
                 ["secondarySplitRatio"] = _activeThread.SecondarySplitRatio.ToString("0.000"),
+            });
+        }
+
+        private void UpdatePaneSplitRatiosFromPointer(Point point, bool adjustPrimary, bool adjustSecondary)
+        {
+            if (_activeThread is null)
+            {
+                return;
+            }
+
+            if (adjustPrimary && PaneWorkspaceGrid.ColumnDefinitions.Count >= 3)
+            {
+                double leftWidth = PaneWorkspaceGrid.ColumnDefinitions[0].ActualWidth;
+                double rightWidth = PaneWorkspaceGrid.ColumnDefinitions[2].ActualWidth;
+                double totalWidth = leftWidth + rightWidth;
+                if (totalWidth > 0)
+                {
+                    double nextLeftWidth = Math.Clamp((totalWidth * _splitterStartPrimaryRatio) + (point.X - _splitterDragOriginX), totalWidth * MinPaneSplitRatio, totalWidth * MaxPaneSplitRatio);
+                    _activeThread.PrimarySplitRatio = ClampPaneSplitRatio(nextLeftWidth / totalWidth);
+                    PaneWorkspaceGrid.ColumnDefinitions[0].Width = new GridLength(_activeThread.PrimarySplitRatio, GridUnitType.Star);
+                    PaneWorkspaceGrid.ColumnDefinitions[2].Width = new GridLength(1 - _activeThread.PrimarySplitRatio, GridUnitType.Star);
+                }
+            }
+
+            if (adjustSecondary && PaneWorkspaceGrid.RowDefinitions.Count >= 3)
+            {
+                double topHeight = PaneWorkspaceGrid.RowDefinitions[0].ActualHeight;
+                double bottomHeight = PaneWorkspaceGrid.RowDefinitions[2].ActualHeight;
+                double totalHeight = topHeight + bottomHeight;
+                if (totalHeight > 0)
+                {
+                    double nextTopHeight = Math.Clamp((totalHeight * _splitterStartSecondaryRatio) + (point.Y - _splitterDragOriginY), totalHeight * MinPaneSplitRatio, totalHeight * MaxPaneSplitRatio);
+                    _activeThread.SecondarySplitRatio = ClampPaneSplitRatio(nextTopHeight / totalHeight);
+                    PaneWorkspaceGrid.RowDefinitions[0].Height = new GridLength(_activeThread.SecondarySplitRatio, GridUnitType.Star);
+                    PaneWorkspaceGrid.RowDefinitions[2].Height = new GridLength(1 - _activeThread.SecondarySplitRatio, GridUnitType.Star);
+                }
+            }
+        }
+
+        private void EqualizeVisiblePaneSplits(WorkspaceThread thread, bool equalizePrimary, bool equalizeSecondary, string reason)
+        {
+            if (thread is null)
+            {
+                return;
+            }
+
+            int visiblePaneCount = GetVisiblePanes(thread).Count();
+            bool updated = false;
+
+            if (equalizePrimary && visiblePaneCount >= 2)
+            {
+                thread.PrimarySplitRatio = 0.5;
+                updated = true;
+            }
+
+            if (equalizeSecondary && visiblePaneCount >= 3)
+            {
+                thread.SecondarySplitRatio = 0.5;
+                updated = true;
+            }
+
+            if (!updated)
+            {
+                return;
+            }
+
+            if (ReferenceEquals(thread, _activeThread))
+            {
+                RenderPaneWorkspace();
+                RequestLayoutForVisiblePanes();
+            }
+
+            QueueProjectTreeRefresh();
+            QueueSessionSave();
+            LogAutomationEvent("render", "pane.split_equalized", "Equalized visible pane splits", new Dictionary<string, string>
+            {
+                ["threadId"] = thread.Id,
+                ["projectId"] = FindProjectForThread(thread)?.Id ?? string.Empty,
+                ["reason"] = reason ?? string.Empty,
+                ["visiblePaneCount"] = visiblePaneCount.ToString(),
+                ["primarySplitRatio"] = thread.PrimarySplitRatio.ToString("0.000"),
+                ["secondarySplitRatio"] = thread.SecondarySplitRatio.ToString("0.000"),
             });
         }
 
@@ -4962,6 +5045,22 @@ namespace SelfContainedDeployment
             }
 
             return _activeProject ?? GetOrCreateProject(Environment.CurrentDirectory);
+        }
+
+        private WorkspaceThread ResolveActionThread(NativeAutomationActionRequest request)
+        {
+            if (!string.IsNullOrWhiteSpace(request.ThreadId))
+            {
+                return FindThread(request.ThreadId);
+            }
+
+            if (_activeThread is not null)
+            {
+                return _activeThread;
+            }
+
+            WorkspaceProject project = ResolveActionProject(request);
+            return project?.Threads.FirstOrDefault();
         }
 
         private static string ResolveThreadName(string value)

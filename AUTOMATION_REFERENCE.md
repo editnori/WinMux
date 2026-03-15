@@ -97,6 +97,7 @@ Supported `action` values:
 - `moveTabAfter`
 - `closeTab`
 - `setLayout`
+- `fitPanes`
 - `setThreadWorktree`
 - `refreshDiff`
 - `selectDiffFile`

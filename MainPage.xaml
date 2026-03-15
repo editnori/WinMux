@@ -200,6 +200,14 @@
                                     <FontIcon FontSize="12" Glyph="&#xE70F;" />
                                 </Button>
 
+                                <Button x:Name="FitPanesButton"
+                                        AutomationProperties.AutomationId="shell-fit-panes"
+                                        Style="{StaticResource ShellChromeButtonStyle}"
+                                        Click="OnFitPanesClicked"
+                                        ToolTipService.ToolTip="Fit visible panes">
+                                    <FontIcon FontSize="12" Glyph="&#xE9A8;" />
+                                </Button>
+
                                 <Button x:Name="ToggleInspectorButton"
                                         AutomationProperties.AutomationId="shell-toggle-inspector"
                                         Style="{StaticResource ShellChromeButtonStyle}"
@@ -263,12 +271,11 @@
                                   BorderThickness="0,0,0,1"
                                   ColumnDefinitions="*,Auto"
                                   ColumnSpacing="12">
-                                <StackPanel Spacing="2">
-                                    <TextBlock Text="Inspector"
-                                               Style="{StaticResource ShellSectionTextStyle}" />
-                                    <TextBlock Text="Active thread repo state"
-                                               Style="{StaticResource ShellHintTextStyle}" />
-                                </StackPanel>
+                                <TextBlock Text="Review"
+                                           Style="{StaticResource ShellSectionTextStyle}"
+                                           TextTrimming="CharacterEllipsis"
+                                           TextWrapping="NoWrap"
+                                           VerticalAlignment="Center" />
 
                                 <StackPanel Grid.Column="1"
                                             Orientation="Horizontal"
@@ -308,8 +315,10 @@
                                           HorizontalScrollBarVisibility="Disabled">
                                 <StackPanel Padding="12,12,12,14"
                                             Spacing="14">
-                                    <StackPanel Spacing="6">
-                                        <TextBlock Text="REVIEW"
+                                    <StackPanel x:Name="DiffReviewSourceSection"
+                                                Spacing="6"
+                                                Visibility="Collapsed">
+                                        <TextBlock Text="COMPARE"
                                                    Style="{StaticResource ShellInspectorLabelTextStyle}" />
                                         <ComboBox x:Name="DiffReviewSourceComboBox"
                                                   AutomationProperties.AutomationId="shell-diff-review-source"
