@@ -60,6 +60,14 @@ namespace SelfContainedDeployment.Automation
 
         public string Layout { get; set; }
 
+        public int PaneLimit { get; set; }
+
+        public int VisiblePaneCapacity { get; set; }
+
+        public double PrimarySplitRatio { get; set; }
+
+        public double SecondarySplitRatio { get; set; }
+
         public List<NativeAutomationTabState> Tabs { get; set; } = new();
 
         public List<NativeAutomationTabState> Panes { get; set; } = new();

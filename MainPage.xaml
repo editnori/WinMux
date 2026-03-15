@@ -187,7 +187,7 @@
                         <Grid x:Name="PaneWorkspaceGrid"
                               Grid.Row="1"
                               AutomationProperties.AutomationId="shell-pane-grid"
-                              Background="{ThemeResource ShellPageBackgroundBrush}" />
+                              Background="{ThemeResource ShellPaneDividerBrush}" />
                     </Grid>
 
                     <Frame x:Name="SettingsFrame"

@@ -68,6 +68,22 @@
                                  Content="WSL"
                                  Tag="wsl" />
                 </StackPanel>
+
+                <StackPanel Spacing="6">
+                    <TextBlock Style="{StaticResource ShellSectionTextStyle}" Text="Thread pane limit" />
+                    <TextBlock Style="{StaticResource ShellHintTextStyle}"
+                               Text="When a thread reaches this pane count, new panes spill into a new thread instead of shrinking the current workspace further." />
+                </StackPanel>
+
+                <ComboBox x:Name="paneLimitBox"
+                          AutomationProperties.AutomationId="settings-pane-limit"
+                          HorizontalAlignment="Left"
+                          MinWidth="160"
+                          SelectionChanged="OnPaneLimitSelectionChanged">
+                    <ComboBoxItem Content="2 panes" Tag="2" />
+                    <ComboBoxItem Content="3 panes" Tag="3" />
+                    <ComboBoxItem Content="4 panes" Tag="4" />
+                </ComboBox>
             </StackPanel>
         </ScrollViewer>
 

@@ -22,6 +22,10 @@ namespace SelfContainedDeployment
                 .First(button => string.Equals((string)button.Tag, SampleConfig.DefaultShellProfileId, System.StringComparison.OrdinalIgnoreCase))
                 .IsChecked = true;
 
+            paneLimitBox.Items.Cast<ComboBoxItem>()
+                .First(item => string.Equals((string)item.Tag, SampleConfig.MaxPaneCountPerThread.ToString(), System.StringComparison.Ordinal))
+                .IsSelected = true;
+
             base.OnNavigatedTo(e);
         }
 
@@ -35,6 +39,16 @@ namespace SelfContainedDeployment
         {
             string shellProfileId = (string)((RadioButton)sender).Tag;
             MainPage.Current?.ApplyShellProfile(shellProfileId);
+        }
+
+        private void OnPaneLimitSelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (paneLimitBox.SelectedItem is not ComboBoxItem item || !int.TryParse((string)item.Tag, out int paneLimit))
+            {
+                return;
+            }
+
+            MainPage.Current?.ApplyPaneLimit(paneLimit);
         }
     }
 }

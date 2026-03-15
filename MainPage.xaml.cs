@@ -23,11 +23,21 @@ namespace SelfContainedDeployment
 {
     public partial class MainPage : Page
     {
+        private const double PaneDividerThickness = 3;
+        private const double MinPaneSplitRatio = 0.24;
+        private const double MaxPaneSplitRatio = 0.76;
         private readonly List<WorkspaceProject> _projects = new();
         private readonly Dictionary<string, TabViewItem> _tabItemsById = new(StringComparer.Ordinal);
         private readonly Dictionary<string, Border> _paneContainersById = new(StringComparer.Ordinal);
         private WorkspaceProject _activeProject;
         private WorkspaceThread _activeThread;
+        private Border _activeSplitter;
+        private string _activeSplitterDirection;
+        private uint? _activeSplitterPointerId;
+        private double _splitterDragOriginX;
+        private double _splitterDragOriginY;
+        private double _splitterStartPrimaryRatio;
+        private double _splitterStartSecondaryRatio;
         private bool _showingSettings;
         private bool _suppressTabSelectionChanged;
         private bool _suppressThreadNameSync;
@@ -79,6 +89,21 @@ namespace SelfContainedDeployment
             {
                 ["profileId"] = SampleConfig.DefaultShellProfileId,
                 ["projectId"] = _activeProject?.Id ?? string.Empty,
+            });
+        }
+
+        public void ApplyPaneLimit(int paneLimit)
+        {
+            SampleConfig.MaxPaneCountPerThread = Math.Clamp(paneLimit, 2, 4);
+
+            RefreshProjectTree();
+            RefreshTabView();
+            RenderPaneWorkspace();
+            RequestLayoutForVisiblePanes();
+
+            LogAutomationEvent("shell", "pane-limit.changed", $"Thread pane limit set to {SampleConfig.MaxPaneCountPerThread}", new Dictionary<string, string>
+            {
+                ["paneLimit"] = SampleConfig.MaxPaneCountPerThread.ToString(),
             });
         }
 
@@ -358,6 +383,10 @@ namespace SelfContainedDeployment
                         break;
                     case "setlayout":
                         SetThreadLayout(request.ThreadId, request.Value);
+                        ShowTerminalShell();
+                        break;
+                    case "setpanesplit":
+                        SetPaneSplit(request.ThreadId, request.Value);
                         ShowTerminalShell();
                         break;
                     case "closetab":
@@ -660,7 +689,7 @@ namespace SelfContainedDeployment
             return project;
         }
 
-        private WorkspaceThread CreateThread(WorkspaceProject project, string threadName = null)
+        private WorkspaceThread CreateThread(WorkspaceProject project, string threadName = null, bool ensureInitialPane = true)
         {
             project ??= _activeProject ?? GetOrCreateProject(Environment.CurrentDirectory);
 
@@ -668,7 +697,10 @@ namespace SelfContainedDeployment
 
             project.Threads.Add(thread);
             project.SelectedThreadId = thread.Id;
-            EnsureThreadHasTab(project, thread);
+            if (ensureInitialPane)
+            {
+                EnsureThreadHasTab(project, thread);
+            }
             RefreshProjectTree();
             LogAutomationEvent("shell", "thread.created", $"Created thread {thread.Name}", new Dictionary<string, string>
             {
@@ -687,10 +719,32 @@ namespace SelfContainedDeployment
             }
         }
 
-        private TerminalPaneRecord AddTerminalTab(WorkspaceProject project, WorkspaceThread thread)
+        private WorkspaceThread ResolveTargetThreadForNewPane(WorkspaceProject project, WorkspaceThread thread, WorkspacePaneKind paneKind)
         {
             project ??= _activeProject ?? GetOrCreateProject(Environment.CurrentDirectory);
             thread ??= _activeThread ?? CreateThread(project);
+
+            if (thread.Panes.Count < thread.PaneLimit)
+            {
+                return thread;
+            }
+
+            WorkspaceThread overflowThread = CreateThread(project, ensureInitialPane: false);
+            LogAutomationEvent("shell", "thread.overflow_created", $"Created overflow thread {overflowThread.Name} for {paneKind.ToString().ToLowerInvariant()} pane", new Dictionary<string, string>
+            {
+                ["projectId"] = project.Id,
+                ["sourceThreadId"] = thread.Id,
+                ["overflowThreadId"] = overflowThread.Id,
+                ["paneKind"] = paneKind.ToString().ToLowerInvariant(),
+                ["paneLimit"] = overflowThread.PaneLimit.ToString(),
+            });
+            return overflowThread;
+        }
+
+        private TerminalPaneRecord AddTerminalTab(WorkspaceProject project, WorkspaceThread thread)
+        {
+            project ??= _activeProject ?? GetOrCreateProject(Environment.CurrentDirectory);
+            thread = ResolveTargetThreadForNewPane(project, thread, WorkspacePaneKind.Terminal);
 
             TerminalPaneRecord pane = CreateTerminalPane(project, thread, WorkspacePaneKind.Terminal, startupInput: null, initialTitle: FormatProjectPath(project));
             thread.Panes.Add(pane);
@@ -702,6 +756,10 @@ namespace SelfContainedDeployment
             {
                 RefreshTabView();
                 RequestLayoutForVisiblePanes();
+            }
+            else if (thread.Panes.Count == 1)
+            {
+                ActivateThread(thread);
             }
 
             RefreshProjectTree();
@@ -719,7 +777,7 @@ namespace SelfContainedDeployment
         private BrowserPaneRecord AddBrowserPane(WorkspaceProject project, WorkspaceThread thread, string initialUri = null)
         {
             project ??= _activeProject ?? GetOrCreateProject(Environment.CurrentDirectory);
-            thread ??= _activeThread ?? CreateThread(project);
+            thread = ResolveTargetThreadForNewPane(project, thread, WorkspacePaneKind.Browser);
 
             BrowserPaneControl browser = new()
             {
@@ -757,6 +815,10 @@ namespace SelfContainedDeployment
             {
                 RefreshTabView();
             }
+            else if (thread.Panes.Count == 1)
+            {
+                ActivateThread(thread);
+            }
 
             RefreshProjectTree();
             LogAutomationEvent("shell", "pane.created", $"Created browser pane {pane.Id}", new Dictionary<string, string>
@@ -773,7 +835,7 @@ namespace SelfContainedDeployment
         private TerminalPaneRecord AddEditorPane(WorkspaceProject project, WorkspaceThread thread)
         {
             project ??= _activeProject ?? GetOrCreateProject(Environment.CurrentDirectory);
-            thread ??= _activeThread ?? CreateThread(project);
+            thread = ResolveTargetThreadForNewPane(project, thread, WorkspacePaneKind.Editor);
 
             string startupInput = "nvim .\r";
             TerminalPaneRecord pane = CreateTerminalPane(project, thread, WorkspacePaneKind.Editor, startupInput, "Editor");
@@ -786,6 +848,10 @@ namespace SelfContainedDeployment
             {
                 RefreshTabView();
                 RequestLayoutForVisiblePanes();
+            }
+            else if (thread.Panes.Count == 1)
+            {
+                ActivateThread(thread);
             }
 
             RefreshProjectTree();
@@ -982,7 +1048,8 @@ namespace SelfContainedDeployment
                 return;
             }
 
-            thread.LayoutPreset = thread.Panes.Count switch
+            int targetCount = Math.Min(thread.Panes.Count, thread.PaneLimit);
+            thread.LayoutPreset = targetCount switch
             {
                 <= 1 => WorkspaceLayoutPreset.Solo,
                 2 => WorkspaceLayoutPreset.Dual,
@@ -1216,6 +1283,68 @@ namespace SelfContainedDeployment
                 ["threadId"] = thread.Id,
                 ["projectId"] = project.Id,
                 ["remainingThreadCount"] = project.Threads.Count.ToString(),
+            });
+        }
+
+        private void SetPaneSplit(string threadId, string value)
+        {
+            WorkspaceThread thread = string.IsNullOrWhiteSpace(threadId) ? _activeThread : FindThread(threadId);
+            if (thread is null || string.IsNullOrWhiteSpace(value))
+            {
+                return;
+            }
+
+            bool updated = false;
+            foreach (string token in value.Split(new[] { ';', ',' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                string[] parts = token.Split(new[] { '=', ':' }, 2, StringSplitOptions.TrimEntries);
+                if (parts.Length == 1 && double.TryParse(parts[0], out double primaryOnly))
+                {
+                    thread.PrimarySplitRatio = ClampPaneSplitRatio(primaryOnly);
+                    updated = true;
+                    continue;
+                }
+
+                if (parts.Length != 2 || !double.TryParse(parts[1], out double ratio))
+                {
+                    continue;
+                }
+
+                switch (parts[0].Trim().ToLowerInvariant())
+                {
+                    case "primary":
+                    case "x":
+                    case "vertical":
+                        thread.PrimarySplitRatio = ClampPaneSplitRatio(ratio);
+                        updated = true;
+                        break;
+                    case "secondary":
+                    case "y":
+                    case "horizontal":
+                        thread.SecondarySplitRatio = ClampPaneSplitRatio(ratio);
+                        updated = true;
+                        break;
+                }
+            }
+
+            if (!updated)
+            {
+                return;
+            }
+
+            if (ReferenceEquals(thread, _activeThread))
+            {
+                RenderPaneWorkspace();
+                RequestLayoutForVisiblePanes();
+            }
+
+            RefreshProjectTree();
+            LogAutomationEvent("render", "pane.split_set", "Applied pane split ratios", new Dictionary<string, string>
+            {
+                ["threadId"] = thread.Id,
+                ["projectId"] = FindProjectForThread(thread)?.Id ?? string.Empty,
+                ["primarySplitRatio"] = thread.PrimarySplitRatio.ToString("0.000"),
+                ["secondarySplitRatio"] = thread.SecondarySplitRatio.ToString("0.000"),
             });
         }
 
@@ -1588,6 +1717,7 @@ namespace SelfContainedDeployment
 
         private void RenderPaneWorkspace()
         {
+            PaneWorkspaceGrid.Children.Clear();
             PaneWorkspaceGrid.RowDefinitions.Clear();
             PaneWorkspaceGrid.ColumnDefinitions.Clear();
 
@@ -1626,31 +1756,33 @@ namespace SelfContainedDeployment
                     break;
                 case 2:
                     PaneWorkspaceGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-                    PaneWorkspaceGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                    PaneWorkspaceGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                    ConfigureSplitColumns(_activeThread.PrimarySplitRatio);
                     AddPaneCell(visiblePanes[0], 0, 0);
-                    AddPaneCell(visiblePanes[1], 0, 1);
+                    AddVerticalSplitter(0, 1);
+                    AddPaneCell(visiblePanes[1], 0, 2);
                     break;
                 case 3:
-                    PaneWorkspaceGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-                    PaneWorkspaceGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-                    PaneWorkspaceGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.2, GridUnitType.Star) });
-                    PaneWorkspaceGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.8, GridUnitType.Star) });
-                    AddPaneCell(visiblePanes[0], 0, 0, rowSpan: 2);
-                    AddPaneCell(visiblePanes[1], 0, 1);
-                    AddPaneCell(visiblePanes[2], 1, 1);
+                    ConfigureSplitRows(_activeThread.SecondarySplitRatio);
+                    ConfigureSplitColumns(_activeThread.PrimarySplitRatio);
+                    AddPaneCell(visiblePanes[0], 0, 0, rowSpan: 3);
+                    AddVerticalSplitter(0, 1, rowSpan: 3);
+                    AddPaneCell(visiblePanes[1], 0, 2);
+                    AddHorizontalSplitter(1, 2);
+                    AddPaneCell(visiblePanes[2], 2, 2);
                     break;
                 default:
-                    PaneWorkspaceGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-                    PaneWorkspaceGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-                    PaneWorkspaceGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                    PaneWorkspaceGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                    ConfigureSplitRows(_activeThread.SecondarySplitRatio);
+                    ConfigureSplitColumns(_activeThread.PrimarySplitRatio);
                     AddPaneCell(visiblePanes[0], 0, 0);
-                    AddPaneCell(visiblePanes[1], 0, 1);
-                    AddPaneCell(visiblePanes[2], 1, 0);
-                    AddPaneCell(visiblePanes[3], 1, 1);
+                    AddVerticalSplitter(0, 1, rowSpan: 3);
+                    AddPaneCell(visiblePanes[1], 0, 2);
+                    AddHorizontalSplitter(1, 0, columnSpan: 3);
+                    AddPaneCell(visiblePanes[2], 2, 0);
+                    AddPaneCell(visiblePanes[3], 2, 2);
                     break;
             }
+
+            UpdatePaneSelectionChrome();
         }
 
         private void AddPaneCell(WorkspacePaneRecord pane, int row, int column, int rowSpan = 1, int columnSpan = 1)
@@ -1660,28 +1792,271 @@ namespace SelfContainedDeployment
                 border = new Border
                 {
                     BorderThickness = new Thickness(1),
-                    CornerRadius = new CornerRadius(6),
+                    CornerRadius = new CornerRadius(4),
                     Background = (Brush)Application.Current.Resources["ShellSurfaceBackgroundBrush"],
                     Child = pane.View,
-                    Margin = new Thickness(10),
+                    Margin = new Thickness(1),
+                    Tag = pane,
                 };
+                AutomationProperties.SetAutomationId(border, $"shell-pane-{pane.Id}");
+                border.PointerPressed += OnPaneContainerPointerPressed;
                 _paneContainersById[pane.Id] = border;
-                PaneWorkspaceGrid.Children.Add(border);
             }
 
             border.Visibility = Visibility.Visible;
-            border.BorderBrush = (Brush)Application.Current.Resources[ReferenceEquals(GetSelectedPane(_activeThread), pane)
-                ? "ShellNavActiveBrush"
-                : "ShellBorderBrush"];
             Grid.SetRow(border, row);
             Grid.SetColumn(border, column);
             Grid.SetRowSpan(border, rowSpan);
             Grid.SetColumnSpan(border, columnSpan);
+            PaneWorkspaceGrid.Children.Add(border);
 
             if (pane is BrowserPaneRecord browserPane)
             {
                 _ = browserPane.Browser.EnsureInitializedAsync();
             }
+        }
+
+        private void ConfigureSplitColumns(double primaryRatio)
+        {
+            double clampedRatio = ClampPaneSplitRatio(primaryRatio);
+            PaneWorkspaceGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(clampedRatio, GridUnitType.Star) });
+            PaneWorkspaceGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(PaneDividerThickness) });
+            PaneWorkspaceGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1 - clampedRatio, GridUnitType.Star) });
+        }
+
+        private void ConfigureSplitRows(double primaryRatio)
+        {
+            double clampedRatio = ClampPaneSplitRatio(primaryRatio);
+            PaneWorkspaceGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(clampedRatio, GridUnitType.Star) });
+            PaneWorkspaceGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(PaneDividerThickness) });
+            PaneWorkspaceGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1 - clampedRatio, GridUnitType.Star) });
+        }
+
+        private void AddVerticalSplitter(int row, int column, int rowSpan = 1)
+        {
+            Border splitter = new()
+            {
+                Width = PaneDividerThickness,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                VerticalAlignment = VerticalAlignment.Stretch,
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(1, 0, 0, 0)),
+                Tag = "vertical",
+            };
+            AutomationProperties.SetAutomationId(splitter, $"shell-pane-splitter-vertical-{row}-{column}");
+            splitter.PointerPressed += OnPaneSplitterPointerPressed;
+            splitter.PointerMoved += OnPaneSplitterPointerMoved;
+            splitter.PointerReleased += OnPaneSplitterPointerReleased;
+            splitter.PointerCanceled += OnPaneSplitterPointerCanceled;
+            Grid.SetRow(splitter, row);
+            Grid.SetColumn(splitter, column);
+            Grid.SetRowSpan(splitter, rowSpan);
+            PaneWorkspaceGrid.Children.Add(splitter);
+        }
+
+        private void AddHorizontalSplitter(int row, int column, int columnSpan = 1)
+        {
+            Border splitter = new()
+            {
+                Height = PaneDividerThickness,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                VerticalAlignment = VerticalAlignment.Stretch,
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(1, 0, 0, 0)),
+                Tag = "horizontal",
+            };
+            AutomationProperties.SetAutomationId(splitter, $"shell-pane-splitter-horizontal-{row}-{column}");
+            splitter.PointerPressed += OnPaneSplitterPointerPressed;
+            splitter.PointerMoved += OnPaneSplitterPointerMoved;
+            splitter.PointerReleased += OnPaneSplitterPointerReleased;
+            splitter.PointerCanceled += OnPaneSplitterPointerCanceled;
+            Grid.SetRow(splitter, row);
+            Grid.SetColumn(splitter, column);
+            Grid.SetColumnSpan(splitter, columnSpan);
+            PaneWorkspaceGrid.Children.Add(splitter);
+        }
+
+        private void OnPaneSplitterPointerPressed(object sender, PointerRoutedEventArgs e)
+        {
+            if (_activeThread is null || sender is not Border splitter || splitter.Tag is not string direction)
+            {
+                return;
+            }
+
+            _activeSplitter = splitter;
+            _activeSplitterDirection = direction;
+            _activeSplitterPointerId = e.Pointer.PointerId;
+            Point point = e.GetCurrentPoint(PaneWorkspaceGrid).Position;
+            _splitterDragOriginX = point.X;
+            _splitterDragOriginY = point.Y;
+            _splitterStartPrimaryRatio = _activeThread.PrimarySplitRatio;
+            _splitterStartSecondaryRatio = _activeThread.SecondarySplitRatio;
+            splitter.CapturePointer(e.Pointer);
+            e.Handled = true;
+        }
+
+        private void OnPaneSplitterPointerMoved(object sender, PointerRoutedEventArgs e)
+        {
+            if (_activeThread is null || sender is not Border splitter || !ReferenceEquals(splitter, _activeSplitter) || _activeSplitterPointerId != e.Pointer.PointerId)
+            {
+                return;
+            }
+
+            Point point = e.GetCurrentPoint(PaneWorkspaceGrid).Position;
+
+            if (string.Equals(_activeSplitterDirection, "vertical", StringComparison.Ordinal) && PaneWorkspaceGrid.ColumnDefinitions.Count >= 3)
+            {
+                double leftWidth = PaneWorkspaceGrid.ColumnDefinitions[0].ActualWidth;
+                double rightWidth = PaneWorkspaceGrid.ColumnDefinitions[2].ActualWidth;
+                double totalWidth = leftWidth + rightWidth;
+                if (totalWidth <= 0)
+                {
+                    return;
+                }
+
+                double nextLeftWidth = Math.Clamp((totalWidth * _splitterStartPrimaryRatio) + (point.X - _splitterDragOriginX), totalWidth * MinPaneSplitRatio, totalWidth * MaxPaneSplitRatio);
+                _activeThread.PrimarySplitRatio = ClampPaneSplitRatio(nextLeftWidth / totalWidth);
+                PaneWorkspaceGrid.ColumnDefinitions[0].Width = new GridLength(_activeThread.PrimarySplitRatio, GridUnitType.Star);
+                PaneWorkspaceGrid.ColumnDefinitions[2].Width = new GridLength(1 - _activeThread.PrimarySplitRatio, GridUnitType.Star);
+                e.Handled = true;
+                return;
+            }
+
+            if (string.Equals(_activeSplitterDirection, "horizontal", StringComparison.Ordinal) && PaneWorkspaceGrid.RowDefinitions.Count >= 3)
+            {
+                double topHeight = PaneWorkspaceGrid.RowDefinitions[0].ActualHeight;
+                double bottomHeight = PaneWorkspaceGrid.RowDefinitions[2].ActualHeight;
+                double totalHeight = topHeight + bottomHeight;
+                if (totalHeight <= 0)
+                {
+                    return;
+                }
+
+                double nextTopHeight = Math.Clamp((totalHeight * _splitterStartSecondaryRatio) + (point.Y - _splitterDragOriginY), totalHeight * MinPaneSplitRatio, totalHeight * MaxPaneSplitRatio);
+                _activeThread.SecondarySplitRatio = ClampPaneSplitRatio(nextTopHeight / totalHeight);
+                PaneWorkspaceGrid.RowDefinitions[0].Height = new GridLength(_activeThread.SecondarySplitRatio, GridUnitType.Star);
+                PaneWorkspaceGrid.RowDefinitions[2].Height = new GridLength(1 - _activeThread.SecondarySplitRatio, GridUnitType.Star);
+                e.Handled = true;
+            }
+        }
+
+        private void OnPaneSplitterPointerReleased(object sender, PointerRoutedEventArgs e)
+        {
+            if (sender is Border splitter && ReferenceEquals(splitter, _activeSplitter) && _activeSplitterPointerId == e.Pointer.PointerId)
+            {
+                splitter.ReleasePointerCapture(e.Pointer);
+                ClearActiveSplitterTracking();
+                e.Handled = true;
+            }
+
+            PersistActiveThreadSplitRatios();
+        }
+
+        private void OnPaneSplitterPointerCanceled(object sender, PointerRoutedEventArgs e)
+        {
+            if (sender is Border splitter && ReferenceEquals(splitter, _activeSplitter) && _activeSplitterPointerId == e.Pointer.PointerId)
+            {
+                splitter.ReleasePointerCaptures();
+                ClearActiveSplitterTracking();
+                e.Handled = true;
+            }
+        }
+
+        private void ClearActiveSplitterTracking()
+        {
+            _activeSplitter = null;
+            _activeSplitterDirection = null;
+            _activeSplitterPointerId = null;
+        }
+
+        private void PersistActiveThreadSplitRatios()
+        {
+            if (_activeThread is null)
+            {
+                return;
+            }
+
+            if (PaneWorkspaceGrid.ColumnDefinitions.Count >= 3)
+            {
+                double leftWidth = PaneWorkspaceGrid.ColumnDefinitions[0].ActualWidth;
+                double rightWidth = PaneWorkspaceGrid.ColumnDefinitions[2].ActualWidth;
+                double totalWidth = leftWidth + rightWidth;
+                if (totalWidth > 0)
+                {
+                    _activeThread.PrimarySplitRatio = ClampPaneSplitRatio(leftWidth / totalWidth);
+                }
+            }
+
+            if (PaneWorkspaceGrid.RowDefinitions.Count >= 3)
+            {
+                double topHeight = PaneWorkspaceGrid.RowDefinitions[0].ActualHeight;
+                double bottomHeight = PaneWorkspaceGrid.RowDefinitions[2].ActualHeight;
+                double totalHeight = topHeight + bottomHeight;
+                if (totalHeight > 0)
+                {
+                    _activeThread.SecondarySplitRatio = ClampPaneSplitRatio(topHeight / totalHeight);
+                }
+            }
+
+            RefreshProjectTree();
+            LogAutomationEvent("render", "pane.split_resized", "Updated pane split ratios", new Dictionary<string, string>
+            {
+                ["threadId"] = _activeThread.Id,
+                ["projectId"] = _activeProject?.Id ?? string.Empty,
+                ["primarySplitRatio"] = _activeThread.PrimarySplitRatio.ToString("0.000"),
+                ["secondarySplitRatio"] = _activeThread.SecondarySplitRatio.ToString("0.000"),
+            });
+        }
+
+        private void OnPaneContainerPointerPressed(object sender, PointerRoutedEventArgs e)
+        {
+            if (sender is Border border && border.Tag is WorkspacePaneRecord pane)
+            {
+                SelectPane(pane);
+            }
+        }
+
+        private void SelectPane(WorkspacePaneRecord pane)
+        {
+            if (_activeThread is null || pane is null)
+            {
+                return;
+            }
+
+            _activeThread.SelectedPaneId = pane.Id;
+            if (_tabItemsById.TryGetValue(pane.Id, out TabViewItem item) && !ReferenceEquals(TerminalTabs.SelectedItem, item))
+            {
+                _suppressTabSelectionChanged = true;
+                TerminalTabs.SelectedItem = item;
+                _suppressTabSelectionChanged = false;
+            }
+
+            UpdatePaneSelectionChrome();
+            FocusSelectedPane();
+            RequestLayoutForVisiblePanes();
+            LogAutomationEvent("shell", "pane.selected", $"Selected pane {pane.Id}", new Dictionary<string, string>
+            {
+                ["paneId"] = pane.Id,
+                ["paneKind"] = pane.Kind.ToString().ToLowerInvariant(),
+                ["threadId"] = _activeThread.Id,
+                ["projectId"] = _activeProject?.Id ?? string.Empty,
+            });
+        }
+
+        private void UpdatePaneSelectionChrome()
+        {
+            WorkspacePaneRecord selectedPane = GetSelectedPane(_activeThread);
+            foreach ((string paneId, Border border) in _paneContainersById)
+            {
+                bool isSelected = string.Equals(selectedPane?.Id, paneId, StringComparison.Ordinal);
+                border.BorderBrush = (Brush)Application.Current.Resources[isSelected
+                    ? "ShellPaneActiveBorderBrush"
+                    : "ShellBorderBrush"];
+                border.BorderThickness = isSelected ? new Thickness(1.5) : new Thickness(1);
+            }
+        }
+
+        private static double ClampPaneSplitRatio(double ratio)
+        {
+            return Math.Clamp(ratio, MinPaneSplitRatio, MaxPaneSplitRatio);
         }
 
         private IEnumerable<WorkspacePaneRecord> GetVisiblePanes(WorkspaceThread thread)
@@ -2006,7 +2381,7 @@ namespace SelfContainedDeployment
 
         private bool ShouldTrackUiNode(DependencyObject node)
         {
-            return node is FrameworkElement or TextBlock or FontIcon or TabViewItem;
+            return node is FrameworkElement or TextBlock or FontIcon or TabViewItem or Thumb;
         }
 
         private static bool IsInteractiveUiNode(DependencyObject node, string automationId)
@@ -2022,7 +2397,8 @@ namespace SelfContainedDeployment
                 or TabViewItem
                 or TerminalControl
                 or Microsoft.UI.Xaml.Controls.WebView2
-                or MenuFlyoutItem;
+                or MenuFlyoutItem
+                || (node is Border && automationId?.StartsWith("shell-pane-splitter-", StringComparison.Ordinal) == true);
         }
 
         private string ExtractNodeText(DependencyObject node)
@@ -2702,7 +3078,42 @@ namespace SelfContainedDeployment
                 return;
             }
 
+            if (item is MenuFlyoutItem directMenuItem && TryInvokeContextMenuItemDirect(directMenuItem))
+            {
+                LogAutomationEvent("automation", "context-menu.invoked", $"Invoked context menu item {menuItemText}", new Dictionary<string, string>
+                {
+                    ["menuItemText"] = menuItemText ?? string.Empty,
+                    ["targetAutomationId"] = AutomationProperties.GetAutomationId(element) ?? string.Empty,
+                    ["directDispatch"] = bool.TrueString,
+                });
+                return;
+            }
+
             throw new InvalidOperationException($"Context menu item '{menuItemText}' could not be invoked.");
+        }
+
+        private bool TryInvokeContextMenuItemDirect(MenuFlyoutItem menuItem)
+        {
+            if (menuItem?.Tag is not string threadId)
+            {
+                return false;
+            }
+
+            string action = menuItem.Text?.Trim().ToLowerInvariant();
+            switch (action)
+            {
+                case "rename":
+                    _ = BeginRenameThreadAsync(threadId);
+                    return true;
+                case "duplicate":
+                    DuplicateThread(threadId);
+                    return true;
+                case "delete":
+                    DeleteThread(threadId);
+                    return true;
+                default:
+                    return false;
+            }
         }
 
         private static NativeAutomationThreadState BuildThreadState(WorkspaceThread thread)
@@ -2715,6 +3126,10 @@ namespace SelfContainedDeployment
                 TabCount = thread.Panes.Count,
                 PaneCount = thread.Panes.Count,
                 Layout = thread.LayoutPreset.ToString().ToLowerInvariant(),
+                PaneLimit = thread.PaneLimit,
+                VisiblePaneCapacity = thread.VisiblePaneCapacity,
+                PrimarySplitRatio = thread.PrimarySplitRatio,
+                SecondarySplitRatio = thread.SecondarySplitRatio,
                 Tabs = thread.Panes.Select(tab => new NativeAutomationTabState
                 {
                     Id = tab.Id,

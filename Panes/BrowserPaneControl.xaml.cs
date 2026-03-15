@@ -3,6 +3,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.Web.WebView2.Core;
 using SelfContainedDeployment.Automation;
+using SelfContainedDeployment.Terminal;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -10,12 +11,59 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
+using System.Linq;
 using Windows.System;
 
 namespace SelfContainedDeployment.Panes
 {
     public sealed partial class BrowserPaneControl : UserControl
     {
+        private readonly struct SeedCopySummary
+        {
+            public int CopiedFiles { get; init; }
+
+            public int SkippedFiles { get; init; }
+        }
+
+        private static readonly string[] ChromiumProfileFilesToSeed =
+        {
+            "Bookmarks",
+            "Bookmarks.bak",
+            "Favicons",
+            "Favicons-journal",
+            "History",
+            "History-journal",
+            "Last Tabs",
+            "Last Session",
+            "Login Data",
+            "Login Data For Account",
+            "Login Data-journal",
+            "Preferences",
+            "Secure Preferences",
+            "Shortcuts",
+            "Shortcuts-journal",
+            "Top Sites",
+            "Top Sites-journal",
+            "Visited Links",
+            "Web Data",
+            "Web Data-journal",
+        };
+
+        private static readonly string[] ChromiumProfileDirectoriesToSeed =
+        {
+            "Extensions",
+            "Extension State",
+            "IndexedDB",
+            "Local Extension Settings",
+            "Local Storage",
+            "Service Worker",
+            "Session Storage",
+            "Sessions",
+            "Shared Dictionary",
+            "Storage",
+            "Sync Extension Settings",
+        };
+
         private static readonly Dictionary<string, Task<CoreWebView2Environment>> EnvironmentTasks = new(StringComparer.OrdinalIgnoreCase);
         private static readonly object EnvironmentSync = new();
         private Task _initializationTask;
@@ -202,6 +250,8 @@ namespace SelfContainedDeployment.Panes
                 {
                     ["step"] = "settings.generalAutofill",
                 });
+                core.Profile.IsPasswordAutosaveEnabled = true;
+                core.Profile.IsGeneralAutofillEnabled = true;
                 core.DocumentTitleChanged += OnDocumentTitleChanged;
                 core.NavigationCompleted += OnNavigationCompleted;
                 core.SourceChanged += OnSourceChanged;
@@ -216,6 +266,8 @@ namespace SelfContainedDeployment.Panes
                 {
                     ["step"] = "theme.applied",
                 });
+
+                await ImportSeededExtensionsAsync(core).ConfigureAwait(true);
 
                 if (string.IsNullOrWhiteSpace(InitialUri))
                 {
@@ -383,6 +435,11 @@ namespace SelfContainedDeployment.Panes
 
         private async Task<CoreWebView2Environment> GetEnvironmentAsync()
         {
+            if (UseSharedDebugEnvironment())
+            {
+                return await TerminalControl.GetEnvironmentAsync().ConfigureAwait(true);
+            }
+
             string key = ResolveProfileRoot();
             Task<CoreWebView2Environment> environmentTask;
 
@@ -406,6 +463,7 @@ namespace SelfContainedDeployment.Panes
             {
                 options.AdditionalBrowserArguments = additionalArguments;
             }
+            options.AreBrowserExtensionsEnabled = true;
 
             return await CoreWebView2Environment.CreateWithOptionsAsync(null, userDataFolder, options);
         }
@@ -423,6 +481,7 @@ namespace SelfContainedDeployment.Panes
                 profileSegment);
 
             Directory.CreateDirectory(root);
+            TrySeedProfileRootFromChromium(root);
             return root;
         }
 
@@ -430,6 +489,220 @@ namespace SelfContainedDeployment.Panes
         {
             byte[] bytes = SHA256.HashData(Encoding.UTF8.GetBytes(value.Trim().ToLowerInvariant()));
             return Convert.ToHexString(bytes[..16]).ToLowerInvariant();
+        }
+
+        private static bool UseSharedDebugEnvironment()
+        {
+            return string.Equals(Environment.GetEnvironmentVariable("WINMUX_SHARED_WEBVIEW_DEBUG_ENV"), "1", StringComparison.Ordinal);
+        }
+
+        private void TrySeedProfileRootFromChromium(string targetRoot)
+        {
+            using IEnumerator<string> entries = Directory.EnumerateFileSystemEntries(targetRoot).GetEnumerator();
+            if (UseSharedDebugEnvironment() || entries.MoveNext())
+            {
+                return;
+            }
+
+            string sourceRoot = ResolveChromiumUserDataRoot();
+            if (string.IsNullOrWhiteSpace(sourceRoot))
+            {
+                return;
+            }
+
+            try
+            {
+                SeedCopySummary summary = CopyChromiumProfileSeed(sourceRoot, targetRoot);
+                string eventName = summary.SkippedFiles > 0 ? "profile.seeded_partial" : "profile.seeded";
+                LogBrowserEvent(eventName, $"Seeded browser profile from {sourceRoot}", new Dictionary<string, string>
+                {
+                    ["sourceRoot"] = sourceRoot,
+                    ["targetRoot"] = targetRoot,
+                    ["copiedFiles"] = summary.CopiedFiles.ToString(),
+                    ["skippedFiles"] = summary.SkippedFiles.ToString(),
+                });
+            }
+            catch (Exception ex)
+            {
+                LogBrowserEvent("profile.seed_failed", $"Failed to seed browser profile from {sourceRoot}: {ex.Message}", new Dictionary<string, string>
+                {
+                    ["sourceRoot"] = sourceRoot,
+                    ["targetRoot"] = targetRoot,
+                    ["error"] = ex.Message,
+                });
+            }
+        }
+
+        private static string ResolveChromiumUserDataRoot()
+        {
+            string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            string[] candidates =
+            {
+                Path.Combine(localAppData, "Google", "Chrome", "User Data"),
+                Path.Combine(localAppData, "Chromium", "User Data"),
+                Path.Combine(localAppData, "BraveSoftware", "Brave-Browser", "User Data"),
+            };
+
+            foreach (string candidate in candidates)
+            {
+                if (Directory.Exists(candidate))
+                {
+                    return candidate;
+                }
+            }
+
+            return null;
+        }
+
+        private static SeedCopySummary CopyChromiumProfileSeed(string sourceRoot, string targetRoot)
+        {
+            string sourceDefault = Path.Combine(sourceRoot, "Default");
+            if (!Directory.Exists(sourceDefault))
+            {
+                throw new DirectoryNotFoundException($"Chromium profile root '{sourceRoot}' does not contain a Default profile.");
+            }
+
+            SeedCopySummary summary = default;
+            CopyFileIfExists(Path.Combine(sourceRoot, "Local State"), Path.Combine(targetRoot, "Local State"), ref summary);
+            CopyFileIfExists(Path.Combine(sourceRoot, "Last Version"), Path.Combine(targetRoot, "Last Version"), ref summary);
+
+            string targetDefault = Path.Combine(targetRoot, "Default");
+            Directory.CreateDirectory(targetDefault);
+
+            foreach (string relativeFile in ChromiumProfileFilesToSeed)
+            {
+                CopyFileIfExists(Path.Combine(sourceDefault, relativeFile), Path.Combine(targetDefault, relativeFile), ref summary);
+            }
+
+            foreach (string relativeDirectory in ChromiumProfileDirectoriesToSeed)
+            {
+                CopyDirectoryIfExists(Path.Combine(sourceDefault, relativeDirectory), Path.Combine(targetDefault, relativeDirectory), ref summary);
+            }
+
+            CopyFileIfExists(Path.Combine(sourceDefault, "Network", "Cookies"), Path.Combine(targetDefault, "Network", "Cookies"), ref summary);
+            CopyFileIfExists(Path.Combine(sourceDefault, "Network", "Cookies-journal"), Path.Combine(targetDefault, "Network", "Cookies-journal"), ref summary);
+            return summary;
+        }
+
+        private static void CopyDirectory(string sourceDirectory, string targetDirectory, ref SeedCopySummary summary)
+        {
+            Directory.CreateDirectory(targetDirectory);
+
+            foreach (string sourceFile in Directory.GetFiles(sourceDirectory))
+            {
+                string targetFile = Path.Combine(targetDirectory, Path.GetFileName(sourceFile));
+                CopyFileIfExists(sourceFile, targetFile, ref summary);
+            }
+
+            foreach (string sourceSubdirectory in Directory.GetDirectories(sourceDirectory))
+            {
+                string targetSubdirectory = Path.Combine(targetDirectory, Path.GetFileName(sourceSubdirectory));
+                CopyDirectory(sourceSubdirectory, targetSubdirectory, ref summary);
+            }
+        }
+
+        private static void CopyDirectoryIfExists(string sourceDirectory, string targetDirectory, ref SeedCopySummary summary)
+        {
+            if (!Directory.Exists(sourceDirectory))
+            {
+                return;
+            }
+
+            CopyDirectory(sourceDirectory, targetDirectory, ref summary);
+        }
+
+        private static void CopyFileIfExists(string sourceFile, string targetFile, ref SeedCopySummary summary)
+        {
+            if (!File.Exists(sourceFile))
+            {
+                return;
+            }
+
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(targetFile)!);
+                File.Copy(sourceFile, targetFile, overwrite: true);
+                summary = new SeedCopySummary
+                {
+                    CopiedFiles = summary.CopiedFiles + 1,
+                    SkippedFiles = summary.SkippedFiles,
+                };
+            }
+            catch (IOException)
+            {
+                summary = new SeedCopySummary
+                {
+                    CopiedFiles = summary.CopiedFiles,
+                    SkippedFiles = summary.SkippedFiles + 1,
+                };
+            }
+            catch (UnauthorizedAccessException)
+            {
+                summary = new SeedCopySummary
+                {
+                    CopiedFiles = summary.CopiedFiles,
+                    SkippedFiles = summary.SkippedFiles + 1,
+                };
+            }
+        }
+
+        private async Task ImportSeededExtensionsAsync(CoreWebView2 core)
+        {
+            if (UseSharedDebugEnvironment())
+            {
+                return;
+            }
+
+            string extensionsRoot = Path.Combine(ResolveProfileRoot(), "Default", "Extensions");
+            if (!Directory.Exists(extensionsRoot))
+            {
+                return;
+            }
+
+            IReadOnlyList<CoreWebView2BrowserExtension> installedExtensions = await core.Profile.GetBrowserExtensionsAsync();
+            HashSet<string> installedIds = installedExtensions
+                .Select(extension => extension.Id)
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            foreach (string extensionDirectory in Directory.GetDirectories(extensionsRoot))
+            {
+                string extensionId = Path.GetFileName(extensionDirectory);
+                if (string.IsNullOrWhiteSpace(extensionId) || installedIds.Contains(extensionId))
+                {
+                    continue;
+                }
+
+                string versionDirectory = Directory.GetDirectories(extensionDirectory)
+                    .OrderByDescending(Directory.GetLastWriteTimeUtc)
+                    .FirstOrDefault(candidate => File.Exists(Path.Combine(candidate, "manifest.json")));
+
+                if (string.IsNullOrWhiteSpace(versionDirectory))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    CoreWebView2BrowserExtension installed = await core.Profile.AddBrowserExtensionAsync(versionDirectory);
+                    installedIds.Add(installed.Id);
+                    LogBrowserEvent("extension.installed", $"Installed browser extension {installed.Name}", new Dictionary<string, string>
+                    {
+                        ["extensionId"] = installed.Id ?? extensionId,
+                        ["name"] = installed.Name ?? extensionId,
+                        ["sourcePath"] = versionDirectory,
+                    });
+                }
+                catch (Exception ex)
+                {
+                    LogBrowserEvent("extension.install_failed", $"Failed to install browser extension {extensionId}: {ex.Message}", new Dictionary<string, string>
+                    {
+                        ["extensionId"] = extensionId,
+                        ["sourcePath"] = versionDirectory,
+                        ["error"] = ex.Message,
+                    });
+                }
+            }
         }
 
         private string BuildStartPageHtml()

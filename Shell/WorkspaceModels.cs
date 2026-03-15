@@ -371,7 +371,13 @@ namespace SelfContainedDeployment.Shell
 
         public WorkspaceLayoutPreset LayoutPreset { get; set; }
 
-        public int VisiblePaneCapacity => Math.Clamp((int)LayoutPreset, 1, 4);
+        public int PaneLimit => Math.Clamp(SelfContainedDeployment.SampleConfig.MaxPaneCountPerThread, 2, 4);
+
+        public int VisiblePaneCapacity => Math.Min(PaneLimit, Math.Clamp((int)LayoutPreset, 1, 4));
+
+        public double PrimarySplitRatio { get; set; } = 0.58;
+
+        public double SecondarySplitRatio { get; set; } = 0.5;
 
         public List<WorkspacePaneRecord> Panes { get; } = new();
 

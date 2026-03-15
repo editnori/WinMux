@@ -689,7 +689,7 @@ namespace SelfContainedDeployment.Terminal
             return Path.Combine(AppContext.BaseDirectory, "Web", "terminal-host.html");
         }
 
-        private static Task<CoreWebView2Environment> GetEnvironmentAsync()
+        internal static Task<CoreWebView2Environment> GetEnvironmentAsync()
         {
             lock (EnvironmentSync)
             {
