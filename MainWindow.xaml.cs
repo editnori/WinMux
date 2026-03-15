@@ -37,6 +37,11 @@ namespace SelfContainedDeployment
 
         internal MainPage MainPage => Content as MainPage;
 
+        internal void PersistSessionState()
+        {
+            MainPage?.PersistSessionState();
+        }
+
         public NativeAutomationState GetAutomationState()
         {
             return MainPage?.GetAutomationState() ?? new NativeAutomationState

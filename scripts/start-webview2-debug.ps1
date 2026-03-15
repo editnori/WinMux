@@ -19,6 +19,12 @@ if ([string]::IsNullOrWhiteSpace($targetFramework)) {
     throw "Could not resolve TargetFramework from $projectPath"
 }
 
+try {
+    Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:$AutomationPort/action" -ContentType "application/json" -Body (@{ action = "saveSession" } | ConvertTo-Json -Compress) -TimeoutSec 2 | Out-Null
+}
+catch {
+}
+
 Get-Process SelfContainedDeployment -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep -Milliseconds 750
 

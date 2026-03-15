@@ -45,6 +45,7 @@ namespace SelfContainedDeployment
 
         private void OnMainWindowClosed(object sender, WindowEventArgs args)
         {
+            MainWindowInstance?.PersistSessionState();
             automationServer?.Dispose();
         }
     }

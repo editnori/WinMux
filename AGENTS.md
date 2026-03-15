@@ -25,6 +25,7 @@ What exists now:
 
 - fixed native shell layout with a dense inline sidebar and a top pane strip
 - multiple projects, each with nested threads and per-thread pane workspaces
+- autosaved workspace/session replay across app relaunches
 - terminal panes backed by `TerminalControl`
 - browser preview panes backed by `WebView2` with a built-in start page and a shared WinMux browser profile
 - imported browser-password CSV support backed by a WinMux-encrypted credential store
@@ -39,7 +40,7 @@ What exists now:
 What does not exist yet:
 
 - thread overview / niri-style vertical workspace navigation
-- durable workspace/session persistence
+- true ConPTY process hibernation beyond workspace replay
 - true live Chrome-profile reuse and Google account sync parity inside the shared browser
 - custom pane-strip visuals and overview polish
 

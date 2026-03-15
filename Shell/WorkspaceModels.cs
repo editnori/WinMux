@@ -329,9 +329,9 @@ namespace SelfContainedDeployment.Shell
 
     public sealed class WorkspaceProject
     {
-        public WorkspaceProject(string rootPath, string shellProfileId = null, string name = null)
+        public WorkspaceProject(string rootPath, string shellProfileId = null, string name = null, string id = null)
         {
-            Id = Guid.NewGuid().ToString("N");
+            Id = string.IsNullOrWhiteSpace(id) ? Guid.NewGuid().ToString("N") : id;
             RootPath = ShellProfiles.NormalizeProjectPath(rootPath);
             ShellProfileId = ShellProfiles.Resolve(shellProfileId).Id;
             Name = string.IsNullOrWhiteSpace(name) ? ShellProfiles.DeriveName(RootPath) : name.Trim();
@@ -369,10 +369,10 @@ namespace SelfContainedDeployment.Shell
 
     public sealed class WorkspaceThread
     {
-        public WorkspaceThread(WorkspaceProject project, string name)
+        public WorkspaceThread(WorkspaceProject project, string name, string id = null)
         {
             Project = project ?? throw new ArgumentNullException(nameof(project));
-            Id = Guid.NewGuid().ToString("N");
+            Id = string.IsNullOrWhiteSpace(id) ? Guid.NewGuid().ToString("N") : id;
             Name = name;
             LayoutPreset = WorkspaceLayoutPreset.Dual;
         }
@@ -410,9 +410,9 @@ namespace SelfContainedDeployment.Shell
 
     public abstract class WorkspacePaneRecord
     {
-        protected WorkspacePaneRecord(string title, WorkspacePaneKind kind)
+        protected WorkspacePaneRecord(string title, WorkspacePaneKind kind, string id = null)
         {
-            Id = Guid.NewGuid().ToString("N");
+            Id = string.IsNullOrWhiteSpace(id) ? Guid.NewGuid().ToString("N") : id;
             Title = title;
             Kind = kind;
         }
@@ -420,6 +420,8 @@ namespace SelfContainedDeployment.Shell
         public string Id { get; }
 
         public string Title { get; set; }
+
+        public bool HasCustomTitle { get; set; }
 
         public WorkspacePaneKind Kind { get; }
 
@@ -438,8 +440,8 @@ namespace SelfContainedDeployment.Shell
 
     public sealed class TerminalPaneRecord : WorkspacePaneRecord
     {
-        public TerminalPaneRecord(string title, TerminalControl terminal, WorkspacePaneKind kind = WorkspacePaneKind.Terminal)
-            : base(title, kind)
+        public TerminalPaneRecord(string title, TerminalControl terminal, WorkspacePaneKind kind = WorkspacePaneKind.Terminal, string id = null)
+            : base(title, kind, id)
         {
             Terminal = terminal;
         }
@@ -464,8 +466,8 @@ namespace SelfContainedDeployment.Shell
 
     public sealed class BrowserPaneRecord : WorkspacePaneRecord
     {
-        public BrowserPaneRecord(string title, BrowserPaneControl browser)
-            : base(title, WorkspacePaneKind.Browser)
+        public BrowserPaneRecord(string title, BrowserPaneControl browser, string id = null)
+            : base(title, WorkspacePaneKind.Browser, id)
         {
             Browser = browser;
         }

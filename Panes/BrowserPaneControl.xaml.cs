@@ -125,6 +125,7 @@ namespace SelfContainedDeployment.Panes
         public event EventHandler<string> TitleChanged;
         public event EventHandler InteractionRequested;
         public event EventHandler<string> OpenPaneRequested;
+        public event EventHandler StateChanged;
 
         public string ProjectId { get; set; }
 
@@ -631,6 +632,7 @@ namespace SelfContainedDeployment.Panes
                     ["error"] = args.WebErrorStatus.ToString(),
                     ["uri"] = _currentUri ?? string.Empty,
                 });
+                StateChanged?.Invoke(this, EventArgs.Empty);
                 return;
             }
 
@@ -646,6 +648,7 @@ namespace SelfContainedDeployment.Panes
                 ["uri"] = _currentUri ?? string.Empty,
                 ["success"] = args.IsSuccess.ToString(),
             });
+            StateChanged?.Invoke(this, EventArgs.Empty);
         }
 
         private void OnDocumentTitleChanged(CoreWebView2 sender, object args)
@@ -660,6 +663,7 @@ namespace SelfContainedDeployment.Panes
 
             _currentTitle = title.Trim();
             TitleChanged?.Invoke(this, _currentTitle);
+            StateChanged?.Invoke(this, EventArgs.Empty);
         }
 
         private void OnSourceChanged(CoreWebView2 sender, CoreWebView2SourceChangedEventArgs args)
@@ -676,6 +680,7 @@ namespace SelfContainedDeployment.Panes
             }
 
             LogBrowserEvent("source.changed", $"Browser source changed to {_currentUri}");
+            StateChanged?.Invoke(this, EventArgs.Empty);
         }
 
         private async void OnWebMessageReceived(CoreWebView2 sender, CoreWebView2WebMessageReceivedEventArgs args)

@@ -136,6 +136,12 @@ try {
     Assert-True (@($state.threads).Count -ge 1) "Expected at least one thread."
     Add-Check "initial-state" "$(@($state.projects).Count) project(s), $(@($state.threads).Count) thread(s)"
 
+    if ($state.activeView -ne "terminal") {
+        $showTerminal = Invoke-AutomationPost "/action" @{ action = "showTerminal" }
+        Assert-True ($showTerminal.ok -eq $true) "Could not normalize the shell back to terminal view."
+        $state = Invoke-AutomationGet "/state"
+    }
+
     $uiTree = Invoke-AutomationGet "/ui-tree"
     $interactiveNodes = @($uiTree.interactiveNodes)
     Assert-True ($interactiveNodes.Count -gt 0) "Expected interactive nodes in ui-tree."
