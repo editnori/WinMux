@@ -11,6 +11,7 @@ using System.Net;
 using System.Reflection;
 using System.Text;
 using System.Threading.Tasks;
+using Windows.Foundation;
 using Windows.System;
 
 namespace SelfContainedDeployment.Panes
@@ -316,9 +317,18 @@ namespace SelfContainedDeployment.Panes
             };
 
             object taskObject = createAsync.Invoke(null, arguments);
+            if (taskObject is Task<CoreWebView2Environment> directTask)
+            {
+                return await directTask.ConfigureAwait(true);
+            }
+
+            if (taskObject is IAsyncOperation<CoreWebView2Environment> winRtOperation)
+            {
+                return await winRtOperation;
+            }
+
             Task task = (Task)taskObject;
             await task.ConfigureAwait(true);
-
             PropertyInfo resultProperty = task.GetType().GetProperty("Result");
             return (CoreWebView2Environment)resultProperty.GetValue(task);
         }
