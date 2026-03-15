@@ -156,6 +156,24 @@ namespace SelfContainedDeployment.Automation
                         await WriteJsonAsync(stream, 200, terminalState).ConfigureAwait(false);
                         break;
 
+                    case ("POST", "/browser-state"):
+                        var browserStateRequest = ReadJson<NativeAutomationBrowserStateRequest>(request.Body);
+                        var browserState = await InvokeOnUiThreadAsync(() => _window.GetBrowserState(browserStateRequest)).ConfigureAwait(false);
+                        await WriteJsonAsync(stream, 200, browserState).ConfigureAwait(false);
+                        break;
+
+                    case ("POST", "/browser-eval"):
+                        var browserEvalRequest = ReadJson<NativeAutomationBrowserEvalRequest>(request.Body);
+                        var browserEval = await InvokeOnUiThreadAsync(() => _window.EvaluateBrowserAsync(browserEvalRequest)).ConfigureAwait(false);
+                        await WriteJsonAsync(stream, 200, browserEval).ConfigureAwait(false);
+                        break;
+
+                    case ("POST", "/browser-screenshot"):
+                        var browserScreenshotRequest = ReadJson<NativeAutomationBrowserScreenshotRequest>(request.Body);
+                        var browserScreenshot = await InvokeOnUiThreadAsync(() => _window.CaptureBrowserScreenshotAsync(browserScreenshotRequest)).ConfigureAwait(false);
+                        await WriteJsonAsync(stream, 200, browserScreenshot).ConfigureAwait(false);
+                        break;
+
                     case ("POST", "/desktop-action"):
                         var desktopActionRequest = ReadJson<NativeAutomationDesktopActionRequest>(request.Body);
                         var desktopAction = _window.PerformDesktopAction(desktopActionRequest);

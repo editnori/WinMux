@@ -176,6 +176,50 @@ try {
     }
     Add-Check "terminal-state" "$($selectedSnapshot.cols)x$($selectedSnapshot.rows) cursor=($($selectedSnapshot.cursorX),$($selectedSnapshot.cursorY))"
 
+    $browserTabCountBefore = @($activeThread.tabs).Count
+    $newBrowserPaneResponse = Invoke-AutomationPost "/action" @{ action = "newBrowserPane" }
+    Assert-True ($newBrowserPaneResponse.ok -eq $true) "newBrowserPane action failed."
+
+    $state = Invoke-AutomationGet "/state"
+    $activeProject = Get-ProjectById -State $state -ProjectId $state.projectId
+    $activeThread = Get-ThreadById -Project $activeProject -ThreadId $state.activeThreadId
+    Assert-True (@($activeThread.tabs).Count -eq ($browserTabCountBefore + 1)) "newBrowserPane did not create a browser pane."
+
+    $browserTree = Wait-Until -FailureMessage "Browser pane controls did not appear in ui-tree." -Condition {
+        $tree = Invoke-AutomationGet "/ui-tree"
+        $interactive = @($tree.interactiveNodes)
+        if ((@($interactive | Where-Object { $_.automationId -eq "browser-pane-address" }).Count -gt 0) -and
+            (@($interactive | Where-Object { $_.automationId -eq "browser-pane-pages" }).Count -gt 0) -and
+            (@($interactive | Where-Object { $_.automationId -eq "browser-pane-extensions" }).Count -gt 0)) {
+            return $tree
+        }
+
+        return $null
+    }
+
+    $navigateBrowserResponse = Invoke-AutomationPost "/action" @{
+        action = "navigateBrowser"
+        value = "https://example.com"
+    }
+    Assert-True ($navigateBrowserResponse.ok -eq $true) "navigateBrowser action failed."
+
+    $null = Wait-Until -FailureMessage "Browser pane did not complete navigation to example.com." -Condition {
+        $events = Invoke-AutomationGet "/events"
+        if (@($events.events | Where-Object { $_.category -eq "browser" -and $_.name -eq "navigate.completed" -and $_.data.uri -eq "https://example.com/" -and $_.data.success -eq "True" }).Count -gt 0) {
+            return $true
+        }
+
+        return $null
+    }
+    Add-Check "browser-pane" "browser pane rendered controls and completed navigation to example.com"
+
+    $browserState = Invoke-AutomationPost "/browser-state" @{}
+    $selectedBrowserPane = @($browserState.panes) | Where-Object { $_.paneId -eq $browserState.selectedPaneId } | Select-Object -First 1
+    Assert-True ($null -ne $selectedBrowserPane) "browser-state did not return the selected pane."
+    Assert-True ($selectedBrowserPane.initialized -eq $true) "Selected browser pane was not initialized."
+    Assert-True (-not [string]::IsNullOrWhiteSpace($selectedBrowserPane.profileSeedStatus)) "Selected browser pane did not report profile seed status."
+    Add-Check "browser-state" "$($selectedBrowserPane.profileSeedStatus)"
+
     $settingsResponse = Invoke-AutomationPost "/ui-action" @{
         action = "click"
         automationId = "shell-nav-settings"

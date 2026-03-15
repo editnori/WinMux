@@ -267,6 +267,81 @@ namespace SelfContainedDeployment.Automation
         public string BufferTail { get; set; }
     }
 
+    public sealed class NativeAutomationBrowserStateRequest
+    {
+        public string PaneId { get; set; }
+    }
+
+    public sealed class NativeAutomationBrowserStateResponse
+    {
+        public string SelectedPaneId { get; set; }
+
+        public List<NativeAutomationBrowserSnapshot> Panes { get; set; } = new();
+    }
+
+    public sealed class NativeAutomationBrowserSnapshot
+    {
+        public string PaneId { get; set; }
+
+        public string ThreadId { get; set; }
+
+        public string ProjectId { get; set; }
+
+        public string Title { get; set; }
+
+        public string Uri { get; set; }
+
+        public string AddressText { get; set; }
+
+        public bool Initialized { get; set; }
+
+        public string ProfileSeedStatus { get; set; }
+
+        public string ExtensionImportStatus { get; set; }
+
+        public List<string> InstalledExtensions { get; set; } = new();
+    }
+
+    public sealed class NativeAutomationBrowserEvalRequest
+    {
+        public string PaneId { get; set; }
+
+        public string Script { get; set; }
+    }
+
+    public sealed class NativeAutomationBrowserEvalResponse
+    {
+        public bool Ok { get; set; }
+
+        public string Message { get; set; }
+
+        public string PaneId { get; set; }
+
+        public string Result { get; set; }
+    }
+
+    public sealed class NativeAutomationBrowserScreenshotRequest
+    {
+        public string PaneId { get; set; }
+
+        public string Path { get; set; }
+    }
+
+    public sealed class NativeAutomationBrowserScreenshotResponse
+    {
+        public bool Ok { get; set; }
+
+        public string Message { get; set; }
+
+        public string PaneId { get; set; }
+
+        public string Path { get; set; }
+
+        public int Width { get; set; }
+
+        public int Height { get; set; }
+    }
+
     public sealed class NativeAutomationEventsResponse
     {
         public long NextSequence { get; set; }

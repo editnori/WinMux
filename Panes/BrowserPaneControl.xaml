@@ -18,7 +18,7 @@
                 BorderBrush="{ThemeResource ShellBorderBrush}"
                 BorderThickness="0,0,0,1"
                 Padding="8,4,8,4">
-            <Grid ColumnDefinitions="Auto,*,Auto"
+            <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto"
                   ColumnSpacing="8">
                 <Button x:Name="BrowserHomeButton"
                         AutomationProperties.AutomationId="browser-pane-home"
@@ -35,8 +35,26 @@
                          KeyDown="OnAddressBoxKeyDown"
                          PlaceholderText="Enter a URL or localhost preview" />
 
-                <Button x:Name="BrowserReloadButton"
+                <Button x:Name="BrowserPagesButton"
                         Grid.Column="2"
+                        AutomationProperties.AutomationId="browser-pane-pages"
+                        Style="{StaticResource ShellChromeButtonStyle}"
+                        Click="OnPagesClicked"
+                        ToolTipService.ToolTip="Show page details">
+                    <FontIcon FontSize="11" Glyph="&#xE8A5;" />
+                </Button>
+
+                <Button x:Name="BrowserExtensionsButton"
+                        Grid.Column="3"
+                        AutomationProperties.AutomationId="browser-pane-extensions"
+                        Style="{StaticResource ShellChromeButtonStyle}"
+                        Click="OnExtensionsClicked"
+                        ToolTipService.ToolTip="Show imported extensions">
+                    <FontIcon FontSize="11" Glyph="&#xE9CE;" />
+                </Button>
+
+                <Button x:Name="BrowserReloadButton"
+                        Grid.Column="4"
                         AutomationProperties.AutomationId="browser-pane-reload"
                         Style="{StaticResource ShellChromeButtonStyle}"
                         Click="OnReloadClicked"

@@ -78,6 +78,29 @@ namespace SelfContainedDeployment
             return MainPage?.GetTerminalStateAsync(request) ?? Task.FromResult(new NativeAutomationTerminalStateResponse());
         }
 
+        public NativeAutomationBrowserStateResponse GetBrowserState(NativeAutomationBrowserStateRequest request)
+        {
+            return MainPage?.GetBrowserState(request) ?? new NativeAutomationBrowserStateResponse();
+        }
+
+        public Task<NativeAutomationBrowserEvalResponse> EvaluateBrowserAsync(NativeAutomationBrowserEvalRequest request)
+        {
+            return MainPage?.EvaluateBrowserAsync(request) ?? Task.FromResult(new NativeAutomationBrowserEvalResponse
+            {
+                Ok = false,
+                Message = "Main page is not available.",
+            });
+        }
+
+        public Task<NativeAutomationBrowserScreenshotResponse> CaptureBrowserScreenshotAsync(NativeAutomationBrowserScreenshotRequest request)
+        {
+            return MainPage?.CaptureBrowserScreenshotAsync(request) ?? Task.FromResult(new NativeAutomationBrowserScreenshotResponse
+            {
+                Ok = false,
+                Message = "Main page is not available.",
+            });
+        }
+
         public NativeAutomationDesktopWindowsResponse GetDesktopWindows()
         {
             return NativeDesktopAutomation.GetWindows();

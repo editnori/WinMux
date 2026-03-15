@@ -377,6 +377,7 @@
         }
 
         hideContextMenu();
+        post({ type: "focus" });
         term.focus();
     });
 

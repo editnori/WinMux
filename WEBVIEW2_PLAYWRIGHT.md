@@ -17,6 +17,7 @@ What this gives you:
 - capture native window screenshots from the running WinUI app
 - capture annotated native screenshots with overlay labels
 - inspect terminal scrollback, visible rows, cursor, selection, and session metadata
+- inspect browser panes through native browser state, eval, and screenshot endpoints
 - inspect the real `WebView2` surface that the native app is using
 - attach Playwright to the running native app renderer
 - reload renderer HTML, CSS, and JS from the repo `Web/` folder without rebuilding native code
@@ -64,6 +65,9 @@ bun run native:recording-status
 bun run native:desktop-action -- '{"action":"focusWindow","titleContains":"WinMux"}'
 bun run native:desktop-uia-action -- '{"action":"focus","titleContains":"WinMux","name":"WinMux"}'
 bun run native:terminal-state
+bun run native:browser-state
+bun run native:browser-eval -- "<pane-id>" "document.title"
+bun run native:browser-screenshot -- "<pane-id>"
 bun run native:recording-start -- '{"fps":24,"maxDurationMs":5000,"keepFrames":false}'
 bun run native:recording-stop
 bun run native:demo-recording
@@ -149,6 +153,7 @@ The native automation loop covers the shell-level gaps that CDP cannot:
 
 - shell state inspection
 - native control discovery and generic UI actions
+- browser-pane state, script eval, and preview capture through the app-owned automation layer
 - desktop window enumeration and Win32 pointer/keyboard control
 - external semantic UIA inspection and actions through `scripts/run-desktop-uia.ps1`
 - native frame recording
@@ -158,6 +163,8 @@ The native automation loop covers the shell-level gaps that CDP cannot:
 - theme changes
 - terminal inspection
 - native window screenshots
+
+Browser panes now keep their own project-scoped WebView2 profiles in debug mode instead of borrowing the terminal's shared debug profile. The tradeoff is that `webview2:targets` is now best for the terminal renderer, while browser-pane inspection should go through `native:browser-state`, `native:browser-eval`, and `native:browser-screenshot`.
 
 ## Setup
 

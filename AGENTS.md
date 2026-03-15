@@ -176,6 +176,9 @@ bun run native:ui-action -- '{"action":"click","refLabel":"e2"}'
 bun run native:desktop-action -- '{"action":"focusWindow","titleContains":"WinMux"}'
 bun run native:desktop-uia-action -- '{"action":"focus","titleContains":"WinMux","name":"WinMux"}'
 bun run native:terminal-state
+bun run native:browser-state
+bun run native:browser-eval -- "<pane-id>" "document.title"
+bun run native:browser-screenshot -- "<pane-id>"
 bun run native:render-trace
 bun run native:recording-start -- '{"fps":24,"maxDurationMs":5000,"keepFrames":false}'
 bun run native:recording-stop
@@ -231,6 +234,7 @@ bun run webview2:start
 ```bash
 bun run native:health
 bun run native:state
+bun run native:browser-state
 bun run webview2:targets
 bun run webview2:screenshot
 bun run webview2:eval -- "document.title"
@@ -253,6 +257,7 @@ What this is good for:
 - taking annotated native screenshots with overlay refs
 - inspecting terminal scrollback, visible rows, selection, cursor, and shell metadata
 - inspecting the real renderer inside the native app
+- inspecting browser panes through native browser-state, browser-eval, and browser-screenshot routes
 - CSS and JS debugging
 - capturing screenshots
 - reading live DOM state
@@ -287,6 +292,7 @@ The biggest remaining visual gap is the stock `TabView`. It is the heaviest rema
 - The native title bar and shell chrome are not yet unified into a tighter single system.
 - Theme propagation is simple and not deeply modeled yet.
 - The WebView2 debug helpers currently depend on the app being launched through the provided PowerShell script.
+- Browser panes keep project-scoped WebView2 profiles even in debug mode, so terminal panes show up on the shared CDP port while browser-pane inspection should go through the native browser automation routes.
 
 ## Guardrails for future agents
 

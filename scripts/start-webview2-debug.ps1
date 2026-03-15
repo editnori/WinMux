@@ -52,7 +52,6 @@ if (-not (Test-Path $exePath)) {
 $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=$Port --remote-debugging-address=0.0.0.0"
 $env:NATIVE_TERMINAL_WEB_ROOT = $webRoot
 $env:NATIVE_TERMINAL_AUTOMATION_PORT = "$AutomationPort"
-$env:WINMUX_SHARED_WEBVIEW_DEBUG_ENV = "1"
 
 $process = Start-Process -FilePath $exePath -WorkingDirectory $repoRoot -PassThru
 

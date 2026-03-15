@@ -40,6 +40,7 @@ namespace SelfContainedDeployment.Terminal
         public event EventHandler<string> SessionTitleChanged;
         public event EventHandler RendererReady;
         public event EventHandler SessionExited;
+        public event EventHandler InteractionRequested;
 
         public TerminalControl()
         {
@@ -47,6 +48,7 @@ namespace SelfContainedDeployment.Terminal
             InitialWorkingDirectory = Environment.CurrentDirectory;
             ActualThemeChanged += OnActualThemeChanged;
             SizeChanged += OnTerminalSizeChanged;
+            PointerPressed += (_, _) => RaiseInteractionRequested();
             ApplyBackgroundColor();
         }
 
@@ -182,9 +184,20 @@ namespace SelfContainedDeployment.Terminal
                     CompleteInspection(message);
                     break;
                 case "focus":
+                    RaiseInteractionRequested();
                     FocusTerminal();
                     break;
             }
+        }
+
+        private void OnInteractionRequested(object sender, RoutedEventArgs e)
+        {
+            RaiseInteractionRequested();
+        }
+
+        private void RaiseInteractionRequested()
+        {
+            InteractionRequested?.Invoke(this, EventArgs.Empty);
         }
 
         private void EnsureStarted()

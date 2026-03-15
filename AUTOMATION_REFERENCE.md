@@ -16,6 +16,9 @@ Native automation server:
 - `POST /ui-action`
 - `POST /desktop-action`
 - `POST /terminal-state`
+- `POST /browser-state`
+- `POST /browser-eval`
+- `POST /browser-screenshot`
 - `POST /recording/start`
 - `POST /recording/stop`
 - `POST /render-trace`
@@ -47,6 +50,9 @@ bun run native:ui-action -- '{"action":"click","automationId":"shell-nav-setting
 bun run native:desktop-action -- '{"action":"focusWindow","titleContains":"WinMux"}'
 bun run native:desktop-uia-action -- '{"action":"invoke","titleContains":"Browse for Folder","name":"OK"}'
 bun run native:terminal-state
+bun run native:browser-state
+bun run native:browser-eval -- "<pane-id>" "document.title"
+bun run native:browser-screenshot -- "<pane-id>"
 bun run native:recording-start -- '{"fps":24,"maxDurationMs":5000,"keepFrames":false}'
 bun run native:recording-stop
 bun run native:demo-recording
@@ -105,6 +111,41 @@ Notes:
 - `navigateBrowser` sends a URL to the selected browser pane; an empty `value` returns it to the built-in start page.
 - `input` sends text to the selected terminal/editor pane, not to arbitrary native controls.
 - `moveTabAfter` provides a semantic pane reorder path without coordinate dragging.
+
+### Browser inspection
+
+These routes expose browser-pane state directly from the native app, which is now the preferred browser debug path.
+
+`POST /browser-state` returns:
+
+- selected browser pane id
+- title
+- URI
+- address-box text
+- initialization state
+- profile seed status
+- extension import status
+- imported preferred extension names
+
+`POST /browser-eval` executes JavaScript inside a browser pane and returns the raw `ExecuteScriptAsync` result.
+
+Request fields:
+
+- `paneId`
+- `script`
+
+`POST /browser-screenshot` captures the current browser-pane preview to a PNG file.
+
+Request fields:
+
+- `paneId`
+- `path`
+
+Notes:
+
+- browser panes keep project-scoped WebView2 profiles even in debug mode
+- this means browser inspection no longer depends on the shared CDP target list
+- the preferred extension set is currently Claude plus uBlock Origin when found in the local Chromium profile
 
 ### Generic UI actions
 

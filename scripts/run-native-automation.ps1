@@ -95,6 +95,33 @@ switch ($Tool) {
         Invoke-RestMethod -Method Post -Uri "$baseUrl/terminal-state" -ContentType "application/json" -Body $body | ConvertTo-Json -Depth 20
         break
     }
+    "browser-state" {
+        $paneId = if ($ForwardArgs.Count -gt 0) { $ForwardArgs[0] } else { "" }
+        $body = @{ paneId = $paneId } | ConvertTo-Json
+        Invoke-RestMethod -Method Post -Uri "$baseUrl/browser-state" -ContentType "application/json" -Body $body | ConvertTo-Json -Depth 20
+        break
+    }
+    "browser-eval" {
+        $paneId = ""
+        $script = "document.title"
+        if ($ForwardArgs.Count -eq 1) {
+            $script = $ForwardArgs[0]
+        }
+        elseif ($ForwardArgs.Count -gt 1) {
+            $paneId = $ForwardArgs[0]
+            $script = ($ForwardArgs[1..($ForwardArgs.Count - 1)] -join " ")
+        }
+        $body = @{ paneId = $paneId; script = $script } | ConvertTo-Json -Depth 10
+        Invoke-RestMethod -Method Post -Uri "$baseUrl/browser-eval" -ContentType "application/json" -Body $body | ConvertTo-Json -Depth 20
+        break
+    }
+    "browser-screenshot" {
+        $paneId = if ($ForwardArgs.Count -gt 0) { $ForwardArgs[0] } else { "" }
+        $path = if ($ForwardArgs.Count -gt 1) { $ForwardArgs[1] } else { "" }
+        $body = @{ paneId = $paneId; path = $path } | ConvertTo-Json -Depth 10
+        Invoke-RestMethod -Method Post -Uri "$baseUrl/browser-screenshot" -ContentType "application/json" -Body $body | ConvertTo-Json -Depth 20
+        break
+    }
     "recording-start" {
         $body = if ($ForwardArgs.Count -gt 0) { $ForwardArgs -join " " } else { @{ fps = 24; maxDurationMs = 5000; jpegQuality = 82 } | ConvertTo-Json }
         Invoke-RestMethod -Method Post -Uri "$baseUrl/recording/start" -ContentType "application/json" -Body $body | ConvertTo-Json -Depth 20
@@ -120,6 +147,6 @@ switch ($Tool) {
         break
     }
     default {
-        throw "Unknown automation tool '$Tool'. Expected one of: health, state, ui-tree, ui-refs, desktop-windows, desktop-uia-tree, events, events-clear, recording-status, action, ui-action, desktop-action, desktop-uia-action, terminal-state, recording-start, recording-stop, render-trace, screenshot"
+        throw "Unknown automation tool '$Tool'. Expected one of: health, state, ui-tree, ui-refs, desktop-windows, desktop-uia-tree, events, events-clear, recording-status, action, ui-action, desktop-action, desktop-uia-action, terminal-state, browser-state, browser-eval, browser-screenshot, recording-start, recording-stop, render-trace, screenshot"
     }
 }

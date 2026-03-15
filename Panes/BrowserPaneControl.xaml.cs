@@ -3,16 +3,17 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.Web.WebView2.Core;
 using SelfContainedDeployment.Automation;
-using SelfContainedDeployment.Terminal;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Net;
+using System.Runtime.InteropServices.WindowsRuntime;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
 using System.Linq;
 using Windows.System;
+using Windows.Storage.Streams;
 
 namespace SelfContainedDeployment.Panes
 {
@@ -23,6 +24,13 @@ namespace SelfContainedDeployment.Panes
             "cjpalhdlnbpafiamejdnhcphjbkeiagm", // uBlock Origin
             "fcoeoabgfenejglbffodgkkbkcdhcgfn", // Claude
         };
+
+        private readonly struct BrowserExtensionSnapshot
+        {
+            public string Id { get; init; }
+
+            public string Name { get; init; }
+        }
 
         private readonly struct SeedCopySummary
         {
@@ -35,6 +43,10 @@ namespace SelfContainedDeployment.Panes
         {
             "Bookmarks",
             "Bookmarks.bak",
+            "Account Web Data",
+            "Account Web Data-journal",
+            "Affiliation Database",
+            "Affiliation Database-journal",
             "Favicons",
             "Favicons-journal",
             "History",
@@ -78,14 +90,21 @@ namespace SelfContainedDeployment.Panes
         private string _currentUri;
         private string _currentTitle = "Preview";
         private ElementTheme _themePreference = ElementTheme.Default;
+        private string _profileSeedStatus = "Project-scoped browser profile";
+        private string _extensionImportStatus = "No browser extensions imported yet.";
+        private readonly List<BrowserExtensionSnapshot> _installedExtensions = new();
 
         public BrowserPaneControl()
         {
             InitializeComponent();
             ActualThemeChanged += OnActualThemeChanged;
+            PointerPressed += (_, _) => RaiseInteractionRequested();
+            GotFocus += OnInteractionRequested;
         }
 
         public event EventHandler<string> TitleChanged;
+        public event EventHandler InteractionRequested;
+        public event EventHandler<string> OpenPaneRequested;
 
         public string ProjectId { get; set; }
 
@@ -100,6 +119,19 @@ namespace SelfContainedDeployment.Panes
         public string CurrentUri => _currentUri;
 
         public string CurrentTitle => _currentTitle;
+
+        public string AddressText => AddressBox.Text ?? string.Empty;
+
+        public bool IsInitialized => _initialized;
+
+        public string ProfileSeedStatus => _profileSeedStatus;
+
+        public string ExtensionImportStatus => _extensionImportStatus;
+
+        public IReadOnlyList<string> InstalledExtensionNames => _installedExtensions
+            .OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(item => item.Name)
+            .ToList();
 
         private void LogBrowserEvent(string name, string message = null, IReadOnlyDictionary<string, string> data = null)
         {
@@ -125,6 +157,7 @@ namespace SelfContainedDeployment.Panes
 
         public void FocusPane()
         {
+            RaiseInteractionRequested();
             if (!_initialized || BrowserView.CoreWebView2 is null)
             {
                 AddressBox.Focus(FocusState.Programmatic);
@@ -164,6 +197,7 @@ namespace SelfContainedDeployment.Panes
 
             string normalized = NormalizeUri(target);
             AddressBox.Text = normalized;
+            RaiseInteractionRequested();
             if (_initialized && BrowserView.CoreWebView2 is not null)
             {
                 BrowserView.CoreWebView2.Navigate(normalized);
@@ -220,6 +254,7 @@ namespace SelfContainedDeployment.Panes
                 });
 
                 await BrowserView.EnsureCoreWebView2Async();
+                _profileSeedStatus = "Fell back to default WebView2 profile";
                 LogBrowserEvent("webview.ready", "Browser WebView2 initialized with default profile");
             }
 
@@ -261,6 +296,7 @@ namespace SelfContainedDeployment.Panes
                 core.DocumentTitleChanged += OnDocumentTitleChanged;
                 core.NavigationCompleted += OnNavigationCompleted;
                 core.SourceChanged += OnSourceChanged;
+                BrowserView.GotFocus += OnInteractionRequested;
                 _initialized = true;
                 LogBrowserEvent("webview.configure", "Attached browser event handlers", new Dictionary<string, string>
                 {
@@ -274,6 +310,7 @@ namespace SelfContainedDeployment.Panes
                 });
 
                 await ImportSeededExtensionsAsync(core).ConfigureAwait(true);
+                await RefreshInstalledExtensionsAsync(core).ConfigureAwait(true);
 
                 if (string.IsNullOrWhiteSpace(InitialUri))
                 {
@@ -345,6 +382,7 @@ namespace SelfContainedDeployment.Panes
                 return;
             }
 
+            RaiseInteractionRequested();
             _currentUri = "winmux://start";
             AddressBox.Text = string.Empty;
             BrowserView.CoreWebView2.NavigateToString(BuildStartPageHtml());
@@ -364,6 +402,7 @@ namespace SelfContainedDeployment.Panes
                 return;
             }
 
+            RaiseInteractionRequested();
             if (string.Equals(_currentUri, "winmux://start", StringComparison.OrdinalIgnoreCase))
             {
                 _ = NavigateToStartPageAsync();
@@ -380,8 +419,129 @@ namespace SelfContainedDeployment.Panes
                 return;
             }
 
+            RaiseInteractionRequested();
             Navigate(AddressBox.Text);
             e.Handled = true;
+        }
+
+        private void OnPagesClicked(object sender, RoutedEventArgs e)
+        {
+            RaiseInteractionRequested();
+
+            MenuFlyout flyout = new();
+            flyout.Items.Add(new MenuFlyoutItem
+            {
+                Text = string.IsNullOrWhiteSpace(_currentTitle) ? "Current page" : _currentTitle,
+                IsEnabled = false,
+            });
+            flyout.Items.Add(new MenuFlyoutItem
+            {
+                Text = string.IsNullOrWhiteSpace(_currentUri) ? "No page loaded yet" : _currentUri,
+                IsEnabled = false,
+            });
+            flyout.Items.Add(new MenuFlyoutSeparator());
+
+            MenuFlyoutItem duplicateCurrentPageItem = new()
+            {
+                Text = "Open this page in another pane",
+                IsEnabled = !string.IsNullOrWhiteSpace(_currentUri) && !string.Equals(_currentUri, "winmux://start", StringComparison.OrdinalIgnoreCase),
+            };
+            duplicateCurrentPageItem.Click += (_, _) => OpenPaneRequested?.Invoke(this, _currentUri);
+            flyout.Items.Add(duplicateCurrentPageItem);
+
+            MenuFlyoutItem blankPaneItem = new()
+            {
+                Text = "Open a blank browser pane",
+            };
+            blankPaneItem.Click += (_, _) => OpenPaneRequested?.Invoke(this, null);
+            flyout.Items.Add(blankPaneItem);
+
+            flyout.Items.Add(new MenuFlyoutItem
+            {
+                Text = "Each browser pane keeps one live page. Use another pane when you need a second page.",
+                IsEnabled = false,
+            });
+            flyout.ShowAt(BrowserPagesButton);
+        }
+
+        private void OnExtensionsClicked(object sender, RoutedEventArgs e)
+        {
+            RaiseInteractionRequested();
+
+            MenuFlyout flyout = new();
+            flyout.Items.Add(new MenuFlyoutItem
+            {
+                Text = _profileSeedStatus,
+                IsEnabled = false,
+            });
+            flyout.Items.Add(new MenuFlyoutItem
+            {
+                Text = _extensionImportStatus,
+                IsEnabled = false,
+            });
+            flyout.Items.Add(new MenuFlyoutSeparator());
+
+            if (_installedExtensions.Count == 0)
+            {
+                flyout.Items.Add(new MenuFlyoutItem
+                {
+                    Text = "No preferred extensions are available in this pane.",
+                    IsEnabled = false,
+                });
+            }
+            else
+            {
+                foreach (BrowserExtensionSnapshot extension in _installedExtensions.OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase))
+                {
+                    flyout.Items.Add(new MenuFlyoutItem
+                    {
+                        Text = extension.Name,
+                        IsEnabled = false,
+                    });
+                }
+            }
+
+            flyout.ShowAt(BrowserExtensionsButton);
+        }
+
+        private void OnInteractionRequested(object sender, RoutedEventArgs e)
+        {
+            RaiseInteractionRequested();
+        }
+
+        private void RaiseInteractionRequested()
+        {
+            InteractionRequested?.Invoke(this, EventArgs.Empty);
+        }
+
+        public async Task<string> ExecuteBrowserScriptAsync(string script)
+        {
+            await EnsureInitializedAsync().ConfigureAwait(true);
+            CoreWebView2 core = await WaitForCoreWebView2Async().ConfigureAwait(true);
+            string effectiveScript = string.IsNullOrWhiteSpace(script) ? "document.title" : script;
+            return await core.ExecuteScriptAsync(effectiveScript).AsTask().ConfigureAwait(true);
+        }
+
+        public async Task<(string Path, int Width, int Height)> CaptureBrowserPreviewAsync(string outputPath)
+        {
+            await EnsureInitializedAsync().ConfigureAwait(true);
+            CoreWebView2 core = await WaitForCoreWebView2Async().ConfigureAwait(true);
+
+            string finalPath = string.IsNullOrWhiteSpace(outputPath)
+                ? Path.Combine(Path.GetTempPath(), $"winmux-browser-{Environment.ProcessId}-{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}.png")
+                : outputPath;
+
+            string targetDirectory = Path.GetDirectoryName(finalPath);
+            if (!string.IsNullOrWhiteSpace(targetDirectory))
+            {
+                Directory.CreateDirectory(targetDirectory);
+            }
+
+            using FileStream stream = new(finalPath, FileMode.Create, FileAccess.Write, FileShare.None);
+            using IRandomAccessStream randomAccessStream = stream.AsRandomAccessStream();
+            await core.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png, randomAccessStream).AsTask().ConfigureAwait(true);
+            await stream.FlushAsync().ConfigureAwait(true);
+            return (finalPath, (int)Math.Round(BrowserView.ActualWidth), (int)Math.Round(BrowserView.ActualHeight));
         }
 
         private void OnNavigationCompleted(CoreWebView2 sender, CoreWebView2NavigationCompletedEventArgs args)
@@ -441,11 +601,6 @@ namespace SelfContainedDeployment.Panes
 
         private async Task<CoreWebView2Environment> GetEnvironmentAsync()
         {
-            if (UseSharedDebugEnvironment())
-            {
-                return await TerminalControl.GetEnvironmentAsync().ConfigureAwait(true);
-            }
-
             string key = ResolveProfileRoot();
             Task<CoreWebView2Environment> environmentTask;
 
@@ -497,29 +652,40 @@ namespace SelfContainedDeployment.Panes
             return Convert.ToHexString(bytes[..16]).ToLowerInvariant();
         }
 
-        private static bool UseSharedDebugEnvironment()
-        {
-            return string.Equals(Environment.GetEnvironmentVariable("WINMUX_SHARED_WEBVIEW_DEBUG_ENV"), "1", StringComparison.Ordinal);
-        }
-
         private void TrySeedProfileRootFromChromium(string targetRoot)
         {
-            using IEnumerator<string> entries = Directory.EnumerateFileSystemEntries(targetRoot).GetEnumerator();
-            if (UseSharedDebugEnvironment() || entries.MoveNext())
-            {
-                return;
-            }
-
             string sourceRoot = ResolveChromiumUserDataRoot();
             if (string.IsNullOrWhiteSpace(sourceRoot))
             {
+                _profileSeedStatus = "No Chromium profile detected on this machine";
                 return;
             }
 
             try
             {
-                SeedCopySummary summary = CopyChromiumProfileSeed(sourceRoot, targetRoot);
-                string eventName = summary.SkippedFiles > 0 ? "profile.seeded_partial" : "profile.seeded";
+                using IEnumerator<string> entries = Directory.EnumerateFileSystemEntries(targetRoot).GetEnumerator();
+                bool hasExistingEntries = entries.MoveNext();
+                SeedCopySummary summary = CopyChromiumProfileSeed(sourceRoot, targetRoot, overwriteExisting: !hasExistingEntries);
+                string eventName;
+
+                if (!hasExistingEntries)
+                {
+                    eventName = summary.SkippedFiles > 0 ? "profile.seeded_partial" : "profile.seeded";
+                    _profileSeedStatus = summary.SkippedFiles > 0
+                        ? $"Partially seeded from Chrome ({summary.CopiedFiles} copied, {summary.SkippedFiles} skipped)"
+                        : $"Seeded from Chrome ({summary.CopiedFiles} files copied)";
+                }
+                else if (summary.CopiedFiles > 0)
+                {
+                    eventName = "profile.seed_repaired";
+                    _profileSeedStatus = $"Completed Chrome seed for this project ({summary.CopiedFiles} copied)";
+                }
+                else
+                {
+                    _profileSeedStatus = "Reusing existing project browser profile";
+                    return;
+                }
+
                 LogBrowserEvent(eventName, $"Seeded browser profile from {sourceRoot}", new Dictionary<string, string>
                 {
                     ["sourceRoot"] = sourceRoot,
@@ -530,6 +696,7 @@ namespace SelfContainedDeployment.Panes
             }
             catch (Exception ex)
             {
+                _profileSeedStatus = "Chrome profile seed failed";
                 LogBrowserEvent("profile.seed_failed", $"Failed to seed browser profile from {sourceRoot}: {ex.Message}", new Dictionary<string, string>
                 {
                     ["sourceRoot"] = sourceRoot,
@@ -560,7 +727,7 @@ namespace SelfContainedDeployment.Panes
             return null;
         }
 
-        private static SeedCopySummary CopyChromiumProfileSeed(string sourceRoot, string targetRoot)
+        private static SeedCopySummary CopyChromiumProfileSeed(string sourceRoot, string targetRoot, bool overwriteExisting)
         {
             string sourceDefault = Path.Combine(sourceRoot, "Default");
             if (!Directory.Exists(sourceDefault))
@@ -569,57 +736,62 @@ namespace SelfContainedDeployment.Panes
             }
 
             SeedCopySummary summary = default;
-            CopyFileIfExists(Path.Combine(sourceRoot, "Local State"), Path.Combine(targetRoot, "Local State"), ref summary);
-            CopyFileIfExists(Path.Combine(sourceRoot, "Last Version"), Path.Combine(targetRoot, "Last Version"), ref summary);
+            CopyFileIfExists(Path.Combine(sourceRoot, "Local State"), Path.Combine(targetRoot, "Local State"), ref summary, overwriteExisting);
+            CopyFileIfExists(Path.Combine(sourceRoot, "Last Version"), Path.Combine(targetRoot, "Last Version"), ref summary, overwriteExisting);
 
             string targetDefault = Path.Combine(targetRoot, "Default");
             Directory.CreateDirectory(targetDefault);
 
             foreach (string relativeFile in ChromiumProfileFilesToSeed)
             {
-                CopyFileIfExists(Path.Combine(sourceDefault, relativeFile), Path.Combine(targetDefault, relativeFile), ref summary);
+                CopyFileIfExists(Path.Combine(sourceDefault, relativeFile), Path.Combine(targetDefault, relativeFile), ref summary, overwriteExisting);
             }
 
             foreach (string relativeDirectory in ChromiumProfileDirectoriesToSeed)
             {
-                CopyDirectoryIfExists(Path.Combine(sourceDefault, relativeDirectory), Path.Combine(targetDefault, relativeDirectory), ref summary);
+                CopyDirectoryIfExists(Path.Combine(sourceDefault, relativeDirectory), Path.Combine(targetDefault, relativeDirectory), ref summary, overwriteExisting);
             }
 
-            CopyFileIfExists(Path.Combine(sourceDefault, "Network", "Cookies"), Path.Combine(targetDefault, "Network", "Cookies"), ref summary);
-            CopyFileIfExists(Path.Combine(sourceDefault, "Network", "Cookies-journal"), Path.Combine(targetDefault, "Network", "Cookies-journal"), ref summary);
+            CopyFileIfExists(Path.Combine(sourceDefault, "Network", "Cookies"), Path.Combine(targetDefault, "Network", "Cookies"), ref summary, overwriteExisting);
+            CopyFileIfExists(Path.Combine(sourceDefault, "Network", "Cookies-journal"), Path.Combine(targetDefault, "Network", "Cookies-journal"), ref summary, overwriteExisting);
             return summary;
         }
 
-        private static void CopyDirectory(string sourceDirectory, string targetDirectory, ref SeedCopySummary summary)
+        private static void CopyDirectory(string sourceDirectory, string targetDirectory, ref SeedCopySummary summary, bool overwriteExisting)
         {
             Directory.CreateDirectory(targetDirectory);
 
             foreach (string sourceFile in Directory.GetFiles(sourceDirectory))
             {
                 string targetFile = Path.Combine(targetDirectory, Path.GetFileName(sourceFile));
-                CopyFileIfExists(sourceFile, targetFile, ref summary);
+                CopyFileIfExists(sourceFile, targetFile, ref summary, overwriteExisting);
             }
 
             foreach (string sourceSubdirectory in Directory.GetDirectories(sourceDirectory))
             {
                 string targetSubdirectory = Path.Combine(targetDirectory, Path.GetFileName(sourceSubdirectory));
-                CopyDirectory(sourceSubdirectory, targetSubdirectory, ref summary);
+                CopyDirectory(sourceSubdirectory, targetSubdirectory, ref summary, overwriteExisting);
             }
         }
 
-        private static void CopyDirectoryIfExists(string sourceDirectory, string targetDirectory, ref SeedCopySummary summary)
+        private static void CopyDirectoryIfExists(string sourceDirectory, string targetDirectory, ref SeedCopySummary summary, bool overwriteExisting)
         {
             if (!Directory.Exists(sourceDirectory))
             {
                 return;
             }
 
-            CopyDirectory(sourceDirectory, targetDirectory, ref summary);
+            CopyDirectory(sourceDirectory, targetDirectory, ref summary, overwriteExisting);
         }
 
-        private static void CopyFileIfExists(string sourceFile, string targetFile, ref SeedCopySummary summary)
+        private static void CopyFileIfExists(string sourceFile, string targetFile, ref SeedCopySummary summary, bool overwriteExisting)
         {
             if (!File.Exists(sourceFile))
+            {
+                return;
+            }
+
+            if (!overwriteExisting && (File.Exists(targetFile) || Directory.Exists(targetFile)))
             {
                 return;
             }
@@ -627,7 +799,9 @@ namespace SelfContainedDeployment.Panes
             try
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(targetFile)!);
-                File.Copy(sourceFile, targetFile, overwrite: true);
+                using FileStream sourceStream = new(sourceFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                using FileStream targetStream = new(targetFile, FileMode.Create, FileAccess.Write, FileShare.None);
+                sourceStream.CopyTo(targetStream);
                 summary = new SeedCopySummary
                 {
                     CopiedFiles = summary.CopiedFiles + 1,
@@ -654,15 +828,21 @@ namespace SelfContainedDeployment.Panes
 
         private async Task ImportSeededExtensionsAsync(CoreWebView2 core)
         {
-            if (UseSharedDebugEnvironment())
-            {
-                return;
-            }
-
             string extensionsRoot = Path.Combine(ResolveProfileRoot(), "Default", "Extensions");
             if (!Directory.Exists(extensionsRoot))
             {
-                return;
+                string sourceRoot = ResolveChromiumUserDataRoot();
+                string fallbackExtensionsRoot = string.IsNullOrWhiteSpace(sourceRoot)
+                    ? null
+                    : Path.Combine(sourceRoot, "Default", "Extensions");
+
+                if (string.IsNullOrWhiteSpace(fallbackExtensionsRoot) || !Directory.Exists(fallbackExtensionsRoot))
+                {
+                    _extensionImportStatus = "No Chromium extension directory was found to import from.";
+                    return;
+                }
+
+                extensionsRoot = fallbackExtensionsRoot;
             }
 
             IReadOnlyList<CoreWebView2BrowserExtension> installedExtensions = await core.Profile.GetBrowserExtensionsAsync();
@@ -690,6 +870,7 @@ namespace SelfContainedDeployment.Panes
 
             if (preferredExtensions.Count == 0)
             {
+                _extensionImportStatus = "Preferred Chrome extensions were not found in the local profile.";
                 LogBrowserEvent("extension.preferred_missing", "No preferred Chromium extensions were available to import.", new Dictionary<string, string>
                 {
                     ["extensionsRoot"] = extensionsRoot,
@@ -697,6 +878,7 @@ namespace SelfContainedDeployment.Panes
                 return;
             }
 
+            int importedCount = 0;
             foreach ((string extensionId, string versionDirectory) in preferredExtensions)
             {
                 if (string.IsNullOrWhiteSpace(extensionId) || installedIds.Contains(extensionId))
@@ -708,6 +890,7 @@ namespace SelfContainedDeployment.Panes
                 {
                     CoreWebView2BrowserExtension installed = await core.Profile.AddBrowserExtensionAsync(versionDirectory);
                     installedIds.Add(installed.Id);
+                    importedCount++;
                     LogBrowserEvent("extension.installed", $"Installed browser extension {installed.Name}", new Dictionary<string, string>
                     {
                         ["extensionId"] = installed.Id ?? extensionId,
@@ -722,6 +905,28 @@ namespace SelfContainedDeployment.Panes
                         ["extensionId"] = extensionId,
                         ["sourcePath"] = versionDirectory,
                         ["error"] = ex.Message,
+                    });
+                }
+            }
+
+            _extensionImportStatus = importedCount > 0
+                ? $"Imported {importedCount} preferred Chrome extension{(importedCount == 1 ? string.Empty : "s")}."
+                : "Preferred extensions were already present in this browser profile.";
+        }
+
+        private async Task RefreshInstalledExtensionsAsync(CoreWebView2 core)
+        {
+            _installedExtensions.Clear();
+
+            IReadOnlyList<CoreWebView2BrowserExtension> installedExtensions = await core.Profile.GetBrowserExtensionsAsync();
+            foreach (CoreWebView2BrowserExtension extension in installedExtensions)
+            {
+                if (PreferredChromiumExtensionIds.Contains(extension.Id, StringComparer.OrdinalIgnoreCase))
+                {
+                    _installedExtensions.Add(new BrowserExtensionSnapshot
+                    {
+                        Id = extension.Id,
+                        Name = extension.Name,
                     });
                 }
             }

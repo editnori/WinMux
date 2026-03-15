@@ -150,6 +150,14 @@ namespace SelfContainedDeployment
             DependencyObject target = FindUiElement(request);
             if (target is null)
             {
+                if (TryPerformKnownUiActionWithoutElement(request))
+                {
+                    return new NativeAutomationUiActionResponse
+                    {
+                        Ok = true,
+                    };
+                }
+
                 return new NativeAutomationUiActionResponse
                 {
                     Ok = false,
@@ -217,8 +225,15 @@ namespace SelfContainedDeployment
                     };
             }
 
-            int interactiveIndex = 0;
-            NativeAutomationUiNode snapshot = BuildUiNodeTree(target, "target", ref interactiveIndex);
+            NativeAutomationUiNode snapshot = null;
+            try
+            {
+                int interactiveIndex = 0;
+                snapshot = BuildUiNodeTree(target, "target", ref interactiveIndex);
+            }
+            catch
+            {
+            }
             LogAutomationEvent("automation", "ui-action.executed", $"Executed ui action '{request.Action}'", new Dictionary<string, string>
             {
                 ["action"] = request.Action ?? string.Empty,
@@ -233,6 +248,27 @@ namespace SelfContainedDeployment
                 Ok = true,
                 Target = snapshot,
             };
+        }
+
+        private bool TryPerformKnownUiActionWithoutElement(NativeAutomationUiActionRequest request)
+        {
+            string automationId = request?.AutomationId?.Trim();
+            if (string.IsNullOrWhiteSpace(automationId) || !automationId.StartsWith("shell-thread-", StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            string threadId = automationId["shell-thread-".Length..];
+            switch (request.Action?.Trim().ToLowerInvariant())
+            {
+                case "doubleclick":
+                    _ = BeginRenameThreadAsync(threadId);
+                    return true;
+                case "invokemenuitem":
+                    return TryInvokeThreadMenuAction(threadId, request.MenuItemText ?? request.Value);
+                default:
+                    return false;
+            }
         }
 
         public async System.Threading.Tasks.Task<NativeAutomationTerminalStateResponse> GetTerminalStateAsync(NativeAutomationTerminalStateRequest request)
@@ -259,6 +295,110 @@ namespace SelfContainedDeployment
                 SelectedTabId = _activeThread?.SelectedPaneId,
                 Tabs = snapshots,
             };
+        }
+
+        public NativeAutomationBrowserStateResponse GetBrowserState(NativeAutomationBrowserStateRequest request)
+        {
+            request ??= new NativeAutomationBrowserStateRequest();
+
+            List<NativeAutomationBrowserSnapshot> snapshots = new();
+            foreach ((WorkspaceProject project, WorkspaceThread thread, BrowserPaneRecord pane) in EnumerateBrowserRecords())
+            {
+                if (!string.IsNullOrWhiteSpace(request.PaneId) && !string.Equals(pane.Id, request.PaneId, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                snapshots.Add(new NativeAutomationBrowserSnapshot
+                {
+                    PaneId = pane.Id,
+                    ThreadId = thread.Id,
+                    ProjectId = project.Id,
+                    Title = pane.Browser.CurrentTitle,
+                    Uri = pane.Browser.CurrentUri,
+                    AddressText = pane.Browser.AddressText,
+                    Initialized = pane.Browser.IsInitialized,
+                    ProfileSeedStatus = pane.Browser.ProfileSeedStatus,
+                    ExtensionImportStatus = pane.Browser.ExtensionImportStatus,
+                    InstalledExtensions = pane.Browser.InstalledExtensionNames.ToList(),
+                });
+            }
+
+            return new NativeAutomationBrowserStateResponse
+            {
+                SelectedPaneId = _activeThread?.SelectedPaneId,
+                Panes = snapshots,
+            };
+        }
+
+        public async System.Threading.Tasks.Task<NativeAutomationBrowserEvalResponse> EvaluateBrowserAsync(NativeAutomationBrowserEvalRequest request)
+        {
+            request ??= new NativeAutomationBrowserEvalRequest();
+            BrowserPaneRecord pane = ResolveBrowserPane(request.PaneId);
+            if (pane is null)
+            {
+                return new NativeAutomationBrowserEvalResponse
+                {
+                    Ok = false,
+                    Message = "No browser pane was available for evaluation.",
+                };
+            }
+
+            try
+            {
+                string result = await pane.Browser.ExecuteBrowserScriptAsync(request.Script).ConfigureAwait(true);
+                return new NativeAutomationBrowserEvalResponse
+                {
+                    Ok = true,
+                    PaneId = pane.Id,
+                    Result = result,
+                };
+            }
+            catch (Exception ex)
+            {
+                return new NativeAutomationBrowserEvalResponse
+                {
+                    Ok = false,
+                    PaneId = pane.Id,
+                    Message = ex.Message,
+                };
+            }
+        }
+
+        public async System.Threading.Tasks.Task<NativeAutomationBrowserScreenshotResponse> CaptureBrowserScreenshotAsync(NativeAutomationBrowserScreenshotRequest request)
+        {
+            request ??= new NativeAutomationBrowserScreenshotRequest();
+            BrowserPaneRecord pane = ResolveBrowserPane(request.PaneId);
+            if (pane is null)
+            {
+                return new NativeAutomationBrowserScreenshotResponse
+                {
+                    Ok = false,
+                    Message = "No browser pane was available for capture.",
+                };
+            }
+
+            try
+            {
+                (string path, int width, int height) = await pane.Browser.CaptureBrowserPreviewAsync(request.Path).ConfigureAwait(true);
+                return new NativeAutomationBrowserScreenshotResponse
+                {
+                    Ok = true,
+                    PaneId = pane.Id,
+                    Path = path,
+                    Width = width,
+                    Height = height,
+                };
+            }
+            catch (Exception ex)
+            {
+                return new NativeAutomationBrowserScreenshotResponse
+                {
+                    Ok = false,
+                    PaneId = pane.Id,
+                    Message = ex.Message,
+                };
+            }
         }
 
         public void ShowAutomationOverlay()
@@ -790,6 +930,21 @@ namespace SelfContainedDeployment
             browser.ApplyTheme(ResolveTheme(SampleConfig.CurrentTheme));
 
             BrowserPaneRecord pane = new("Preview", browser);
+            AttachPaneInteraction(project, thread, pane);
+            browser.OpenPaneRequested += (_, uri) =>
+            {
+                BrowserPaneRecord siblingPane = AddBrowserPane(project, thread, uri);
+                SelectPane(siblingPane);
+                ShowTerminalShell();
+                LogAutomationEvent("browser", "pane.spawned", "Opened a related browser pane", new Dictionary<string, string>
+                {
+                    ["sourcePaneId"] = pane.Id,
+                    ["paneId"] = siblingPane.Id,
+                    ["threadId"] = thread.Id,
+                    ["projectId"] = project.Id,
+                    ["initialUri"] = uri ?? string.Empty,
+                });
+            };
             browser.TitleChanged += (_, title) =>
             {
                 pane.Title = string.IsNullOrWhiteSpace(title) ? "Preview" : title;
@@ -880,6 +1035,7 @@ namespace SelfContainedDeployment
             terminal.ApplyTheme(ResolveTheme(SampleConfig.CurrentTheme));
 
             TerminalPaneRecord pane = new(initialTitle, terminal, kind);
+            AttachPaneInteraction(project, thread, pane);
             terminal.SessionTitleChanged += (_, title) =>
             {
                 pane.Title = string.IsNullOrWhiteSpace(title) ? initialTitle : title;
@@ -914,6 +1070,36 @@ namespace SelfContainedDeployment
             };
 
             return pane;
+        }
+
+        private void AttachPaneInteraction(WorkspaceProject project, WorkspaceThread thread, WorkspacePaneRecord pane)
+        {
+            void ActivatePaneFromInteraction()
+            {
+                if (!ReferenceEquals(_activeThread, thread))
+                {
+                    ActivateThread(thread);
+                }
+
+                if (!string.Equals(thread.SelectedPaneId, pane.Id, StringComparison.Ordinal))
+                {
+                    SelectPane(pane);
+                }
+                else
+                {
+                    UpdatePaneSelectionChrome();
+                }
+            }
+
+            switch (pane)
+            {
+                case TerminalPaneRecord terminalPane:
+                    terminalPane.Terminal.InteractionRequested += (_, _) => ActivatePaneFromInteraction();
+                    break;
+                case BrowserPaneRecord browserPane:
+                    browserPane.Browser.InteractionRequested += (_, _) => ActivatePaneFromInteraction();
+                    break;
+            }
         }
 
         private void CloseTab(string tabId)
@@ -1084,9 +1270,16 @@ namespace SelfContainedDeployment
 
         private void NavigateSelectedBrowser(string value)
         {
-            if (TerminalTabs.SelectedItem is not TabViewItem item || item.Tag is not BrowserPaneRecord pane)
+            BrowserPaneRecord pane = ResolveBrowserPane();
+
+            if (pane is null)
             {
                 return;
+            }
+
+            if (!string.Equals(_activeThread?.SelectedPaneId, pane.Id, StringComparison.Ordinal))
+            {
+                SelectPane(pane);
             }
 
             pane.Browser.Navigate(value);
@@ -1097,6 +1290,20 @@ namespace SelfContainedDeployment
                 ["projectId"] = _activeProject?.Id ?? string.Empty,
                 ["value"] = value ?? string.Empty,
             });
+        }
+
+        private BrowserPaneRecord ResolveBrowserPane(string paneId = null)
+        {
+            if (!string.IsNullOrWhiteSpace(paneId))
+            {
+                return EnumerateBrowserRecords()
+                    .Select(record => record.Pane)
+                    .FirstOrDefault(candidate => string.Equals(candidate.Id, paneId, StringComparison.OrdinalIgnoreCase));
+            }
+
+            return (TerminalTabs.SelectedItem as TabViewItem)?.Tag as BrowserPaneRecord
+                ?? _activeThread?.Panes.OfType<BrowserPaneRecord>().FirstOrDefault(candidate => string.Equals(candidate.Id, _activeThread.SelectedPaneId, StringComparison.Ordinal))
+                ?? _activeThread?.Panes.OfType<BrowserPaneRecord>().FirstOrDefault();
         }
 
         private static WorkspaceLayoutPreset ParseLayoutPreset(string value)
@@ -1799,7 +2006,7 @@ namespace SelfContainedDeployment
                     Tag = pane,
                 };
                 AutomationProperties.SetAutomationId(border, $"shell-pane-{pane.Id}");
-                border.PointerPressed += OnPaneContainerPointerPressed;
+                border.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler(OnPaneContainerPointerPressed), true);
                 _paneContainersById[pane.Id] = border;
             }
 
@@ -2243,6 +2450,11 @@ namespace SelfContainedDeployment
         private IEnumerable<(WorkspaceProject Project, WorkspaceThread Thread, TerminalPaneRecord Pane)> EnumerateTerminalRecords()
         {
             return _projects.SelectMany(project => project.Threads.SelectMany(thread => thread.Panes.OfType<TerminalPaneRecord>().Select(pane => (project, thread, pane))));
+        }
+
+        private IEnumerable<(WorkspaceProject Project, WorkspaceThread Thread, BrowserPaneRecord Pane)> EnumerateBrowserRecords()
+        {
+            return _projects.SelectMany(project => project.Threads.SelectMany(thread => thread.Panes.OfType<BrowserPaneRecord>().Select(pane => (project, thread, pane))));
         }
 
         private WorkspaceProject ResolveActionProject(NativeAutomationActionRequest request)
@@ -3100,6 +3312,30 @@ namespace SelfContainedDeployment
             }
 
             string action = menuItem.Text?.Trim().ToLowerInvariant();
+            switch (action)
+            {
+                case "rename":
+                    _ = BeginRenameThreadAsync(threadId);
+                    return true;
+                case "duplicate":
+                    DuplicateThread(threadId);
+                    return true;
+                case "delete":
+                    DeleteThread(threadId);
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        private bool TryInvokeThreadMenuAction(string threadId, string menuItemText)
+        {
+            if (string.IsNullOrWhiteSpace(threadId))
+            {
+                return false;
+            }
+
+            string action = menuItemText?.Trim().ToLowerInvariant();
             switch (action)
             {
                 case "rename":
