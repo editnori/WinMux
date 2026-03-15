@@ -100,6 +100,18 @@ namespace SelfContainedDeployment.Panes
         private string _credentialAutofillStatus = "No imported WinMux credentials.";
         private readonly List<BrowserExtensionSnapshot> _installedExtensions = new();
         private readonly Dictionary<int, BrowserCredentialMatch> _credentialContextMenuMatches = new();
+        private bool _credentialCaptureScriptInjected;
+
+        private sealed class BrowserCredentialCaptureMessage
+        {
+            public string Type { get; set; }
+
+            public string Url { get; set; }
+
+            public string Username { get; set; }
+
+            public string Password { get; set; }
+        }
 
         public BrowserPaneControl()
         {
@@ -107,6 +119,7 @@ namespace SelfContainedDeployment.Panes
             ActualThemeChanged += OnActualThemeChanged;
             PointerPressed += (_, _) => RaiseInteractionRequested();
             GotFocus += OnInteractionRequested;
+            SizeChanged += OnBrowserPaneSizeChanged;
         }
 
         public event EventHandler<string> TitleChanged;
@@ -178,6 +191,10 @@ namespace SelfContainedDeployment.Panes
 
         public void RequestLayout()
         {
+            BrowserView.InvalidateMeasure();
+            BrowserView.InvalidateArrange();
+            BrowserView.UpdateLayout();
+            _ = NotifyBrowserResizedAsync();
         }
 
         public void RefreshCredentialAutofillState()
@@ -199,6 +216,7 @@ namespace SelfContainedDeployment.Panes
                 BrowserView.CoreWebView2.DocumentTitleChanged -= OnDocumentTitleChanged;
                 BrowserView.CoreWebView2.SourceChanged -= OnSourceChanged;
                 BrowserView.CoreWebView2.ContextMenuRequested -= OnContextMenuRequested;
+                BrowserView.CoreWebView2.WebMessageReceived -= OnWebMessageReceived;
             }
         }
 
@@ -296,22 +314,23 @@ namespace SelfContainedDeployment.Panes
                 {
                     ["step"] = "settings.basic",
                 });
-                core.Settings.IsPasswordAutosaveEnabled = true;
-                LogBrowserEvent("webview.configure", "Enabled browser password autosave", new Dictionary<string, string>
+                core.Settings.IsPasswordAutosaveEnabled = false;
+                LogBrowserEvent("webview.configure", "Disabled native browser password autosave in favor of WinMux vault", new Dictionary<string, string>
                 {
                     ["step"] = "settings.passwordAutosave",
                 });
-                core.Settings.IsGeneralAutofillEnabled = true;
-                LogBrowserEvent("webview.configure", "Enabled browser general autofill", new Dictionary<string, string>
+                core.Settings.IsGeneralAutofillEnabled = false;
+                LogBrowserEvent("webview.configure", "Disabled native browser general autofill in favor of WinMux vault", new Dictionary<string, string>
                 {
                     ["step"] = "settings.generalAutofill",
                 });
-                core.Profile.IsPasswordAutosaveEnabled = true;
-                core.Profile.IsGeneralAutofillEnabled = true;
+                core.Profile.IsPasswordAutosaveEnabled = false;
+                core.Profile.IsGeneralAutofillEnabled = false;
                 core.DocumentTitleChanged += OnDocumentTitleChanged;
                 core.NavigationCompleted += OnNavigationCompleted;
                 core.SourceChanged += OnSourceChanged;
                 core.ContextMenuRequested += OnContextMenuRequested;
+                core.WebMessageReceived += OnWebMessageReceived;
                 BrowserView.GotFocus += OnInteractionRequested;
                 _initialized = true;
                 LogBrowserEvent("webview.configure", "Attached browser event handlers", new Dictionary<string, string>
@@ -327,6 +346,7 @@ namespace SelfContainedDeployment.Panes
 
                 await ImportSeededExtensionsAsync(core).ConfigureAwait(true);
                 await RefreshInstalledExtensionsAsync(core).ConfigureAwait(true);
+                await EnsureCredentialCaptureScriptAsync(core).ConfigureAwait(true);
                 UpdateCredentialAutofillStatus();
 
                 if (string.IsNullOrWhiteSpace(InitialUri))
@@ -554,6 +574,11 @@ namespace SelfContainedDeployment.Panes
             RaiseInteractionRequested();
         }
 
+        private void OnBrowserPaneSizeChanged(object sender, SizeChangedEventArgs e)
+        {
+            _ = NotifyBrowserResizedAsync();
+        }
+
         private void RaiseInteractionRequested()
         {
             InteractionRequested?.Invoke(this, EventArgs.Empty);
@@ -651,6 +676,44 @@ namespace SelfContainedDeployment.Panes
             }
 
             LogBrowserEvent("source.changed", $"Browser source changed to {_currentUri}");
+        }
+
+        private async void OnWebMessageReceived(CoreWebView2 sender, CoreWebView2WebMessageReceivedEventArgs args)
+        {
+            try
+            {
+                BrowserCredentialCaptureMessage message = JsonSerializer.Deserialize<BrowserCredentialCaptureMessage>(args.WebMessageAsJson);
+                if (message is null || !string.Equals(message.Type, "credentialCapture", StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+
+                BrowserCredentialImportResult result = BrowserCredentialStore.SaveCredential(
+                    string.IsNullOrWhiteSpace(message.Url) ? _currentUri : message.Url,
+                    message.Username,
+                    message.Password,
+                    name: ProjectName,
+                    note: "Captured from WinMux browser");
+
+                if (!result.Ok)
+                {
+                    return;
+                }
+
+                UpdateCredentialAutofillStatus();
+                LogBrowserEvent("credentials.saved", result.Message, new Dictionary<string, string>
+                {
+                    ["url"] = message.Url ?? _currentUri ?? string.Empty,
+                    ["usernamePresent"] = (!string.IsNullOrWhiteSpace(message.Username)).ToString(),
+                });
+            }
+            catch (Exception ex)
+            {
+                LogBrowserEvent("credentials.save_failed", $"Failed to save credential candidate: {ex.Message}", new Dictionary<string, string>
+                {
+                    ["error"] = ex.Message,
+                });
+            }
         }
 
         private void OnContextMenuRequested(CoreWebView2 sender, CoreWebView2ContextMenuRequestedEventArgs args)
@@ -840,6 +903,85 @@ namespace SelfContainedDeployment.Panes
                     ["host"] = match.Host ?? string.Empty,
                     ["error"] = ex.Message,
                 });
+            }
+        }
+
+        private async Task EnsureCredentialCaptureScriptAsync(CoreWebView2 core)
+        {
+            if (_credentialCaptureScriptInjected)
+            {
+                return;
+            }
+
+            string script = """
+(() => {
+  if (!window.chrome?.webview || window.__winmuxCredentialCaptureInstalled) {
+    return;
+  }
+
+  window.__winmuxCredentialCaptureInstalled = true;
+
+  const visible = (element) => {
+    if (!element) return false;
+    const style = window.getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
+  };
+
+  const gather = (root) => {
+    const scope = root instanceof Element ? root : document;
+    const passwordField = scope.querySelector('input[type="password"]');
+    if (!passwordField || !passwordField.value) return null;
+
+    const usernameField = scope.querySelector('input[type="email"], input[autocomplete="username"], input[name*="user" i], input[name*="email" i], input[id*="user" i], input[id*="email" i], input[type="text"]');
+    return {
+      type: 'credentialCapture',
+      url: location.href,
+      username: usernameField && visible(usernameField) ? usernameField.value : '',
+      password: passwordField.value
+    };
+  };
+
+  const postCandidate = (root) => {
+    const payload = gather(root);
+    if (payload) {
+      window.chrome.webview.postMessage(payload);
+    }
+  };
+
+  document.addEventListener('submit', (event) => {
+    postCandidate(event.target);
+  }, true);
+
+  document.addEventListener('click', (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    const trigger = target ? target.closest('button, input[type="submit"], [role="button"]') : null;
+    if (!trigger) {
+      return;
+    }
+
+    window.setTimeout(() => postCandidate(trigger.form ?? document), 0);
+  }, true);
+})();
+""";
+
+            await core.AddScriptToExecuteOnDocumentCreatedAsync(script).AsTask().ConfigureAwait(true);
+            _credentialCaptureScriptInjected = true;
+        }
+
+        private async Task NotifyBrowserResizedAsync()
+        {
+            if (!_initialized || BrowserView.CoreWebView2 is null)
+            {
+                return;
+            }
+
+            try
+            {
+                await BrowserView.CoreWebView2.ExecuteScriptAsync("window.dispatchEvent(new Event('resize'));").AsTask().ConfigureAwait(true);
+            }
+            catch
+            {
             }
         }
 

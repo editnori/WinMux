@@ -283,6 +283,70 @@ namespace SelfContainedDeployment.Browser
             }
         }
 
+        public static BrowserCredentialImportResult SaveCredential(string url, string username, string password, string name = null, string note = null)
+        {
+            if (!Uri.TryCreate(url, UriKind.Absolute, out Uri parsedUri) ||
+                !(parsedUri.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) ||
+                  parsedUri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)))
+            {
+                return new BrowserCredentialImportResult
+                {
+                    Ok = false,
+                    Message = "Only http and https credentials can be stored in the WinMux vault.",
+                };
+            }
+
+            if (string.IsNullOrWhiteSpace(password))
+            {
+                return new BrowserCredentialImportResult
+                {
+                    Ok = false,
+                    Message = "Password is required.",
+                };
+            }
+
+            lock (Sync)
+            {
+                BrowserCredentialEnvelope envelope = LoadEnvelopeCore();
+                string host = NormalizeHost(parsedUri.Host);
+                int existingIndex = envelope.Entries.FindIndex(entry =>
+                    string.Equals(entry.Host, host, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(entry.Username ?? string.Empty, username ?? string.Empty, StringComparison.OrdinalIgnoreCase));
+
+                BrowserCredentialEntry next = new()
+                {
+                    Id = BuildCredentialId(url, username, password),
+                    Name = string.IsNullOrWhiteSpace(name) ? host : name.Trim(),
+                    Url = url,
+                    Host = host,
+                    Username = username?.Trim() ?? string.Empty,
+                    Password = password,
+                    Note = note?.Trim() ?? string.Empty,
+                };
+
+                if (existingIndex >= 0)
+                {
+                    envelope.Entries[existingIndex] = next;
+                }
+                else
+                {
+                    envelope.Entries.Add(next);
+                }
+
+                envelope.ImportedAtUtc = DateTimeOffset.UtcNow;
+                SaveEnvelopeCore(envelope);
+
+                return new BrowserCredentialImportResult
+                {
+                    Ok = true,
+                    ImportedCount = 1,
+                    Message = existingIndex >= 0
+                        ? $"Updated saved browser credential for {host}."
+                        : $"Saved browser credential for {host}.",
+                };
+            }
+        }
+
         private static List<BrowserCredentialEntry> ParseGooglePasswordsCsv(string csvPath)
         {
             List<BrowserCredentialEntry> entries = new();

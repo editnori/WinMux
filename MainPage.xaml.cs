@@ -24,7 +24,7 @@ namespace SelfContainedDeployment
 {
     public partial class MainPage : Page
     {
-        private const double PaneDividerThickness = 3;
+        private const double PaneDividerThickness = 4;
         private const double MinPaneSplitRatio = 0.24;
         private const double MaxPaneSplitRatio = 0.76;
         private readonly List<WorkspaceProject> _projects = new();
@@ -2160,7 +2160,7 @@ namespace SelfContainedDeployment
                 Width = PaneDividerThickness,
                 HorizontalAlignment = HorizontalAlignment.Stretch,
                 VerticalAlignment = VerticalAlignment.Stretch,
-                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(1, 0, 0, 0)),
+                Background = (Brush)Application.Current.Resources["ShellPaneDividerBrush"],
                 Tag = "vertical",
             };
             AutomationProperties.SetAutomationId(splitter, $"shell-pane-splitter-vertical-{row}-{column}");
@@ -2181,7 +2181,7 @@ namespace SelfContainedDeployment
                 Height = PaneDividerThickness,
                 HorizontalAlignment = HorizontalAlignment.Stretch,
                 VerticalAlignment = VerticalAlignment.Stretch,
-                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(1, 0, 0, 0)),
+                Background = (Brush)Application.Current.Resources["ShellPaneDividerBrush"],
                 Tag = "horizontal",
             };
             AutomationProperties.SetAutomationId(splitter, $"shell-pane-splitter-horizontal-{row}-{column}");
