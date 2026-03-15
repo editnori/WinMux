@@ -21,6 +21,8 @@ namespace SelfContainedDeployment.Persistence
 
         public bool PaneOpen { get; set; }
 
+        public bool InspectorOpen { get; set; } = true;
+
         public string ActiveView { get; set; }
 
         public string ActiveProjectId { get; set; }

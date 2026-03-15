@@ -138,8 +138,12 @@
 
                 <Grid Grid.Row="1"
                       AutomationProperties.AutomationId="shell-workspace-host"
-                      Background="{ThemeResource ShellPageBackgroundBrush}"
-                      ColumnDefinitions="*,320">
+                      Background="{ThemeResource ShellPageBackgroundBrush}">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition x:Name="InspectorColumn" Width="320" />
+                    </Grid.ColumnDefinitions>
+
                     <Grid x:Name="PaneWorkspaceShell"
                           Grid.Column="0"
                           AutomationProperties.AutomationId="shell-pane-workspace">
@@ -153,7 +157,7 @@
                               Background="{ThemeResource ShellSurfaceBackgroundBrush}"
                               BorderBrush="{ThemeResource ShellBorderBrush}"
                               BorderThickness="0,0,0,1"
-                              ColumnDefinitions="*,Auto,Auto">
+                              ColumnDefinitions="*,Auto,Auto,Auto">
                             <TabView x:Name="TerminalTabs"
                                      AutomationProperties.AutomationId="shell-tab-view"
                                      AddTabButtonClick="TerminalTabs_AddTabButtonClick"
@@ -185,6 +189,16 @@
                                     ToolTipService.ToolTip="Add editor pane">
                                 <FontIcon FontSize="12" Glyph="&#xE70F;" />
                             </Button>
+
+                            <Button x:Name="ToggleInspectorButton"
+                                    Grid.Column="3"
+                                    AutomationProperties.AutomationId="shell-toggle-inspector"
+                                    Margin="0,6,10,6"
+                                    Style="{StaticResource ShellChromeButtonStyle}"
+                                    Click="OnToggleInspectorClicked"
+                                    ToolTipService.ToolTip="Hide inspector">
+                                <FontIcon FontSize="12" Glyph="&#xE7F8;" />
+                            </Button>
                         </Grid>
 
                         <Grid x:Name="PaneWorkspaceGrid"
@@ -194,6 +208,7 @@
                     </Grid>
 
                     <Border Grid.Column="1"
+                            x:Name="InspectorSidebar"
                             AutomationProperties.AutomationId="shell-diff-sidebar"
                             Background="{ThemeResource ShellSurfaceBackgroundBrush}"
                             BorderBrush="{ThemeResource ShellBorderBrush}"
@@ -204,6 +219,8 @@
                                         AutomationProperties.AutomationId="shell-diff-refresh"
                                         Click="OnRefreshDiffClicked"
                                         Content="Refresh diff" />
+                                <TextBlock Text="Inspector"
+                                           Style="{StaticResource ShellSectionTextStyle}" />
                                 <TextBlock x:Name="DiffBranchText"
                                            AutomationProperties.AutomationId="shell-diff-branch"
                                            Text="No git context" />

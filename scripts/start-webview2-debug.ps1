@@ -84,7 +84,12 @@ for ($i = 0; $i -lt 40; $i++) {
         $lastTargets = $targets
 
         $rendererTargets = @($targets | Where-Object {
-            $_.url -like "*terminal-host.html*" -or $_.title -like "*terminal*"
+            $_.type -eq "page" -and (
+                $_.url -like "*terminal-host.html*" -or
+                $_.title -like "*terminal*" -or
+                $_.url -like "http://*" -or
+                $_.url -like "https://*"
+            )
         })
 
         if ($rendererTargets.Count -gt 0) {

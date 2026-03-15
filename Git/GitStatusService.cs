@@ -51,6 +51,10 @@ namespace SelfContainedDeployment.Git
 
     internal static class GitStatusService
     {
+        private const string RootMarker = "__WINMUX_ROOT__";
+        private const string StatusMarker = "__WINMUX_STATUS__";
+        private const string DiffStatMarker = "__WINMUX_DIFFSTAT__";
+
         public static GitThreadSnapshot Capture(string workingPath, string selectedPath = null)
         {
             string normalizedPath = ShellProfiles.NormalizeProjectPath(workingPath);
@@ -59,25 +63,15 @@ namespace SelfContainedDeployment.Git
                 WorktreePath = normalizedPath,
             };
 
-            GitCommandResult rootResult = RunGit(normalizedPath, "rev-parse --show-toplevel");
-            if (!rootResult.Ok)
+            GitCommandResult metadataResult = RunGitSnapshot(normalizedPath);
+            if (!metadataResult.Ok)
             {
-                snapshot.Error = NormalizeGitError(rootResult.Error);
+                snapshot.Error = NormalizeGitError(metadataResult.Error);
                 return snapshot;
             }
 
-            snapshot.RepositoryRootPath = rootResult.Output.Trim();
-
-            GitCommandResult statusResult = RunGit(normalizedPath, "status --porcelain=v1 -b --untracked-files=all");
-            if (!statusResult.Ok)
-            {
-                snapshot.Error = NormalizeGitError(statusResult.Error);
-                return snapshot;
-            }
-
-            ParseStatus(snapshot, statusResult.Output);
+            ParseMetadataSnapshot(snapshot, metadataResult.Output);
             snapshot.StatusSummary = BuildStatusSummary(snapshot.ChangedFiles);
-            snapshot.DiffSummary = RunGit(normalizedPath, "diff --stat --compact-summary").Output?.Trim() ?? string.Empty;
 
             string resolvedSelectedPath = selectedPath;
             if (string.IsNullOrWhiteSpace(resolvedSelectedPath))
@@ -88,8 +82,7 @@ namespace SelfContainedDeployment.Git
             snapshot.SelectedPath = resolvedSelectedPath;
             if (!string.IsNullOrWhiteSpace(resolvedSelectedPath))
             {
-                string escapedPath = EscapeForPosixDoubleQuotes(resolvedSelectedPath);
-                GitCommandResult diffResult = RunGit(normalizedPath, $"diff -- \"{escapedPath}\"");
+                GitCommandResult diffResult = RunGitDiff(normalizedPath, resolvedSelectedPath);
                 snapshot.SelectedDiff = diffResult.Ok
                     ? diffResult.Output
                     : NormalizeGitError(diffResult.Error);
@@ -160,19 +153,84 @@ namespace SelfContainedDeployment.Git
             return files.Count == 1 ? "1 changed file" : $"{files.Count} changed files";
         }
 
-        private static GitCommandResult RunGit(string workingPath, string gitArguments)
+        private static void ParseMetadataSnapshot(GitThreadSnapshot snapshot, string output)
+        {
+            StringBuilder rootOutput = new();
+            StringBuilder statusOutput = new();
+            StringBuilder diffStatOutput = new();
+            StringBuilder activeOutput = null;
+
+            string[] lines = output?.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None) ?? Array.Empty<string>();
+            foreach (string line in lines)
+            {
+                if (string.Equals(line, RootMarker, StringComparison.Ordinal))
+                {
+                    activeOutput = rootOutput;
+                    continue;
+                }
+
+                if (string.Equals(line, StatusMarker, StringComparison.Ordinal))
+                {
+                    activeOutput = statusOutput;
+                    continue;
+                }
+
+                if (string.Equals(line, DiffStatMarker, StringComparison.Ordinal))
+                {
+                    activeOutput = diffStatOutput;
+                    continue;
+                }
+
+                activeOutput?.AppendLine(line);
+            }
+
+            snapshot.RepositoryRootPath = rootOutput.ToString().Trim();
+            ParseStatus(snapshot, statusOutput.ToString());
+            snapshot.DiffSummary = diffStatOutput.ToString().Trim();
+        }
+
+        private static GitCommandResult RunGitSnapshot(string workingPath)
+        {
+            string script = string.Join(" && ", new[]
+            {
+                $"printf '%s\\n' '{RootMarker}'",
+                "git --no-optional-locks rev-parse --show-toplevel",
+                $"printf '%s\\n' '{StatusMarker}'",
+                "git --no-optional-locks -c core.quotepath=false status --porcelain=v1 -b --untracked-files=all",
+                $"printf '%s\\n' '{DiffStatMarker}'",
+                "git --no-optional-locks -c core.quotepath=false diff --stat --compact-summary",
+            });
+
+            return RunWslShell(workingPath, script);
+        }
+
+        private static GitCommandResult RunGitDiff(string workingPath, string selectedPath)
+        {
+            const string script = "git --no-optional-locks -c core.quotepath=false diff -- \"$1\"";
+            return RunWslShell(workingPath, script, selectedPath);
+        }
+
+        private static GitCommandResult RunWslShell(string workingPath, string shellScript, string argument = null)
         {
             string linuxPath = ShellProfiles.ResolveDisplayPath(workingPath, ShellProfileIds.Wsl);
-            string script = $"git {gitArguments}";
             ProcessStartInfo startInfo = new()
             {
-                FileName = "powershell.exe",
-                Arguments = $"-NoProfile -Command \"wsl.exe --cd \\\"{linuxPath}\\\" sh -lc '{EscapeForSingleQuotedPosix(script)}'\"",
+                FileName = "wsl.exe",
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
                 CreateNoWindow = true,
             };
+            startInfo.ArgumentList.Add("--cd");
+            startInfo.ArgumentList.Add(linuxPath);
+            startInfo.ArgumentList.Add("sh");
+            startInfo.ArgumentList.Add("-lc");
+            startInfo.ArgumentList.Add(shellScript);
+            startInfo.ArgumentList.Add("winmux");
+            if (!string.IsNullOrWhiteSpace(argument))
+            {
+                startInfo.ArgumentList.Add(argument);
+            }
 
             using Process process = Process.Start(startInfo);
             if (process is null)
@@ -198,16 +256,6 @@ namespace SelfContainedDeployment.Git
             return process.ExitCode == 0
                 ? new GitCommandResult(true, stdout.TrimEnd(), stderr.Trim())
                 : new GitCommandResult(false, stdout.TrimEnd(), string.IsNullOrWhiteSpace(stderr) ? stdout.Trim() : stderr.Trim());
-        }
-
-        private static string EscapeForSingleQuotedPosix(string value)
-        {
-            return (value ?? string.Empty).Replace("'", "'\"'\"'");
-        }
-
-        private static string EscapeForPosixDoubleQuotes(string value)
-        {
-            return (value ?? string.Empty).Replace("\\", "\\\\").Replace("\"", "\\\"");
         }
 
         private readonly record struct GitCommandResult(bool Ok, string Output, string Error);

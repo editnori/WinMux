@@ -74,6 +74,7 @@ These go through `POST /action`.
 Supported `action` values:
 
 - `togglePane`
+- `toggleInspector`
 - `showTerminal`
 - `showSettings`
 - `newProject`
@@ -100,6 +101,7 @@ Supported `action` values:
 - `renameThread`
 - `duplicateThread`
 - `deleteThread`
+- `deleteProject`
 - `input`
 
 Relevant payload fields:
@@ -113,6 +115,7 @@ Relevant payload fields:
 Notes:
 
 - `newProject` on the semantic route creates a project directly from `value` without opening the dialog.
+- `toggleInspector` collapses or reopens the right-side inspector rail without changing the active thread.
 - `newBrowserPane` adds a preview pane to the active thread backed by the shared WinMux browser profile.
 - `newEditorPane` adds a terminal-backed editor pane that launches `nvim .`.
 - `importBrowserPasswordsCsv` imports a Google Passwords CSV into the WinMux-encrypted credential store.
@@ -124,6 +127,7 @@ Notes:
 - `refreshDiff` refreshes the active thread's git snapshot.
 - `selectDiffFile` refreshes the active thread's git snapshot and selects one changed file by relative path.
 - `navigateBrowser` sends a URL to the selected browser pane; an empty `value` returns it to the built-in start page.
+- `deleteProject` removes a project and its threads from the live workspace; if it was the active project, WinMux activates the next surviving project.
 - `input` sends text to the selected terminal/editor pane, not to arbitrary native controls.
 - `moveTabAfter` provides a semantic pane reorder path without coordinate dragging.
 
@@ -135,6 +139,7 @@ Notes:
 - `worktreePath`
 - `changedFileCount`
 - `selectedDiffPath`
+- `inspectorOpen`
 
 Each thread entry also includes:
 
@@ -145,6 +150,7 @@ Each thread entry also includes:
 Notes:
 
 - git snapshots refresh on thread activation and can be forced with `refreshDiff`
+- git snapshots now refresh off the UI thread and use direct `wsl.exe` git probes instead of repeated PowerShell launches
 - non-git threads show a friendly "No git repository detected for this thread." message instead of raw git stderr
 
 ### Browser inspection

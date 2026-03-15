@@ -22,6 +22,8 @@ namespace SelfContainedDeployment.Automation
 
         public bool PaneOpen { get; set; }
 
+        public bool InspectorOpen { get; set; }
+
         public string ShellProfileId { get; set; }
 
         public string GitBranch { get; set; }

@@ -25,7 +25,7 @@ What exists now:
 
 - fixed native shell layout with a dense inline sidebar and a top pane strip
 - multiple projects, each with nested threads and per-thread pane workspaces
-- worktree-aware thread metadata and a right-side git diff rail for the active thread
+- worktree-aware thread metadata and a collapsible right-side inspector rail for the active thread
 - autosaved workspace/session replay across app relaunches
 - terminal panes backed by `TerminalControl`
 - browser preview panes backed by `WebView2` with a built-in start page and a shared WinMux browser profile
@@ -37,6 +37,7 @@ What exists now:
 - WebView2 CDP debug workflow for Playwright-style inspection
 - native automation loop for shell state, UI-tree snapshots, style metadata, generic UI actions, desktop window automation, render traces, terminal snapshots, event logs, and native window screenshots
 - native frame recording and script-backed semantic UIA control for external windows
+- async git refresh plus render-key coalescing on the shell so thread switches and inspector refreshes do less work on the UI path
 
 What does not exist yet:
 

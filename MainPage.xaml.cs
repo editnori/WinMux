@@ -19,6 +19,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
 using Windows.Storage.Pickers;
 using Windows.Foundation;
 using WinRT.Interop;
@@ -48,9 +49,17 @@ namespace SelfContainedDeployment
         private bool _suppressDiffSelectionChanged;
         private string _inlineRenamingPaneId;
         private bool _restoringSession;
+        private bool _inspectorOpen = true;
         private int _threadSequence = 1;
         private readonly DispatcherQueueTimer _sessionSaveTimer;
+        private readonly DispatcherQueueTimer _projectTreeRefreshTimer;
+        private readonly DispatcherQueueTimer _gitRefreshTimer;
         private GitThreadSnapshot _activeGitSnapshot;
+        private int _latestGitRefreshRequestId;
+        private string _pendingGitSelectedPath;
+        private bool _pendingGitPreserveSelection;
+        private string _lastProjectTreeRenderKey;
+        private string _lastPaneWorkspaceRenderKey;
 
         public static MainPage Current;
 
@@ -64,6 +73,14 @@ namespace SelfContainedDeployment
             _sessionSaveTimer.IsRepeating = false;
             _sessionSaveTimer.Interval = TimeSpan.FromMilliseconds(450);
             _sessionSaveTimer.Tick += OnSessionSaveTimerTick;
+            _projectTreeRefreshTimer = DispatcherQueue.CreateTimer();
+            _projectTreeRefreshTimer.IsRepeating = false;
+            _projectTreeRefreshTimer.Interval = TimeSpan.FromMilliseconds(70);
+            _projectTreeRefreshTimer.Tick += OnProjectTreeRefreshTimerTick;
+            _gitRefreshTimer = DispatcherQueue.CreateTimer();
+            _gitRefreshTimer.IsRepeating = false;
+            _gitRefreshTimer.Interval = TimeSpan.FromMilliseconds(120);
+            _gitRefreshTimer.Tick += OnGitRefreshTimerTick;
         }
 
         private static void LogAutomationEvent(string category, string name, string message = null, IReadOnlyDictionary<string, string> data = null)
@@ -477,6 +494,7 @@ namespace SelfContainedDeployment
                 ActiveView = _showingSettings ? "settings" : "terminal",
                 Theme = ResolveTheme(SampleConfig.CurrentTheme).ToString().ToLowerInvariant(),
                 PaneOpen = ShellSplitView.IsPaneOpen,
+                InspectorOpen = _inspectorOpen,
                 ShellProfileId = _activeProject?.ShellProfileId,
                 GitBranch = _activeThread?.BranchName,
                 WorktreePath = _activeThread?.WorktreePath,
@@ -505,6 +523,9 @@ namespace SelfContainedDeployment
                         break;
                     case "showsettings":
                         ShowSettings();
+                        break;
+                    case "toggleinspector":
+                        ToggleInspector();
                         break;
                     case "newproject":
                         OpenProject(GetOrCreateProject(ResolveRequestedPath(request.Value), null, SampleConfig.DefaultShellProfileId));
@@ -602,6 +623,9 @@ namespace SelfContainedDeployment
                     case "deletethread":
                         DeleteThread(request.ThreadId);
                         break;
+                    case "deleteproject":
+                        DeleteProject(request.ProjectId);
+                        break;
                     case "input":
                         SendInputToSelectedTerminal(request.Value);
                         break;
@@ -647,6 +671,7 @@ namespace SelfContainedDeployment
             InitializeShellModel();
             ApplyTheme(SampleConfig.CurrentTheme);
             UpdatePaneLayout();
+            UpdateInspectorVisibility();
             if (_showingSettings)
             {
                 ShowSettings();
@@ -663,11 +688,23 @@ namespace SelfContainedDeployment
             PersistSessionState();
         }
 
+        private void OnProjectTreeRefreshTimerTick(DispatcherQueueTimer sender, object args)
+        {
+            _projectTreeRefreshTimer.Stop();
+            RefreshProjectTree();
+        }
+
+        private async void OnGitRefreshTimerTick(DispatcherQueueTimer sender, object args)
+        {
+            _gitRefreshTimer.Stop();
+            await RefreshActiveThreadGitStateAsync(_pendingGitSelectedPath, _pendingGitPreserveSelection).ConfigureAwait(true);
+        }
+
         private void OnActualThemeChanged(FrameworkElement sender, object args)
         {
             if (SampleConfig.CurrentTheme == ElementTheme.Default)
             {
-                RefreshProjectTree();
+                QueueProjectTreeRefresh();
                 UpdateSidebarActions();
                 UpdateHeader();
                 ApplyThemeToAllTerminals(ResolveTheme(ElementTheme.Default));
@@ -836,9 +873,14 @@ namespace SelfContainedDeployment
             AddEditorPane(_activeProject, _activeThread);
         }
 
+        private void OnToggleInspectorClicked(object sender, RoutedEventArgs e)
+        {
+            ToggleInspector();
+        }
+
         private void OnRefreshDiffClicked(object sender, RoutedEventArgs e)
         {
-            RefreshActiveThreadGitState();
+            QueueActiveThreadGitRefresh();
         }
 
         private void OnDiffFileSelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -853,7 +895,7 @@ namespace SelfContainedDeployment
                 return;
             }
 
-            RefreshActiveThreadGitState(changedFile.Path);
+            QueueActiveThreadGitRefresh(changedFile.Path);
         }
 
         private void TerminalTabs_TabCloseRequested(TabView sender, TabViewTabCloseRequestedEventArgs args)
@@ -943,6 +985,33 @@ namespace SelfContainedDeployment
             _sessionSaveTimer.Start();
         }
 
+        private void QueueProjectTreeRefresh()
+        {
+            _projectTreeRefreshTimer.Stop();
+            _projectTreeRefreshTimer.Start();
+        }
+
+        private void QueueActiveThreadGitRefresh(string selectedPath = null, bool preserveSelection = false)
+        {
+            if (_activeThread is null)
+            {
+                _activeGitSnapshot = null;
+                ApplyGitSnapshotToUi();
+                return;
+            }
+
+            _pendingGitSelectedPath = selectedPath;
+            _pendingGitPreserveSelection = preserveSelection;
+            _gitRefreshTimer.Stop();
+            _gitRefreshTimer.Start();
+
+            DiffBranchText.Text = string.IsNullOrWhiteSpace(_activeThread.BranchName)
+                ? "Refreshing git state..."
+                : _activeThread.BranchName;
+            DiffWorktreeText.Text = _activeThread.WorktreePath ?? _activeProject?.RootPath ?? string.Empty;
+            DiffSummaryText.Text = "Refreshing git state...";
+        }
+
         private WorkspaceSessionSnapshot BuildSessionSnapshot()
         {
             return new WorkspaceSessionSnapshot
@@ -952,11 +1021,14 @@ namespace SelfContainedDeployment
                 DefaultShellProfileId = SampleConfig.DefaultShellProfileId,
                 MaxPaneCountPerThread = SampleConfig.MaxPaneCountPerThread,
                 PaneOpen = ShellSplitView.IsPaneOpen,
+                InspectorOpen = _inspectorOpen,
                 ActiveView = _showingSettings ? "settings" : "terminal",
                 ActiveProjectId = _activeProject?.Id,
                 ActiveThreadId = _activeThread?.Id,
                 ThreadSequence = _threadSequence,
-                Projects = _projects.Select(project => new ProjectSessionSnapshot
+                Projects = _projects
+                    .Where(ShouldPersistProject)
+                    .Select(project => new ProjectSessionSnapshot
                 {
                     Id = project.Id,
                     Name = project.Name,
@@ -1018,6 +1090,11 @@ namespace SelfContainedDeployment
 
                 foreach (ProjectSessionSnapshot projectSnapshot in snapshot.Projects)
                 {
+                    if (!ShouldPersistProjectPath(projectSnapshot.RootPath))
+                    {
+                        continue;
+                    }
+
                     WorkspaceProject project = new(projectSnapshot.RootPath, projectSnapshot.ShellProfileId, projectSnapshot.Name, projectSnapshot.Id);
                     ShellProfiles.EnsureProjectDirectory(project.RootPath, out _);
                     _projects.Add(project);
@@ -1077,9 +1154,11 @@ namespace SelfContainedDeployment
                 }
 
                 ShellSplitView.IsPaneOpen = snapshot.PaneOpen;
+                _inspectorOpen = snapshot.InspectorOpen;
                 _showingSettings = string.Equals(snapshot.ActiveView, "settings", StringComparison.OrdinalIgnoreCase);
                 RefreshProjectTree();
                 RefreshTabView();
+                UpdateInspectorVisibility();
                 return true;
             }
             catch
@@ -1804,7 +1883,7 @@ namespace SelfContainedDeployment
             if (thread is null)
             {
                 _activeThread = null;
-                RefreshProjectTree();
+                QueueProjectTreeRefresh();
                 RefreshTabView();
                 UpdateWorkspaceVisibility();
                 UpdateHeader();
@@ -1837,13 +1916,13 @@ namespace SelfContainedDeployment
             _activeProject = FindProjectForThread(thread);
             _activeProject.SelectedThreadId = thread.Id;
             EnsureThreadHasTab(_activeProject, thread);
-            RefreshProjectTree();
+            QueueProjectTreeRefresh();
             RefreshTabView();
             UpdateWorkspaceVisibility();
             UpdateHeader();
             RequestLayoutForVisiblePanes();
             FocusSelectedPane();
-            RefreshActiveThreadGitState(preserveSelection: true);
+            QueueActiveThreadGitRefresh(preserveSelection: true);
             QueueSessionSave();
             LogAutomationEvent("shell", "thread.selected", $"Selected thread {thread.Name}", new Dictionary<string, string>
             {
@@ -2078,6 +2157,49 @@ namespace SelfContainedDeployment
             });
         }
 
+        private void DeleteProject(string projectId)
+        {
+            WorkspaceProject project = string.IsNullOrWhiteSpace(projectId)
+                ? _activeProject
+                : _projects.FirstOrDefault(candidate => string.Equals(candidate.Id, projectId, StringComparison.Ordinal));
+            if (project is null)
+            {
+                return;
+            }
+
+            bool wasActive = ReferenceEquals(project, _activeProject);
+            foreach (WorkspaceThread thread in project.Threads.ToList())
+            {
+                ClearThreadPanes(project, thread);
+            }
+
+            _projects.Remove(project);
+
+            if (_projects.Count == 0)
+            {
+                WorkspaceProject fallbackProject = GetOrCreateProject(Environment.CurrentDirectory, null, SampleConfig.DefaultShellProfileId);
+                OpenProject(fallbackProject);
+            }
+            else if (wasActive)
+            {
+                OpenProject(_projects[0]);
+            }
+            else
+            {
+                QueueProjectTreeRefresh();
+                UpdateWorkspaceVisibility();
+                UpdateHeader();
+            }
+
+            ShowTerminalShell();
+            QueueSessionSave();
+            LogAutomationEvent("shell", "project.deleted", $"Deleted project {project.Name}", new Dictionary<string, string>
+            {
+                ["projectId"] = project.Id,
+                ["remainingProjectCount"] = _projects.Count.ToString(),
+            });
+        }
+
         private void SetPaneSplit(string threadId, string value)
         {
             WorkspaceThread thread = string.IsNullOrWhiteSpace(threadId) ? _activeThread : FindThread(threadId);
@@ -2166,6 +2288,13 @@ namespace SelfContainedDeployment
 
         private void RefreshProjectTree()
         {
+            string renderKey = BuildProjectTreeRenderKey();
+            if (string.Equals(renderKey, _lastProjectTreeRenderKey, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _lastProjectTreeRenderKey = renderKey;
             ProjectListPanel.Children.Clear();
             bool isOpen = ShellSplitView.IsPaneOpen;
 
@@ -2575,6 +2704,14 @@ namespace SelfContainedDeployment
 
         private void RenderPaneWorkspace()
         {
+            string renderKey = BuildPaneWorkspaceRenderKey();
+            if (string.Equals(renderKey, _lastPaneWorkspaceRenderKey, StringComparison.Ordinal))
+            {
+                UpdatePaneSelectionChrome();
+                return;
+            }
+
+            _lastPaneWorkspaceRenderKey = renderKey;
             PaneWorkspaceGrid.Children.Clear();
             PaneWorkspaceGrid.RowDefinitions.Clear();
             PaneWorkspaceGrid.ColumnDefinitions.Clear();
@@ -2854,7 +2991,7 @@ namespace SelfContainedDeployment
                 }
             }
 
-            RefreshProjectTree();
+            QueueProjectTreeRefresh();
             LogAutomationEvent("render", "pane.split_resized", "Updated pane split ratios", new Dictionary<string, string>
             {
                 ["threadId"] = _activeThread.Id,
@@ -2996,7 +3133,7 @@ namespace SelfContainedDeployment
             FocusSelectedPane();
             RequestLayoutForVisiblePanes();
             UpdateHeader();
-            RefreshActiveThreadGitState(_activeGitSnapshot?.SelectedPath, preserveSelection: true);
+            QueueActiveThreadGitRefresh(_activeGitSnapshot?.SelectedPath, preserveSelection: true);
             QueueSessionSave();
             LogAutomationEvent("shell", "view.terminal", _activeThread is null ? "Showing empty project state" : "Showing pane workspace", new Dictionary<string, string>
             {
@@ -3016,12 +3153,46 @@ namespace SelfContainedDeployment
 
             string targetPath = preserveSelection ? selectedPath ?? _activeGitSnapshot?.SelectedPath : selectedPath;
             GitThreadSnapshot snapshot = GitStatusService.Capture(_activeThread.WorktreePath ?? _activeProject?.RootPath, targetPath);
+            ApplyActiveGitSnapshot(snapshot);
+        }
+
+        private async System.Threading.Tasks.Task RefreshActiveThreadGitStateAsync(string selectedPath = null, bool preserveSelection = false)
+        {
+            if (_activeThread is null)
+            {
+                _activeGitSnapshot = null;
+                ApplyGitSnapshotToUi();
+                return;
+            }
+
+            WorkspaceThread thread = _activeThread;
+            WorkspaceProject project = _activeProject;
+            string targetPath = preserveSelection ? selectedPath ?? _activeGitSnapshot?.SelectedPath : selectedPath;
+            int requestId = ++_latestGitRefreshRequestId;
+            string worktreePath = thread.WorktreePath ?? project?.RootPath;
+
+            GitThreadSnapshot snapshot = await System.Threading.Tasks.Task
+                .Run(() => GitStatusService.Capture(worktreePath, targetPath))
+                .ConfigureAwait(true);
+
+            if (requestId != _latestGitRefreshRequestId ||
+                !ReferenceEquals(thread, _activeThread) ||
+                !ReferenceEquals(project, _activeProject))
+            {
+                return;
+            }
+
+            ApplyActiveGitSnapshot(snapshot);
+        }
+
+        private void ApplyActiveGitSnapshot(GitThreadSnapshot snapshot)
+        {
             _activeGitSnapshot = snapshot;
             _activeThread.BranchName = snapshot.BranchName;
             _activeThread.WorktreePath = string.IsNullOrWhiteSpace(_activeThread.WorktreePath) ? snapshot.WorktreePath : _activeThread.WorktreePath;
             _activeThread.ChangedFileCount = snapshot.ChangedFiles.Count;
             ApplyGitSnapshotToUi();
-            RefreshProjectTree();
+            QueueProjectTreeRefresh();
             LogAutomationEvent("git", "thread.snapshot_refreshed", string.IsNullOrWhiteSpace(snapshot.Error) ? "Refreshed thread git snapshot" : snapshot.Error, new Dictionary<string, string>
             {
                 ["threadId"] = _activeThread.Id,
@@ -3077,13 +3248,6 @@ namespace SelfContainedDeployment
             foreach (WorkspacePaneRecord pane in GetVisiblePanes(_activeThread))
             {
                 pane.RequestLayout();
-                LogAutomationEvent("render", "pane.layout_requested", $"Requested layout for pane {pane.Id}", new Dictionary<string, string>
-                {
-                    ["paneId"] = pane.Id,
-                    ["paneKind"] = pane.Kind.ToString().ToLowerInvariant(),
-                    ["threadId"] = _activeThread?.Id ?? string.Empty,
-                    ["projectId"] = _activeProject?.Id ?? string.Empty,
-                });
             }
         }
 
@@ -3108,6 +3272,37 @@ namespace SelfContainedDeployment
             ApplyActionButtonState(NewProjectButton, NewProjectText, false);
         }
 
+        private void ToggleInspector()
+        {
+            _inspectorOpen = !_inspectorOpen;
+            UpdateInspectorVisibility();
+            _lastPaneWorkspaceRenderKey = null;
+            QueueSessionSave();
+            LogAutomationEvent("shell", "inspector.toggled", _inspectorOpen ? "Inspector opened" : "Inspector collapsed", new Dictionary<string, string>
+            {
+                ["inspectorOpen"] = _inspectorOpen.ToString(),
+            });
+        }
+
+        private void UpdateInspectorVisibility()
+        {
+            if (InspectorColumn is null || InspectorSidebar is null || ToggleInspectorButton is null)
+            {
+                return;
+            }
+
+            InspectorColumn.Width = _inspectorOpen
+                ? new GridLength(320)
+                : new GridLength(0);
+            InspectorSidebar.Visibility = _inspectorOpen ? Visibility.Visible : Visibility.Collapsed;
+
+            ToolTipService.SetToolTip(ToggleInspectorButton, _inspectorOpen ? "Hide inspector" : "Show inspector");
+            if (ToggleInspectorButton.Content is FontIcon icon)
+            {
+                icon.Glyph = _inspectorOpen ? "\uE7F8" : "\uE7F7";
+            }
+        }
+
         private void UpdatePaneLayout()
         {
             bool isOpen = ShellSplitView.IsPaneOpen;
@@ -3116,9 +3311,10 @@ namespace SelfContainedDeployment
             ProjectSectionText.Visibility = isOpen ? Visibility.Visible : Visibility.Collapsed;
             NewProjectText.Visibility = isOpen ? Visibility.Visible : Visibility.Collapsed;
             SettingsNavText.Visibility = isOpen ? Visibility.Visible : Visibility.Collapsed;
+            _lastProjectTreeRenderKey = null;
 
             ToolTipService.SetToolTip(PaneToggleButton, isOpen ? "Collapse sidebar" : "Expand sidebar");
-            RefreshProjectTree();
+            QueueProjectTreeRefresh();
             LogAutomationEvent("render", "pane.layout", isOpen ? "Sidebar expanded" : "Sidebar collapsed", new Dictionary<string, string>
             {
                 ["paneOpen"] = isOpen.ToString(),
@@ -3170,10 +3366,10 @@ namespace SelfContainedDeployment
             if (thread == _activeThread)
             {
                 UpdateHeader();
-                RefreshActiveThreadGitState();
+                QueueActiveThreadGitRefresh();
             }
 
-            RefreshProjectTree();
+            QueueProjectTreeRefresh();
             QueueSessionSave();
             LogAutomationEvent("shell", "thread.worktree.changed", $"Set thread worktree to {normalizedPath}", new Dictionary<string, string>
             {
@@ -3904,6 +4100,12 @@ namespace SelfContainedDeployment
                 return true;
             }
 
+            if (string.Equals(automationId, "shell-toggle-inspector", StringComparison.Ordinal))
+            {
+                ToggleInspector();
+                return true;
+            }
+
             if (string.Equals(automationId, "shell-new-project", StringComparison.Ordinal))
             {
                 return false;
@@ -4271,6 +4473,106 @@ namespace SelfContainedDeployment
         private static string FormatProjectPath(WorkspaceProject project)
         {
             return project.DisplayPath;
+        }
+
+        private string BuildProjectTreeRenderKey()
+        {
+            StringBuilder builder = new();
+            builder.Append(ShellSplitView?.IsPaneOpen == true ? '1' : '0')
+                .Append('|')
+                .Append(_showingSettings ? '1' : '0')
+                .Append('|')
+                .Append(_activeProject?.Id)
+                .Append('|')
+                .Append(_activeThread?.Id)
+                .Append('|');
+
+            foreach (WorkspaceProject project in _projects)
+            {
+                builder.Append(project.Id)
+                    .Append(':')
+                    .Append(project.Name)
+                    .Append(':')
+                    .Append(project.SelectedThreadId)
+                    .Append(':')
+                    .Append(project.Threads.Count)
+                    .Append(':')
+                    .Append(project.RootPath)
+                    .Append('|');
+
+                foreach (WorkspaceThread thread in project.Threads)
+                {
+                    builder.Append(thread.Id)
+                        .Append(':')
+                        .Append(thread.Name)
+                        .Append(':')
+                        .Append(thread.TabSummary)
+                        .Append(':')
+                        .Append(thread.BranchName)
+                        .Append(':')
+                        .Append(thread.WorktreePath)
+                        .Append('|');
+                }
+            }
+
+            return builder.ToString();
+        }
+
+        private string BuildPaneWorkspaceRenderKey()
+        {
+            StringBuilder builder = new();
+            builder.Append(_showingSettings ? '1' : '0')
+                .Append('|')
+                .Append(_inspectorOpen ? '1' : '0')
+                .Append('|')
+                .Append(_activeThread?.Id)
+                .Append('|');
+
+            if (_activeThread is null)
+            {
+                return builder.ToString();
+            }
+
+            builder.Append(_activeThread.SelectedPaneId)
+                .Append('|')
+                .Append(_activeThread.LayoutPreset)
+                .Append('|')
+                .Append(_activeThread.PrimarySplitRatio.ToString("0.000"))
+                .Append('|')
+                .Append(_activeThread.SecondarySplitRatio.ToString("0.000"))
+                .Append('|');
+
+            foreach (WorkspacePaneRecord pane in GetVisiblePanes(_activeThread))
+            {
+                builder.Append(pane.Id)
+                    .Append(':')
+                    .Append(pane.Title)
+                    .Append(':')
+                    .Append(pane.Kind)
+                    .Append(':')
+                    .Append(pane.IsExited ? '1' : '0')
+                    .Append('|');
+            }
+
+            return builder.ToString();
+        }
+
+        private static bool ShouldPersistProject(WorkspaceProject project)
+        {
+            return project is not null && ShouldPersistProjectPath(project.RootPath);
+        }
+
+        private static bool ShouldPersistProjectPath(string rootPath)
+        {
+            if (string.IsNullOrWhiteSpace(rootPath))
+            {
+                return false;
+            }
+
+            string normalizedRoot = ShellProfiles.NormalizeProjectPath(rootPath)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            string leafName = Path.GetFileName(normalizedRoot);
+            return !leafName.StartsWith("winmux-smoke-", StringComparison.OrdinalIgnoreCase);
         }
 
         private static string ResolveThreadRootPath(WorkspaceProject project, WorkspaceThread thread)

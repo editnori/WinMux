@@ -149,6 +149,8 @@ try {
     Add-Check "terminal-ui-tree" "$($interactiveNodes.Count) visible interactive node(s)"
 
     $activeProject = Get-ProjectById -State $state -ProjectId $state.projectId
+    $initialProjectId = $activeProject.id
+    $initialThreadId = $state.activeThreadId
     $threadCountBefore = @($activeProject.threads).Count
     $addThreadResponse = Invoke-AutomationPost "/ui-action" @{
         action = "click"
@@ -160,6 +162,7 @@ try {
     $activeProject = Get-ProjectById -State $state -ProjectId $state.projectId
     Assert-True (@($activeProject.threads).Count -eq ($threadCountBefore + 1)) "Add-thread did not create a new thread."
     $activeThread = Get-ThreadById -Project $activeProject -ThreadId $state.activeThreadId
+    $createdThreadId = $activeThread.id
     Add-Check "add-thread" "selected thread is '$($activeThread.name)'"
 
     $tabCountBefore = @($activeThread.tabs).Count
@@ -460,6 +463,7 @@ try {
 
         return $null
     }
+    $tempProjectId = $state.projectId
     Add-Check "new-project-dialog" "new project added at $tempProjectPath"
 
     $threadIdToDelete = $state.activeThreadId
@@ -546,6 +550,36 @@ try {
         value = "dark"
     }
     Assert-True ($resetTheme.ok -eq $true) "Failed to restore dark theme."
+
+    $restoreProject = Invoke-AutomationPost "/action" @{
+        action = "selectProject"
+        projectId = $initialProjectId
+    }
+    Assert-True ($restoreProject.ok -eq $true) "Failed to restore the initial project."
+
+    if (-not [string]::IsNullOrWhiteSpace($initialThreadId)) {
+        $restoreThread = Invoke-AutomationPost "/action" @{
+            action = "selectThread"
+            threadId = $initialThreadId
+        }
+        Assert-True ($restoreThread.ok -eq $true) "Failed to restore the initial thread."
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($createdThreadId)) {
+        $cleanupThread = Invoke-AutomationPost "/action" @{
+            action = "deleteThread"
+            threadId = $createdThreadId
+        }
+        Assert-True ($cleanupThread.ok -eq $true) "Failed to clean up the created smoke thread."
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($tempProjectId)) {
+        $cleanupProject = Invoke-AutomationPost "/action" @{
+            action = "deleteProject"
+            projectId = $tempProjectId
+        }
+        Assert-True ($cleanupProject.ok -eq $true) "Failed to clean up the temporary smoke project."
+    }
 
     $showTerminalResponse = Invoke-AutomationPost "/action" @{ action = "showTerminal" }
     Assert-True ($showTerminalResponse.ok -eq $true) "Failed to restore terminal view."
