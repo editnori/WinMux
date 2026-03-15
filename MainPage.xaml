@@ -175,17 +175,7 @@
                                         HorizontalAlignment="Right"
                                         VerticalAlignment="Center"
                                         Margin="0,0,10,0"
-                                        Spacing="10">
-                                <TextBlock x:Name="PaneStripMetaText"
-                                           AutomationProperties.AutomationId="shell-pane-strip-meta"
-                                           Style="{StaticResource ShellMetaTextStyle}"
-                                           MaxWidth="220"
-                                           Text="3 panes · dual · 2 visible"
-                                           TextTrimming="CharacterEllipsis"
-                                           TextWrapping="NoWrap"
-                                           VerticalAlignment="Center"
-                                           Visibility="Collapsed" />
-
+                                        Spacing="6">
                                 <Border Background="{ThemeResource ShellMutedSurfaceBrush}"
                                         BorderBrush="{ThemeResource ShellBorderBrush}"
                                         BorderThickness="1"
@@ -252,7 +242,7 @@
                                       ColumnDefinitions="*,Auto"
                                       ColumnSpacing="12">
                                     <StackPanel Spacing="2">
-                                        <TextBlock Text="Workspace map"
+                                        <TextBlock Text="Thread overview"
                                                    Style="{StaticResource ShellSectionTextStyle}" />
                                         <TextBlock x:Name="ThreadOverviewMetaText"
                                                    Style="{StaticResource ShellHintTextStyle}"

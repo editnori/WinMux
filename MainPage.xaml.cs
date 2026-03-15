@@ -3390,7 +3390,7 @@ namespace SelfContainedDeployment
                         threadText.Children.Add(threadTitle);
                         TextBlock threadMeta = new()
                         {
-                            Text = $"{threadLocation} · {thread.TabSummary}",
+                            Text = BuildThreadRailMeta(project, thread),
                             Style = (Style)Application.Current.Resources["ShellHintTextStyle"],
                             TextWrapping = TextWrapping.NoWrap,
                             TextTrimming = TextTrimming.CharacterEllipsis,
@@ -3439,7 +3439,6 @@ namespace SelfContainedDeployment
                     _refreshingTabView = false;
                 }
 
-                UpdatePaneStripMeta();
                 UpdateWorkspaceVisibility();
                 return;
             }
@@ -3500,7 +3499,6 @@ namespace SelfContainedDeployment
             }
 
             RenderPaneWorkspace();
-            UpdatePaneStripMeta();
             UpdateWorkspaceVisibility();
             LogAutomationEvent("render", "pane-strip.refreshed", $"Pane strip refreshed for thread {_activeThread.Name}", new Dictionary<string, string>
             {
@@ -4799,7 +4797,6 @@ namespace SelfContainedDeployment
                     ThreadNameBox.IsReadOnly = true;
                     ActiveDirectoryText.Visibility = Visibility.Visible;
                     ActiveDirectoryText.Text = "Theme, shell profile, and launch defaults";
-                    UpdatePaneStripMeta();
                     return;
                 }
 
@@ -4810,16 +4807,14 @@ namespace SelfContainedDeployment
                     ActiveDirectoryText.Visibility = Visibility.Visible;
                     ActiveDirectoryText.Text = _activeProject is null
                         ? "No active project"
-                        : $"{_activeProject.Threads.Count} thread{(_activeProject.Threads.Count == 1 ? string.Empty : "s")} in overview";
-                    UpdatePaneStripMeta();
+                        : $"{_activeProject.Threads.Count} thread{(_activeProject.Threads.Count == 1 ? string.Empty : "s")}";
                     return;
                 }
 
                 ThreadNameBox.IsReadOnly = _activeThread is null;
                 ThreadNameBox.Text = _activeThread?.Name ?? "No thread selected";
                 ActiveDirectoryText.Visibility = Visibility.Visible;
-                ActiveDirectoryText.Text = _activeProject is null ? string.Empty : FormatThreadPath(_activeProject, _activeThread);
-                UpdatePaneStripMeta();
+                ActiveDirectoryText.Text = _activeProject is null ? string.Empty : BuildHeaderContext(_activeProject, _activeThread);
             }
             finally
             {
@@ -4827,26 +4822,20 @@ namespace SelfContainedDeployment
             }
         }
 
-        private void UpdatePaneStripMeta()
+        private static string BuildHeaderContext(WorkspaceProject project, WorkspaceThread thread)
         {
-            if (PaneStripMetaText is null)
+            string leaf = ShellProfiles.DeriveName(thread?.WorktreePath ?? project?.RootPath ?? string.Empty);
+            if (string.IsNullOrWhiteSpace(leaf))
             {
-                return;
+                return string.Empty;
             }
 
-            string text = null;
-            if (_showingOverview && _activeProject is not null)
+            if (!string.IsNullOrWhiteSpace(thread?.BranchName))
             {
-                text = $"{_activeProject.Threads.Count} threads · workspace map";
-            }
-            else if (!_showingSettings && _activeThread is not null)
-            {
-                int visiblePaneCount = GetVisiblePanes(_activeThread).Count();
-                text = $"{_activeThread.Panes.Count} panes · {FormatLayoutPresetLabel(_activeThread.LayoutPreset)} · {visiblePaneCount} visible";
+                return $"{thread.BranchName} · {leaf}";
             }
 
-            PaneStripMetaText.Text = text ?? string.Empty;
-            PaneStripMetaText.Visibility = string.IsNullOrWhiteSpace(text) ? Visibility.Collapsed : Visibility.Visible;
+            return leaf;
         }
 
         private void SetThreadWorktree(string threadId, string requestedPath)
@@ -4947,7 +4936,7 @@ namespace SelfContainedDeployment
                 return;
             }
 
-            ThreadOverviewMetaText.Text = $"{_activeProject.Name} · {_activeProject.Threads.Count} thread{(_activeProject.Threads.Count == 1 ? string.Empty : "s")} · {FormatProjectPath(_activeProject)}";
+            ThreadOverviewMetaText.Text = $"{_activeProject.Name} · {_activeProject.Threads.Count} thread{(_activeProject.Threads.Count == 1 ? string.Empty : "s")}";
             foreach (WorkspaceThread thread in _activeProject.Threads
                          .OrderByDescending(candidate => ReferenceEquals(candidate, _activeThread))
                          .ThenBy(candidate => candidate.Name, StringComparer.OrdinalIgnoreCase))
@@ -4955,11 +4944,11 @@ namespace SelfContainedDeployment
                 bool isActiveThread = ReferenceEquals(thread, _activeThread);
                 Border card = new()
                 {
-                    Background = AppBrush(ThreadOverviewListPanel, isActiveThread ? "ShellMutedSurfaceBrush" : "ShellSurfaceBackgroundBrush"),
+                    Background = AppBrush(ThreadOverviewListPanel, "ShellSurfaceBackgroundBrush"),
                     BorderBrush = AppBrush(ThreadOverviewListPanel, isActiveThread ? "ShellPaneActiveBorderBrush" : "ShellBorderBrush"),
                     BorderThickness = new Thickness(1),
-                    CornerRadius = new CornerRadius(10),
-                    Padding = new Thickness(14, 12, 14, 12),
+                    CornerRadius = new CornerRadius(8),
+                    Padding = new Thickness(12),
                 };
                 AutomationProperties.SetAutomationId(card, $"shell-overview-card-{thread.Id}");
 
@@ -5001,7 +4990,7 @@ namespace SelfContainedDeployment
                 StackPanel titleStack = new()
                 {
                     Orientation = Orientation.Horizontal,
-                    Spacing = 8,
+                    Spacing = 6,
                 };
 
                 TextBlock title = new()
@@ -5015,7 +5004,7 @@ namespace SelfContainedDeployment
 
                 if (isActiveThread)
                 {
-                    titleStack.Children.Add(BuildOverviewChip(titleStack, "Active", "ShellPaneActiveBorderBrush", $"shell-overview-active-{thread.Id}", emphasized: true));
+                    titleStack.Children.Add(BuildOverviewTag(titleStack, "Active", "ShellPaneActiveBorderBrush", $"shell-overview-active-{thread.Id}", emphasized: true));
                 }
 
                 headingStack.Children.Add(titleStack);
@@ -5058,70 +5047,27 @@ namespace SelfContainedDeployment
                 titleRow.Children.Add(summaryStack);
                 layout.Children.Add(titleRow);
 
-                StackPanel chipRow = new()
-                {
-                    Orientation = Orientation.Horizontal,
-                    Spacing = 6,
-                };
-                chipRow.Children.Add(BuildOverviewChip(chipRow, string.IsNullOrWhiteSpace(thread.BranchName) ? "No branch" : thread.BranchName, "ShellInfoBrush", $"shell-overview-branch-{thread.Id}"));
-                chipRow.Children.Add(BuildOverviewChip(chipRow, $"{thread.ChangedFileCount} changed", thread.ChangedFileCount > 0 ? "ShellWarningBrush" : "ShellTextSecondaryBrush", $"shell-overview-changed-{thread.Id}"));
-                chipRow.Children.Add(BuildOverviewChip(chipRow, $"{thread.DiffCheckpoints.Count} checkpoints", thread.DiffCheckpoints.Count > 0 ? "ShellSuccessBrush" : "ShellTextSecondaryBrush", $"shell-overview-checkpoints-{thread.Id}"));
-                chipRow.Children.Add(BuildOverviewChip(chipRow, FormatOverviewReviewSource(thread), "ShellPaneActiveBorderBrush", $"shell-overview-review-{thread.Id}"));
-                Grid.SetRow(chipRow, 1);
-                layout.Children.Add(chipRow);
-
                 TextBlock meta = new()
                 {
-                    Text = string.IsNullOrWhiteSpace(thread.SelectedDiffPath)
-                        ? "No diff file selected"
-                        : $"Reviewing {thread.SelectedDiffPath}",
-                    Style = (Style)Application.Current.Resources["ShellHintTextStyle"],
-                    TextWrapping = TextWrapping.WrapWholeWords,
+                    Text = BuildOverviewMeta(thread),
+                    Style = (Style)Application.Current.Resources["ShellMetaTextStyle"],
+                    TextWrapping = TextWrapping.NoWrap,
+                    TextTrimming = TextTrimming.CharacterEllipsis,
                 };
                 AutomationProperties.SetAutomationId(meta, $"shell-overview-meta-{thread.Id}");
-                Grid.SetRow(meta, 2);
+                Grid.SetRow(meta, 1);
                 layout.Children.Add(meta);
 
-                StackPanel paneMapRow = new()
+                TextBlock paneMapText = new()
                 {
-                    Spacing = 6,
+                    Text = BuildOverviewPaneSummary(thread),
+                    Style = (Style)Application.Current.Resources["ShellHintTextStyle"],
+                    TextWrapping = TextWrapping.NoWrap,
+                    TextTrimming = TextTrimming.CharacterEllipsis,
                 };
-                TextBlock paneMapLabel = new()
-                {
-                    Text = "Visible panes",
-                    Style = (Style)Application.Current.Resources["ShellInspectorLabelTextStyle"],
-                };
-                AutomationProperties.SetAutomationId(paneMapLabel, $"shell-overview-pane-map-label-{thread.Id}");
-                paneMapRow.Children.Add(paneMapLabel);
-
-                StackPanel paneMapChips = new()
-                {
-                    Orientation = Orientation.Horizontal,
-                    Spacing = 6,
-                };
-                AutomationProperties.SetAutomationId(paneMapChips, $"shell-overview-pane-map-{thread.Id}");
-
-                WorkspacePaneRecord selectedPane = GetSelectedPane(thread);
-                List<WorkspacePaneRecord> visiblePanes = GetVisiblePanes(thread).ToList();
-                foreach (WorkspacePaneRecord pane in visiblePanes)
-                {
-                    paneMapChips.Children.Add(BuildOverviewChip(
-                        paneMapChips,
-                        BuildOverviewPaneLabel(pane),
-                        ResolvePaneKindBrushKey(pane.Kind),
-                        $"shell-overview-pane-chip-{thread.Id}-{pane.Id}",
-                        emphasized: string.Equals(pane.Id, selectedPane?.Id, StringComparison.Ordinal)));
-                }
-
-                int hiddenPaneCount = Math.Max(0, thread.Panes.Count - visiblePanes.Count);
-                if (hiddenPaneCount > 0)
-                {
-                    paneMapChips.Children.Add(BuildOverviewChip(paneMapChips, $"+{hiddenPaneCount} more", "ShellTextSecondaryBrush", $"shell-overview-pane-overflow-{thread.Id}"));
-                }
-
-                paneMapRow.Children.Add(paneMapChips);
-                Grid.SetRow(paneMapRow, 3);
-                layout.Children.Add(paneMapRow);
+                AutomationProperties.SetAutomationId(paneMapText, $"shell-overview-pane-map-{thread.Id}");
+                Grid.SetRow(paneMapText, 2);
+                layout.Children.Add(paneMapText);
 
                 button.Content = layout;
                 card.Child = button;
@@ -5220,15 +5166,15 @@ namespace SelfContainedDeployment
             return $"{kind} {compact}";
         }
 
-        private Border BuildOverviewChip(FrameworkElement owner, string text, string accentBrushKey, string automationId, bool emphasized = false)
+        private Border BuildOverviewTag(FrameworkElement owner, string text, string accentBrushKey, string automationId, bool emphasized = false)
         {
             Border chip = new()
             {
-                Background = AppBrush(owner, emphasized ? "ShellNavActiveBrush" : "ShellMutedSurfaceBrush"),
-                BorderBrush = AppBrush(owner, emphasized ? "ShellPaneActiveBorderBrush" : accentBrushKey),
+                Background = AppBrush(owner, emphasized ? "ShellNavActiveBrush" : "ShellSurfaceBackgroundBrush"),
+                BorderBrush = AppBrush(owner, emphasized ? "ShellPaneActiveBorderBrush" : "ShellBorderBrush"),
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(999),
-                Padding = new Thickness(8, 3, 8, 3),
+                Padding = new Thickness(7, 2, 7, 2),
                 VerticalAlignment = VerticalAlignment.Center,
             };
             if (!string.IsNullOrWhiteSpace(automationId))
@@ -5242,9 +5188,42 @@ namespace SelfContainedDeployment
                 FontSize = 10,
                 FontWeight = emphasized ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal,
                 Foreground = AppBrush(chip, emphasized ? "ShellTextPrimaryBrush" : accentBrushKey),
-                TextTrimming = TextTrimming.CharacterEllipsis,
             };
             return chip;
+        }
+
+        private static string BuildThreadRailMeta(WorkspaceProject project, WorkspaceThread thread)
+        {
+            string threadLocation = string.IsNullOrWhiteSpace(thread.BranchName)
+                ? ShellProfiles.DeriveName(thread.WorktreePath ?? project.RootPath)
+                : $"{thread.BranchName} · {ShellProfiles.DeriveName(thread.WorktreePath ?? project.RootPath)}";
+            int visibleCount = Math.Min(thread.VisiblePaneCapacity, thread.Panes.Count);
+            return $"{threadLocation} · {thread.Panes.Count} panes · {visibleCount} visible";
+        }
+
+        private static string BuildOverviewMeta(WorkspaceThread thread)
+        {
+            string branchText = string.IsNullOrWhiteSpace(thread.BranchName) ? "No branch" : thread.BranchName;
+            string diffText = string.IsNullOrWhiteSpace(thread.SelectedDiffPath) ? "No diff selected" : $"Reviewing {thread.SelectedDiffPath}";
+            return $"{branchText} · {thread.ChangedFileCount} changed · {thread.DiffCheckpoints.Count} checkpoints · {FormatOverviewReviewSource(thread)} · {diffText}";
+        }
+
+        private string BuildOverviewPaneSummary(WorkspaceThread thread)
+        {
+            List<WorkspacePaneRecord> visiblePanes = GetVisiblePanes(thread).ToList();
+            if (visiblePanes.Count == 0)
+            {
+                return "No visible panes";
+            }
+
+            string summary = string.Join(" · ", visiblePanes.Select(BuildOverviewPaneLabel));
+            int hiddenPaneCount = Math.Max(0, thread.Panes.Count - visiblePanes.Count);
+            if (hiddenPaneCount > 0)
+            {
+                summary += $" · +{hiddenPaneCount} more";
+            }
+
+            return summary;
         }
 
         private void ApplyThemeToAllTerminals(ElementTheme resolvedTheme)
