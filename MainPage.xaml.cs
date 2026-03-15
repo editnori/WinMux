@@ -42,6 +42,7 @@ namespace SelfContainedDeployment
         private bool _showingSettings;
         private bool _suppressTabSelectionChanged;
         private bool _suppressThreadNameSync;
+        private string _inlineRenamingPaneId;
         private int _threadSequence = 1;
 
         public static MainPage Current;
@@ -688,12 +689,12 @@ namespace SelfContainedDeployment
             }
         }
 
-        private async void OnPaneTabDoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
+        private void OnPaneTabDoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
         {
             if (sender is TabViewItem item && item.Tag is WorkspacePaneRecord pane)
             {
                 e.Handled = true;
-                await BeginRenamePaneAsync(pane.Id);
+                BeginInlinePaneRename(pane.Id);
             }
         }
 
@@ -705,11 +706,11 @@ namespace SelfContainedDeployment
             }
         }
 
-        private async void OnRenamePaneMenuClicked(object sender, RoutedEventArgs e)
+        private void OnRenamePaneMenuClicked(object sender, RoutedEventArgs e)
         {
             if (sender is MenuFlyoutItem item && item.Tag is string paneId)
             {
-                await BeginRenamePaneAsync(paneId);
+                BeginInlinePaneRename(paneId);
             }
         }
 
@@ -1536,7 +1537,7 @@ namespace SelfContainedDeployment
             }
         }
 
-        private async System.Threading.Tasks.Task BeginRenamePaneAsync(string paneId)
+        private void BeginInlinePaneRename(string paneId)
         {
             WorkspacePaneRecord pane = EnumeratePaneRecords().FirstOrDefault(candidate => string.Equals(candidate.Id, paneId, StringComparison.Ordinal));
             if (pane is null)
@@ -1553,10 +1554,19 @@ namespace SelfContainedDeployment
                 ["paneKind"] = pane.Kind.ToString().ToLowerInvariant(),
             });
 
-            string nextName = await PromptForThreadNameAsync("Rename pane", pane.Title);
-            if (!string.IsNullOrWhiteSpace(nextName))
+            _inlineRenamingPaneId = pane.Id;
+            UpdateTabViewItem(pane);
+            if (_tabItemsById.TryGetValue(pane.Id, out TabViewItem item))
             {
-                RenamePane(paneId, nextName);
+                TerminalTabs.SelectedItem = item;
+                DispatcherQueue.TryEnqueue(() =>
+                {
+                    if (item.Header is TextBox editor)
+                    {
+                        editor.Focus(FocusState.Programmatic);
+                        editor.SelectAll();
+                    }
+                });
             }
         }
 
@@ -1595,6 +1605,7 @@ namespace SelfContainedDeployment
                 return;
             }
 
+            _inlineRenamingPaneId = null;
             pane.Title = trimmed;
             UpdateTabViewItem(pane);
             RenderPaneWorkspace();
@@ -1609,6 +1620,40 @@ namespace SelfContainedDeployment
                 ["paneKind"] = pane.Kind.ToString().ToLowerInvariant(),
                 ["paneTitle"] = pane.Title,
             });
+        }
+
+        private void CancelInlinePaneRename(string paneId)
+        {
+            if (string.IsNullOrWhiteSpace(paneId) || !string.Equals(_inlineRenamingPaneId, paneId, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _inlineRenamingPaneId = null;
+            WorkspacePaneRecord pane = EnumeratePaneRecords().FirstOrDefault(candidate => string.Equals(candidate.Id, paneId, StringComparison.Ordinal));
+            if (pane is not null)
+            {
+                UpdateTabViewItem(pane);
+            }
+        }
+
+        private void CommitInlinePaneRename(string paneId, string nextName)
+        {
+            WorkspacePaneRecord pane = EnumeratePaneRecords().FirstOrDefault(candidate => string.Equals(candidate.Id, paneId, StringComparison.Ordinal));
+            _inlineRenamingPaneId = null;
+            if (pane is null)
+            {
+                return;
+            }
+
+            string trimmed = nextName?.Trim();
+            if (string.IsNullOrWhiteSpace(trimmed) || string.Equals(trimmed, pane.Title, StringComparison.Ordinal))
+            {
+                UpdateTabViewItem(pane);
+                return;
+            }
+
+            RenamePane(paneId, trimmed);
         }
 
         private void DuplicateThread(string threadId)
@@ -2065,7 +2110,7 @@ namespace SelfContainedDeployment
 
             item.Tag = pane;
             item.ContextFlyout = BuildPaneContextMenu(pane);
-            object nextHeader = FormatTabHeader(pane.Title, pane.Kind, pane.IsExited);
+            object nextHeader = BuildPaneTabHeader(pane);
             if (!Equals(item.Header, nextHeader))
             {
                 item.Header = nextHeader;
@@ -2083,7 +2128,7 @@ namespace SelfContainedDeployment
 
             TabViewItem item = GetOrCreateTabViewItem(pane);
             item.ContextFlyout = BuildPaneContextMenu(pane);
-            object nextHeader = FormatTabHeader(pane.Title, pane.Kind, pane.IsExited);
+            object nextHeader = BuildPaneTabHeader(pane);
             if (!Equals(item.Header, nextHeader))
             {
                 item.Header = nextHeader;
@@ -2102,6 +2147,47 @@ namespace SelfContainedDeployment
             renameItem.Click += OnRenamePaneMenuClicked;
             menu.Items.Add(renameItem);
             return menu;
+        }
+
+        private object BuildPaneTabHeader(WorkspacePaneRecord pane)
+        {
+            if (pane is null)
+            {
+                return string.Empty;
+            }
+
+            if (!string.Equals(_inlineRenamingPaneId, pane.Id, StringComparison.Ordinal))
+            {
+                return FormatTabHeader(pane.Title, pane.Kind, pane.IsExited);
+            }
+
+            TextBox editor = new()
+            {
+                Text = pane.Title,
+                MinWidth = 132,
+                MaxWidth = 220,
+                Padding = new Thickness(8, 2, 8, 2),
+                HorizontalAlignment = HorizontalAlignment.Left,
+                VerticalAlignment = VerticalAlignment.Center,
+                Style = (Style)Application.Current.Resources["ShellInlineTextBoxStyle"],
+            };
+            AutomationProperties.SetAutomationId(editor, $"shell-tab-rename-editor-{pane.Id}");
+            editor.KeyDown += (_, args) =>
+            {
+                switch (args.Key)
+                {
+                    case Windows.System.VirtualKey.Enter:
+                        args.Handled = true;
+                        CommitInlinePaneRename(pane.Id, editor.Text);
+                        break;
+                    case Windows.System.VirtualKey.Escape:
+                        args.Handled = true;
+                        CancelInlinePaneRename(pane.Id);
+                        break;
+                }
+            };
+            editor.LostFocus += (_, _) => CommitInlinePaneRename(pane.Id, editor.Text);
+            return editor;
         }
 
         private void RemoveTabViewItem(string tabId)
@@ -2749,7 +2835,7 @@ namespace SelfContainedDeployment
             }
 
             List<NativeAutomationUiNode> children = new();
-            if (node is not Microsoft.UI.Xaml.Controls.WebView2)
+            if (ShouldTraverseUiNodeChildren(node))
             {
                 int childCount = VisualTreeHelper.GetChildrenCount(node);
                 for (int index = 0; index < childCount; index++)
@@ -2818,6 +2904,18 @@ namespace SelfContainedDeployment
             }
 
             return result;
+        }
+
+        private static bool ShouldTraverseUiNodeChildren(DependencyObject node)
+        {
+            return node switch
+            {
+                Microsoft.UI.Xaml.Controls.WebView2 => false,
+                TextBox => false,
+                PasswordBox => false,
+                RichEditBox => false,
+                _ => true,
+            };
         }
 
         private static IEnumerable<NativeAutomationUiNode> FlattenUiNodes(NativeAutomationUiNode root)
@@ -3314,6 +3412,12 @@ namespace SelfContainedDeployment
                 return true;
             }
 
+            if (automationId.StartsWith("shell-tab-", StringComparison.Ordinal))
+            {
+                BeginInlinePaneRename(automationId["shell-tab-".Length..]);
+                return true;
+            }
+
             return false;
         }
 
@@ -3564,7 +3668,7 @@ namespace SelfContainedDeployment
                 switch (action)
                 {
                     case "rename":
-                        _ = BeginRenamePaneAsync(targetId);
+                        BeginInlinePaneRename(targetId);
                         return true;
                     default:
                         return false;

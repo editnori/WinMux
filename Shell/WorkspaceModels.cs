@@ -258,6 +258,7 @@ namespace SelfContainedDeployment.Shell
                 $"export WINMUX_AUTOMATION_PORT={automationPort}; " +
                 $"export WINMUX_REPO_ROOT=\"{repoRootWsl}\"; " +
                 "export WINMUX_BROWSER_BRIDGE=\"$WINMUX_REPO_ROOT/tools/winmux_browser_bridge.py\"; " +
+                "if [ -z \"$STARSHIP_CONFIG\" ] && [ ! -f \"$HOME/.config/starship.toml\" ] && [ -f \"$WINMUX_REPO_ROOT/tools/winmux-starship.toml\" ]; then export STARSHIP_CONFIG=\"$WINMUX_REPO_ROOT/tools/winmux-starship.toml\"; fi; " +
                 "winmux_host=$(awk \"/nameserver/{print \\$2; exit}\" /etc/resolv.conf); " +
                 "[ -n \"$winmux_host\" ] || winmux_host=127.0.0.1; " +
                 "export WINMUX_AUTOMATION_URL=\"http://$winmux_host:$WINMUX_AUTOMATION_PORT\"; " +
