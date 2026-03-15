@@ -18,6 +18,12 @@ namespace SelfContainedDeployment.Panes
 {
     public sealed partial class BrowserPaneControl : UserControl
     {
+        private static readonly string[] PreferredChromiumExtensionIds =
+        {
+            "cjpalhdlnbpafiamejdnhcphjbkeiagm", // uBlock Origin
+            "fcoeoabgfenejglbffodgkkbkcdhcgfn", // Claude
+        };
+
         private readonly struct SeedCopySummary
         {
             public int CopiedFiles { get; init; }
@@ -665,19 +671,35 @@ namespace SelfContainedDeployment.Panes
                 .Where(id => !string.IsNullOrWhiteSpace(id))
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-            foreach (string extensionDirectory in Directory.GetDirectories(extensionsRoot))
-            {
-                string extensionId = Path.GetFileName(extensionDirectory);
-                if (string.IsNullOrWhiteSpace(extensionId) || installedIds.Contains(extensionId))
+            List<(string ExtensionId, string VersionDirectory)> availableExtensions = Directory.GetDirectories(extensionsRoot)
+                .Select(extensionDirectory =>
                 {
-                    continue;
-                }
+                    string extensionId = Path.GetFileName(extensionDirectory);
+                    string versionDirectory = Directory.GetDirectories(extensionDirectory)
+                        .OrderByDescending(Directory.GetLastWriteTimeUtc)
+                        .FirstOrDefault(candidate => File.Exists(Path.Combine(candidate, "manifest.json")));
+                    return (ExtensionId: extensionId, VersionDirectory: versionDirectory);
+                })
+                .Where(candidate => !string.IsNullOrWhiteSpace(candidate.ExtensionId) && !string.IsNullOrWhiteSpace(candidate.VersionDirectory))
+                .ToList();
 
-                string versionDirectory = Directory.GetDirectories(extensionDirectory)
-                    .OrderByDescending(Directory.GetLastWriteTimeUtc)
-                    .FirstOrDefault(candidate => File.Exists(Path.Combine(candidate, "manifest.json")));
+            List<(string ExtensionId, string VersionDirectory)> preferredExtensions = availableExtensions
+                .Where(candidate => PreferredChromiumExtensionIds.Contains(candidate.ExtensionId, StringComparer.OrdinalIgnoreCase))
+                .OrderBy(candidate => Array.IndexOf(PreferredChromiumExtensionIds, candidate.ExtensionId))
+                .ToList();
 
-                if (string.IsNullOrWhiteSpace(versionDirectory))
+            if (preferredExtensions.Count == 0)
+            {
+                LogBrowserEvent("extension.preferred_missing", "No preferred Chromium extensions were available to import.", new Dictionary<string, string>
+                {
+                    ["extensionsRoot"] = extensionsRoot,
+                });
+                return;
+            }
+
+            foreach ((string extensionId, string versionDirectory) in preferredExtensions)
+            {
+                if (string.IsNullOrWhiteSpace(extensionId) || installedIds.Contains(extensionId))
                 {
                     continue;
                 }

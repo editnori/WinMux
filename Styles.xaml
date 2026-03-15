@@ -20,7 +20,7 @@
             <SolidColorBrush x:Key="ShellMutedSurfaceBrush" Color="#17181C" />
             <SolidColorBrush x:Key="ShellBorderBrush" Color="#23252B" />
             <SolidColorBrush x:Key="ShellPaneDividerBrush" Color="#20232A" />
-            <SolidColorBrush x:Key="ShellPaneActiveBorderBrush" Color="#545E6D" />
+            <SolidColorBrush x:Key="ShellPaneActiveBorderBrush" Color="#60A5FA" />
             <SolidColorBrush x:Key="ShellNavHoverBrush" Color="#17191E" />
             <SolidColorBrush x:Key="ShellNavActiveBrush" Color="#1F2228" />
             <SolidColorBrush x:Key="ShellTextPrimaryBrush" Color="#FAFAFA" />
@@ -66,7 +66,7 @@
             <SolidColorBrush x:Key="ShellMutedSurfaceBrush" Color="#17181C" />
             <SolidColorBrush x:Key="ShellBorderBrush" Color="#23252B" />
             <SolidColorBrush x:Key="ShellPaneDividerBrush" Color="#20232A" />
-            <SolidColorBrush x:Key="ShellPaneActiveBorderBrush" Color="#545E6D" />
+            <SolidColorBrush x:Key="ShellPaneActiveBorderBrush" Color="#60A5FA" />
             <SolidColorBrush x:Key="ShellNavHoverBrush" Color="#17191E" />
             <SolidColorBrush x:Key="ShellNavActiveBrush" Color="#1F2228" />
             <SolidColorBrush x:Key="ShellTextPrimaryBrush" Color="#FAFAFA" />
@@ -112,7 +112,7 @@
             <SolidColorBrush x:Key="ShellMutedSurfaceBrush" Color="#F4F4F5" />
             <SolidColorBrush x:Key="ShellBorderBrush" Color="#E4E4E7" />
             <SolidColorBrush x:Key="ShellPaneDividerBrush" Color="#E5E7EB" />
-            <SolidColorBrush x:Key="ShellPaneActiveBorderBrush" Color="#94A3B8" />
+            <SolidColorBrush x:Key="ShellPaneActiveBorderBrush" Color="#2563EB" />
             <SolidColorBrush x:Key="ShellNavHoverBrush" Color="#F1F1F3" />
             <SolidColorBrush x:Key="ShellNavActiveBrush" Color="#E7E7EB" />
             <SolidColorBrush x:Key="ShellTextPrimaryBrush" Color="#18181B" />

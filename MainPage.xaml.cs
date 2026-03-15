@@ -2050,7 +2050,7 @@ namespace SelfContainedDeployment
                 border.BorderBrush = (Brush)Application.Current.Resources[isSelected
                     ? "ShellPaneActiveBorderBrush"
                     : "ShellBorderBrush"];
-                border.BorderThickness = isSelected ? new Thickness(1.5) : new Thickness(1);
+                border.BorderThickness = isSelected ? new Thickness(2) : new Thickness(1);
             }
         }
 
