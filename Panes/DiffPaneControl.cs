@@ -114,9 +114,7 @@ namespace SelfContainedDeployment.Panes
             _pathText.Text = string.IsNullOrWhiteSpace(path) ? "No diff selected" : path.Replace('\\', '/');
             _summaryText.Text = string.IsNullOrWhiteSpace(path)
                 ? "Choose a changed file from the inspector."
-                : string.IsNullOrWhiteSpace(diffText)
-                    ? "Loading patch…"
-                    : "Patch view";
+                : "Patch view";
 
             RenderDiff(diffText);
         }
@@ -126,12 +124,15 @@ namespace SelfContainedDeployment.Panes
             _diffBlock.Blocks.Clear();
             if (string.IsNullOrWhiteSpace(diffText))
             {
+                if (!string.IsNullOrWhiteSpace(_currentPath))
+                {
+                    return;
+                }
+
                 Paragraph emptyParagraph = new();
                 emptyParagraph.Inlines.Add(new Run
                 {
-                    Text = string.IsNullOrWhiteSpace(_currentPath)
-                        ? "Select a changed file to inspect its patch."
-                        : "Loading patch…",
+                    Text = "Select a changed file to inspect its patch.",
                     Foreground = ResolveBrush("ShellTextTertiaryBrush"),
                 });
                 _diffBlock.Blocks.Add(emptyParagraph);

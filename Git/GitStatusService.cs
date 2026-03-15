@@ -87,7 +87,8 @@ namespace SelfContainedDeployment.Git
             snapshot.SelectedPath = resolvedSelectedPath;
             if (!string.IsNullOrWhiteSpace(resolvedSelectedPath))
             {
-                GitCommandResult diffResult = RunGitDiff(normalizedPath, resolvedSelectedPath);
+                GitChangedFile changedFile = snapshot.ChangedFiles.FirstOrDefault(file => string.Equals(file.Path, resolvedSelectedPath, StringComparison.Ordinal));
+                GitCommandResult diffResult = RunGitDiff(normalizedPath, resolvedSelectedPath, changedFile?.Status);
                 snapshot.SelectedDiff = diffResult.Ok
                     ? diffResult.Output
                     : NormalizeGitError(diffResult.Error);
@@ -255,10 +256,31 @@ namespace SelfContainedDeployment.Git
             return RunWslShell(workingPath, script);
         }
 
-        private static GitCommandResult RunGitDiff(string workingPath, string selectedPath)
+        private static GitCommandResult RunGitDiff(string workingPath, string selectedPath, string status)
         {
-            const string script = "git --no-optional-locks -c core.quotepath=false diff -- \"$1\"";
-            return RunWslShell(workingPath, script, selectedPath);
+            string normalizedStatus = status?.Trim() ?? string.Empty;
+            if (string.Equals(normalizedStatus, "??", StringComparison.Ordinal))
+            {
+                const string untrackedScript = "if [ -e \"$1\" ]; then git --no-optional-locks -c core.quotepath=false diff --no-index -- /dev/null -- \"$1\"; code=$?; if [ $code -le 1 ]; then exit 0; fi; exit $code; fi";
+                return RunWslShell(workingPath, untrackedScript, selectedPath);
+            }
+
+            const string headScript = "git --no-optional-locks -c core.quotepath=false diff HEAD -- \"$1\"";
+            GitCommandResult headDiff = RunWslShell(workingPath, headScript, selectedPath);
+            if (headDiff.Ok && !string.IsNullOrWhiteSpace(headDiff.Output))
+            {
+                return headDiff;
+            }
+
+            const string cachedScript = "git --no-optional-locks -c core.quotepath=false diff --cached -- \"$1\"";
+            GitCommandResult cachedDiff = RunWslShell(workingPath, cachedScript, selectedPath);
+            if (cachedDiff.Ok && !string.IsNullOrWhiteSpace(cachedDiff.Output))
+            {
+                return cachedDiff;
+            }
+
+            const string workingTreeScript = "git --no-optional-locks -c core.quotepath=false diff -- \"$1\"";
+            return RunWslShell(workingPath, workingTreeScript, selectedPath);
         }
 
         private static GitCommandResult RunWslShell(string workingPath, string shellScript, string argument = null)

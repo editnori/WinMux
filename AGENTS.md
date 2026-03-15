@@ -26,6 +26,7 @@ What exists now:
 - fixed native shell layout with a dense inline sidebar and a top pane strip
 - multiple projects, each with nested threads and per-thread pane workspaces
 - worktree-aware thread metadata, a collapsible right-side inspector rail, and workspace diff panes for active-thread patches
+- the left project rail now expands only the active project's thread list to keep large workspaces responsive
 - autosaved workspace/session replay across app relaunches
 - terminal panes backed by `TerminalControl`
 - browser preview panes backed by `WebView2` with a built-in start page and a shared WinMux browser profile

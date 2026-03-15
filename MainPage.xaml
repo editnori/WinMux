@@ -157,7 +157,7 @@
                               Background="{ThemeResource ShellSurfaceBackgroundBrush}"
                               BorderBrush="{ThemeResource ShellBorderBrush}"
                               BorderThickness="0,0,0,1"
-                              ColumnDefinitions="*,Auto,Auto,Auto">
+                              ColumnDefinitions="*,Auto">
                             <TabView x:Name="TerminalTabs"
                                      AutomationProperties.AutomationId="shell-tab-view"
                                      AddTabButtonClick="TerminalTabs_AddTabButtonClick"
@@ -170,35 +170,36 @@
                                      TabWidthMode="SizeToContent"
                                      VerticalAlignment="Stretch" />
 
-                            <Button x:Name="AddBrowserPaneButton"
-                                    Grid.Column="1"
-                                    AutomationProperties.AutomationId="shell-add-browser-pane"
-                                    Margin="0,6,6,6"
-                                    Style="{StaticResource ShellChromeButtonStyle}"
-                                    Click="OnAddBrowserPaneClicked"
-                                    ToolTipService.ToolTip="Add browser pane">
-                                <FontIcon FontSize="12" Glyph="&#xE774;" />
-                            </Button>
+                            <StackPanel Grid.Column="1"
+                                        Orientation="Horizontal"
+                                        HorizontalAlignment="Right"
+                                        VerticalAlignment="Center"
+                                        Margin="0,0,10,0"
+                                        Spacing="6">
+                                <Button x:Name="AddBrowserPaneButton"
+                                        AutomationProperties.AutomationId="shell-add-browser-pane"
+                                        Style="{StaticResource ShellChromeButtonStyle}"
+                                        Click="OnAddBrowserPaneClicked"
+                                        ToolTipService.ToolTip="Add browser pane">
+                                    <FontIcon FontSize="12" Glyph="&#xE774;" />
+                                </Button>
 
-                            <Button x:Name="AddEditorPaneButton"
-                                    Grid.Column="2"
-                                    AutomationProperties.AutomationId="shell-add-editor-pane"
-                                    Margin="0,6,10,6"
-                                    Style="{StaticResource ShellChromeButtonStyle}"
-                                    Click="OnAddEditorPaneClicked"
-                                    ToolTipService.ToolTip="Add editor pane">
-                                <FontIcon FontSize="12" Glyph="&#xE70F;" />
-                            </Button>
+                                <Button x:Name="AddEditorPaneButton"
+                                        AutomationProperties.AutomationId="shell-add-editor-pane"
+                                        Style="{StaticResource ShellChromeButtonStyle}"
+                                        Click="OnAddEditorPaneClicked"
+                                        ToolTipService.ToolTip="Add editor pane">
+                                    <FontIcon FontSize="12" Glyph="&#xE70F;" />
+                                </Button>
 
-                            <Button x:Name="ToggleInspectorButton"
-                                    Grid.Column="3"
-                                    AutomationProperties.AutomationId="shell-toggle-inspector"
-                                    Margin="0,6,10,6"
-                                    Style="{StaticResource ShellChromeButtonStyle}"
-                                    Click="OnToggleInspectorClicked"
-                                    ToolTipService.ToolTip="Hide inspector">
-                                <FontIcon FontSize="12" Glyph="&#xE7F8;" />
-                            </Button>
+                                <Button x:Name="ToggleInspectorButton"
+                                        AutomationProperties.AutomationId="shell-toggle-inspector"
+                                        Style="{StaticResource ShellChromeButtonStyle}"
+                                        Click="OnToggleInspectorClicked"
+                                        ToolTipService.ToolTip="Hide inspector">
+                                    <FontIcon FontSize="12" Glyph="&#xE7F8;" />
+                                </Button>
+                            </StackPanel>
                         </Grid>
 
                         <Grid x:Name="PaneWorkspaceGrid"

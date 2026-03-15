@@ -626,6 +626,9 @@ namespace SelfContainedDeployment
                     case "deleteproject":
                         DeleteProject(request.ProjectId);
                         break;
+                    case "clearprojectthreads":
+                        ClearProjectThreads(request.ProjectId);
+                        break;
                     case "input":
                         SendInputToSelectedTerminal(request.Value);
                         break;
@@ -752,6 +755,23 @@ namespace SelfContainedDeployment
             {
                 ActivateProject(FindProject(projectId));
                 ShowTerminalShell();
+            }
+        }
+
+        private void OnProjectNewThreadMenuClicked(object sender, RoutedEventArgs e)
+        {
+            if (sender is MenuFlyoutItem item && item.Tag is string projectId)
+            {
+                ActivateThread(CreateThread(FindProject(projectId)));
+                ShowTerminalShell();
+            }
+        }
+
+        private void OnClearProjectThreadsMenuClicked(object sender, RoutedEventArgs e)
+        {
+            if (sender is MenuFlyoutItem item && item.Tag is string projectId)
+            {
+                ClearProjectThreads(projectId);
             }
         }
 
@@ -1010,10 +1030,9 @@ namespace SelfContainedDeployment
             _gitRefreshTimer.Start();
 
             DiffBranchText.Text = string.IsNullOrWhiteSpace(_activeThread.BranchName)
-                ? "Refreshing git state..."
+                ? (_activeGitSnapshot?.BranchName ?? "No git context")
                 : _activeThread.BranchName;
             DiffWorktreeText.Text = _activeThread.WorktreePath ?? _activeProject?.RootPath ?? string.Empty;
-            DiffSummaryText.Text = "Refreshing git state...";
         }
 
         private WorkspaceSessionSnapshot BuildSessionSnapshot()
@@ -2264,6 +2283,44 @@ namespace SelfContainedDeployment
             });
         }
 
+        private void ClearProjectThreads(string projectId)
+        {
+            WorkspaceProject project = string.IsNullOrWhiteSpace(projectId)
+                ? _activeProject
+                : FindProject(projectId);
+            if (project is null)
+            {
+                return;
+            }
+
+            foreach (WorkspaceThread thread in project.Threads.ToList())
+            {
+                ClearThreadPanes(project, thread);
+            }
+
+            project.Threads.Clear();
+            project.SelectedThreadId = null;
+
+            if (ReferenceEquals(project, _activeProject))
+            {
+                _activeThread = null;
+                RefreshTabView();
+                UpdateWorkspaceVisibility();
+                UpdateHeader();
+                ShowTerminalShell();
+            }
+            else
+            {
+                QueueProjectTreeRefresh();
+            }
+
+            QueueSessionSave();
+            LogAutomationEvent("shell", "project.threads_cleared", $"Cleared all threads for {project.Name}", new Dictionary<string, string>
+            {
+                ["projectId"] = project.Id,
+            });
+        }
+
         private void DeleteProject(string projectId)
         {
             WorkspaceProject project = string.IsNullOrWhiteSpace(projectId)
@@ -2407,6 +2464,7 @@ namespace SelfContainedDeployment
 
             foreach (WorkspaceProject project in _projects)
             {
+                bool showProjectThreads = isOpen && ReferenceEquals(project, _activeProject);
                 StackPanel group = new()
                 {
                     Spacing = 4,
@@ -2450,7 +2508,7 @@ namespace SelfContainedDeployment
                     });
                     textStack.Children.Add(new TextBlock
                     {
-                        Text = FormatProjectPath(project),
+                        Text = $"{FormatProjectPath(project)} · {project.Threads.Count} thread{(project.Threads.Count == 1 ? string.Empty : "s")}",
                         Style = (Style)Application.Current.Resources["ShellHintTextStyle"],
                     });
                     projectLayout.Children.Add(textStack);
@@ -2458,6 +2516,23 @@ namespace SelfContainedDeployment
 
                 projectButton.Content = projectLayout;
                 ApplyProjectButtonState(projectButton, project == _activeProject && !_showingSettings);
+                MenuFlyout projectMenu = new();
+                MenuFlyoutItem projectNewThreadItem = new()
+                {
+                    Text = "New thread",
+                    Tag = project.Id,
+                };
+                projectNewThreadItem.Click += OnProjectNewThreadMenuClicked;
+                projectMenu.Items.Add(projectNewThreadItem);
+                MenuFlyoutItem clearThreadsItem = new()
+                {
+                    Text = "Clear all threads",
+                    Tag = project.Id,
+                    IsEnabled = project.Threads.Count > 0,
+                };
+                clearThreadsItem.Click += OnClearProjectThreadsMenuClicked;
+                projectMenu.Items.Add(clearThreadsItem);
+                projectButton.ContextFlyout = projectMenu;
                 if (!isOpen)
                 {
                     group.Children.Add(projectButton);
@@ -2495,106 +2570,108 @@ namespace SelfContainedDeployment
                 projectHeader.Children.Add(addThreadButton);
                 group.Children.Add(projectHeader);
 
-                StackPanel threadStack = new()
+                if (showProjectThreads)
                 {
-                    Spacing = 2,
-                    Margin = new Thickness(18, 0, 0, 0),
-                    HorizontalAlignment = HorizontalAlignment.Stretch,
-                };
-
-                foreach (WorkspaceThread thread in project.Threads)
-                {
-                    Button threadButton = new()
+                    StackPanel threadStack = new()
                     {
-                        Style = (Style)Application.Current.Resources["ShellSidebarThreadButtonStyle"],
-                        Tag = thread.Id,
-                        HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                        Spacing = 2,
+                        Margin = new Thickness(18, 0, 0, 0),
                         HorizontalAlignment = HorizontalAlignment.Stretch,
                     };
-                    AutomationProperties.SetAutomationId(threadButton, $"shell-thread-{thread.Id}");
-                    threadButton.Click += OnThreadButtonClicked;
-                    threadButton.DoubleTapped += OnThreadButtonDoubleTapped;
 
-                    MenuFlyout threadMenu = new();
-                    MenuFlyoutItem renameItem = new()
+                    foreach (WorkspaceThread thread in project.Threads)
                     {
-                        Text = "Rename",
-                        Tag = thread.Id,
-                    };
-                    AutomationProperties.SetAutomationId(renameItem, $"shell-thread-rename-{thread.Id}");
-                    renameItem.Click += OnRenameThreadMenuClicked;
-                    MenuFlyoutItem duplicateItem = new()
-                    {
-                        Text = "Duplicate",
-                        Tag = thread.Id,
-                    };
-                    AutomationProperties.SetAutomationId(duplicateItem, $"shell-thread-duplicate-{thread.Id}");
-                    duplicateItem.Click += OnDuplicateThreadMenuClicked;
-                    MenuFlyoutItem deleteItem = new()
-                    {
-                        Text = "Delete",
-                        Tag = thread.Id,
-                    };
-                    AutomationProperties.SetAutomationId(deleteItem, $"shell-thread-delete-{thread.Id}");
-                    deleteItem.Click += OnDeleteThreadMenuClicked;
-                    threadMenu.Items.Add(renameItem);
-                    threadMenu.Items.Add(duplicateItem);
-                    threadMenu.Items.Add(deleteItem);
-                    threadButton.ContextFlyout = threadMenu;
+                        Button threadButton = new()
+                        {
+                            Style = (Style)Application.Current.Resources["ShellSidebarThreadButtonStyle"],
+                            Tag = thread.Id,
+                            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                            HorizontalAlignment = HorizontalAlignment.Stretch,
+                        };
+                        AutomationProperties.SetAutomationId(threadButton, $"shell-thread-{thread.Id}");
+                        threadButton.Click += OnThreadButtonClicked;
+                        threadButton.DoubleTapped += OnThreadButtonDoubleTapped;
 
-                    Grid threadLayout = new()
-                    {
-                        ColumnSpacing = 8,
-                    };
-                    threadLayout.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-                    threadLayout.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                        MenuFlyout threadMenu = new();
+                        MenuFlyoutItem renameItem = new()
+                        {
+                            Text = "Rename",
+                            Tag = thread.Id,
+                        };
+                        AutomationProperties.SetAutomationId(renameItem, $"shell-thread-rename-{thread.Id}");
+                        renameItem.Click += OnRenameThreadMenuClicked;
+                        MenuFlyoutItem duplicateItem = new()
+                        {
+                            Text = "Duplicate",
+                            Tag = thread.Id,
+                        };
+                        AutomationProperties.SetAutomationId(duplicateItem, $"shell-thread-duplicate-{thread.Id}");
+                        duplicateItem.Click += OnDuplicateThreadMenuClicked;
+                        MenuFlyoutItem deleteItem = new()
+                        {
+                            Text = "Clear thread",
+                            Tag = thread.Id,
+                        };
+                        AutomationProperties.SetAutomationId(deleteItem, $"shell-thread-delete-{thread.Id}");
+                        deleteItem.Click += OnDeleteThreadMenuClicked;
+                        threadMenu.Items.Add(renameItem);
+                        threadMenu.Items.Add(duplicateItem);
+                        threadMenu.Items.Add(deleteItem);
+                        threadButton.ContextFlyout = threadMenu;
 
-                    threadLayout.Children.Add(new FontIcon
-                    {
-                        FontSize = 10,
-                        Glyph = "\uE8BD",
-                        VerticalAlignment = VerticalAlignment.Center,
-                    });
+                        Grid threadLayout = new()
+                        {
+                            ColumnSpacing = 8,
+                        };
+                        threadLayout.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                        threadLayout.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-                    StackPanel threadText = new()
-                    {
-                        Spacing = 0,
-                    };
-                    Grid.SetColumn(threadText, 1);
-                    threadText.Children.Add(new TextBlock
-                    {
-                        Text = thread.Name,
-                        FontSize = 12,
-                    });
-                    threadText.Children.Add(new TextBlock
-                    {
-                        Text = thread.TabSummary,
-                        Style = (Style)Application.Current.Resources["ShellHintTextStyle"],
-                    });
-                    threadText.Children.Add(new TextBlock
-                    {
-                        Text = string.IsNullOrWhiteSpace(thread.BranchName)
+                        threadLayout.Children.Add(new FontIcon
+                        {
+                            FontSize = 10,
+                            Glyph = "\uE8BD",
+                            VerticalAlignment = VerticalAlignment.Center,
+                        });
+
+                        StackPanel threadText = new()
+                        {
+                            Spacing = 0,
+                        };
+                        Grid.SetColumn(threadText, 1);
+                        threadText.Children.Add(new TextBlock
+                        {
+                            Text = thread.Name,
+                            FontSize = 12,
+                            TextTrimming = TextTrimming.CharacterEllipsis,
+                        });
+
+                        string threadLocation = string.IsNullOrWhiteSpace(thread.BranchName)
                             ? ShellProfiles.DeriveName(thread.WorktreePath ?? project.RootPath)
-                            : $"{thread.BranchName} · {ShellProfiles.DeriveName(thread.WorktreePath ?? project.RootPath)}",
-                        Style = (Style)Application.Current.Resources["ShellHintTextStyle"],
-                    });
+                            : $"{thread.BranchName} · {ShellProfiles.DeriveName(thread.WorktreePath ?? project.RootPath)}";
+                        threadText.Children.Add(new TextBlock
+                        {
+                            Text = $"{threadLocation} · {thread.TabSummary}",
+                            Style = (Style)Application.Current.Resources["ShellHintTextStyle"],
+                            TextTrimming = TextTrimming.CharacterEllipsis,
+                        });
 
-                    threadLayout.Children.Add(threadText);
-                    threadButton.Content = threadLayout;
-                    ApplyThreadButtonState(threadButton, thread == _activeThread && !_showingSettings);
-                    threadStack.Children.Add(threadButton);
-                }
+                        threadLayout.Children.Add(threadText);
+                        threadButton.Content = threadLayout;
+                        ApplyThreadButtonState(threadButton, thread == _activeThread && !_showingSettings);
+                        threadStack.Children.Add(threadButton);
+                    }
 
-                if (project.Threads.Count == 0)
-                {
-                    threadStack.Children.Add(new TextBlock
+                    if (project.Threads.Count == 0)
                     {
-                        Text = "No threads yet",
-                        Style = (Style)Application.Current.Resources["ShellHintTextStyle"],
-                    });
-                }
+                        threadStack.Children.Add(new TextBlock
+                        {
+                            Text = "No threads yet",
+                            Style = (Style)Application.Current.Resources["ShellHintTextStyle"],
+                        });
+                    }
 
-                group.Children.Add(threadStack);
+                    group.Children.Add(threadStack);
+                }
                 ProjectListPanel.Children.Add(group);
             }
         }
@@ -4848,6 +4925,11 @@ namespace SelfContainedDeployment
                     .Append(':')
                     .Append(project.RootPath)
                     .Append('|');
+
+                if (!ReferenceEquals(project, _activeProject))
+                {
+                    continue;
+                }
 
                 foreach (WorkspaceThread thread in project.Threads)
                 {

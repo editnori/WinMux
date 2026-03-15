@@ -101,6 +101,7 @@ Supported `action` values:
 - `renameThread`
 - `duplicateThread`
 - `deleteThread`
+- `clearProjectThreads`
 - `deleteProject`
 - `input`
 
@@ -126,6 +127,7 @@ Notes:
 - `setThreadWorktree` binds a thread to a different repo/worktree path for new panes, diff state, header text, and session replay.
 - `refreshDiff` refreshes the active thread's git snapshot.
 - `selectDiffFile` refreshes the active thread's git snapshot, selects one changed file by relative path, and opens or updates the thread's diff pane in a dual-pane view.
+- `clearProjectThreads` removes all threads from the target project while keeping the project shell open.
 - `navigateBrowser` sends a URL to the selected browser pane; an empty `value` returns it to the built-in start page.
 - `deleteProject` removes a project and its threads from the live workspace; if it was the active project, WinMux activates the next surviving project.
 - `input` sends text to the selected terminal/editor pane, not to arbitrary native controls.
