@@ -146,7 +146,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-winmux-insta
   -AppVersion 0.1.0
 ```
 
-Tagged pushes like `v0.1.0` run `.github/workflows/windows-release.yml`, publish the x64 build, compile the installer, and attach `WinMux-win-x64-installer.exe` directly to the GitHub Release.
+Tagged pushes like `alpha-v0.1.0` run `.github/workflows/windows-release.yml`, publish the x64 build, compile the installer, and attach `WinMux-win-x64-installer.exe` directly to the GitHub Release.
 
 ## Repo structure
 
