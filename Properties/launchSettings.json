@@ -1,9 +1,9 @@
 ﻿{
     "profiles": {
-        "SelfContainedDeployment (Package)": {
+        "WinMux (Package)": {
             "commandName": "MsixPackage"
         },
-        "SelfContainedDeployment (Unpackaged)": {
+        "WinMux (Unpackaged)": {
             "commandName": "Project"
         }
     }

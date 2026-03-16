@@ -3,9 +3,11 @@ using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using SelfContainedDeployment.Automation;
 using SelfContainedDeployment.Git;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Text.RegularExpressions;
 using Windows.Foundation;
@@ -39,16 +41,24 @@ namespace SelfContainedDeployment.Panes
     public sealed class DiffPaneControl : UserControl
     {
         private static readonly Regex HunkHeaderRegex = new(@"@@ -(?<old>\d+)(?:,\d+)? \+(?<new>\d+)(?:,\d+)? @@", RegexOptions.Compiled);
+        private const float MinFitWidthZoomFactor = 0.5f;
+        private const double DiffCharacterWidth = 7.2;
         private readonly Grid _root;
         private readonly Border _headerBorder;
         private readonly TextBlock _pathText;
         private readonly TextBlock _summaryText;
-        private readonly Grid _diffLinesPanel;
+        private readonly StackPanel _diffLinesPanel;
         private readonly ScrollViewer _scrollViewer;
         private readonly Dictionary<string, FrameworkElement> _sectionAnchors = new(StringComparer.Ordinal);
+        private string _automationPaneId;
         private string _currentPath;
         private string _currentDiff;
         private IReadOnlyList<GitChangedFile> _currentFiles = Array.Empty<GitChangedFile>();
+        private bool _showHeader = true;
+        private bool _autoFitWidthLocked;
+        private bool _fitWidthRequested;
+        private float _lastAppliedZoomFactor = float.NaN;
+        private int _maxVisibleLineLength;
 
         public DiffPaneControl()
         {
@@ -60,8 +70,9 @@ namespace SelfContainedDeployment.Panes
             {
                 BorderBrush = ResolveBrush("ShellBorderBrush"),
                 BorderThickness = new Thickness(0, 0, 0, 1),
-                Padding = new Thickness(12, 10, 12, 10),
+                Padding = new Thickness(12, 10, 42, 10),
                 Background = ResolveBrush("ShellSurfaceBackgroundBrush"),
+                Visibility = Visibility.Collapsed,
             };
 
             StackPanel headerStack = new()
@@ -89,21 +100,28 @@ namespace SelfContainedDeployment.Panes
             _headerBorder.Child = headerStack;
             _root.Children.Add(_headerBorder);
 
-            _diffLinesPanel = new Grid
+            _diffLinesPanel = new StackPanel
             {
                 HorizontalAlignment = HorizontalAlignment.Stretch,
+                Orientation = Orientation.Vertical,
             };
-            _diffLinesPanel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
             _scrollViewer = new ScrollViewer
             {
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
                 HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+                ZoomMode = ZoomMode.Enabled,
+                MinZoomFactor = MinFitWidthZoomFactor,
+                MaxZoomFactor = 1.0f,
                 Padding = new Thickness(12, 12, 12, 12),
                 Content = _diffLinesPanel,
                 Background = ResolveBrush("ShellSurfaceBackgroundBrush"),
             };
-            _scrollViewer.SizeChanged += (_, _) => UpdateDiffContentWidth();
+            _scrollViewer.SizeChanged += (_, _) =>
+            {
+                UpdateDiffContentWidth();
+                QueueZoomToFitWidth();
+            };
             Grid.SetRow(_scrollViewer, 1);
             _root.Children.Add(_scrollViewer);
 
@@ -120,6 +138,25 @@ namespace SelfContainedDeployment.Panes
 
         public string CurrentDiff => _currentDiff;
 
+        public bool ShowHeader
+        {
+            get => _showHeader;
+            set
+            {
+                if (_showHeader == value)
+                {
+                    return;
+                }
+
+                _showHeader = value;
+                UpdateHeaderVisibility();
+                if (!string.IsNullOrWhiteSpace(_automationPaneId))
+                {
+                    ApplyAutomationIdentity(_automationPaneId);
+                }
+            }
+        }
+
         public void ApplyAutomationIdentity(string paneId)
         {
             if (string.IsNullOrWhiteSpace(paneId))
@@ -127,14 +164,16 @@ namespace SelfContainedDeployment.Panes
                 return;
             }
 
+            _automationPaneId = paneId;
             AutomationProperties.SetAutomationId(this, $"shell-diff-pane-{paneId}");
             AutomationProperties.SetName(this, "Patch review pane");
-            AutomationProperties.SetAutomationId(_headerBorder, $"shell-diff-pane-header-{paneId}");
-            AutomationProperties.SetName(_headerBorder, "Patch review header");
-            AutomationProperties.SetAutomationId(_pathText, $"shell-diff-pane-path-{paneId}");
-            AutomationProperties.SetName(_pathText, "Patch review path");
-            AutomationProperties.SetAutomationId(_summaryText, $"shell-diff-pane-summary-{paneId}");
-            AutomationProperties.SetName(_summaryText, "Patch review summary");
+            string headerPrefix = _showHeader ? "shell-diff-pane" : "shell-diff-pane-inline";
+            AutomationProperties.SetAutomationId(_headerBorder, $"{headerPrefix}-header-{paneId}");
+            AutomationProperties.SetName(_headerBorder, _showHeader ? "Patch review header" : "Inline patch review header");
+            AutomationProperties.SetAutomationId(_pathText, $"{headerPrefix}-path-{paneId}");
+            AutomationProperties.SetName(_pathText, _showHeader ? "Patch review path" : "Inline patch review path");
+            AutomationProperties.SetAutomationId(_summaryText, $"{headerPrefix}-summary-{paneId}");
+            AutomationProperties.SetName(_summaryText, _showHeader ? "Patch review summary" : "Inline patch review summary");
             AutomationProperties.SetAutomationId(_scrollViewer, $"shell-diff-pane-scroll-{paneId}");
             AutomationProperties.SetName(_scrollViewer, "Patch review scroll");
             AutomationProperties.SetAutomationId(_diffLinesPanel, $"shell-diff-pane-content-{paneId}");
@@ -170,6 +209,23 @@ namespace SelfContainedDeployment.Panes
             InvalidateArrange();
             UpdateLayout();
             UpdateDiffContentWidth();
+            QueueZoomToFitWidth();
+        }
+
+        public void ApplyFitToWidth(bool autoLock)
+        {
+            _autoFitWidthLocked = autoLock;
+            _fitWidthRequested = true;
+            QueueZoomToFitWidth();
+        }
+
+        public void SetAutoFitWidth(bool enabled)
+        {
+            _autoFitWidthLocked = enabled;
+            if (enabled)
+            {
+                _fitWidthRequested = true;
+            }
         }
 
         public void SetDiff(string path, string diffText)
@@ -182,6 +238,7 @@ namespace SelfContainedDeployment.Panes
             _summaryText.Text = string.IsNullOrWhiteSpace(path)
                 ? "Choose a changed file from the inspector."
                 : "Patch view";
+            UpdateHeaderVisibility();
 
             RenderDiff(diffText);
         }
@@ -215,6 +272,7 @@ namespace SelfContainedDeployment.Panes
                 ? "All changed files"
                 : selectedPath.Replace('\\', '/');
             _summaryText.Text = $"{diffFiles.Count} files · Scroll to review the full patch";
+            UpdateHeaderVisibility();
             RenderDiffSet(diffFiles, selectedPath);
         }
 
@@ -256,9 +314,10 @@ namespace SelfContainedDeployment.Panes
 
         private void RenderDiff(string diffText)
         {
+            Stopwatch stopwatch = Stopwatch.StartNew();
             _sectionAnchors.Clear();
             _diffLinesPanel.Children.Clear();
-            _diffLinesPanel.RowDefinitions.Clear();
+            _maxVisibleLineLength = 0;
             if (string.IsNullOrWhiteSpace(diffText))
             {
                 if (!string.IsNullOrWhiteSpace(_currentPath))
@@ -273,22 +332,26 @@ namespace SelfContainedDeployment.Panes
                     FontSize = 12,
                     IsTextSelectionEnabled = true,
                 };
-                _diffLinesPanel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-                Grid.SetRow(emptyText, 0);
                 _diffLinesPanel.Children.Add(emptyText);
+                _maxVisibleLineLength = Math.Max(_maxVisibleLineLength, emptyText.Text?.Length ?? 0);
+                QueueZoomToFitWidth();
+                RecordRenderMetrics("single-empty", lineCount: 0, fileCount: 0, durationMs: stopwatch.ElapsedMilliseconds);
                 return;
             }
 
             string[] lines = diffText.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
             RenderDiffLines(lines, 0);
             UpdateDiffContentWidth();
+            QueueZoomToFitWidth();
+            RecordRenderMetrics("single", lines.Length, fileCount: 1, durationMs: stopwatch.ElapsedMilliseconds);
         }
 
         private void RenderDiffSet(IReadOnlyList<GitChangedFile> files, string selectedPath)
         {
+            Stopwatch stopwatch = Stopwatch.StartNew();
             _sectionAnchors.Clear();
             _diffLinesPanel.Children.Clear();
-            _diffLinesPanel.RowDefinitions.Clear();
+            _maxVisibleLineLength = 0;
 
             if (files is null || files.Count == 0)
             {
@@ -297,20 +360,25 @@ namespace SelfContainedDeployment.Panes
             }
 
             int rowIndex = 0;
+            int lineCount = 0;
             foreach (GitChangedFile file in files)
             {
                 Border sectionHeader = BuildSectionHeader(file, string.Equals(file.Path, selectedPath, StringComparison.Ordinal));
                 _sectionAnchors[file.Path] = sectionHeader;
                 AddDiffRow(sectionHeader, rowIndex++);
+                _maxVisibleLineLength = Math.Max(_maxVisibleLineLength, file?.DisplayName?.Length ?? 0);
 
                 string[] lines = string.IsNullOrWhiteSpace(file.DiffText)
                     ? new[] { "Patch unavailable for this file." }
                     : file.DiffText.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+                lineCount += lines.Length;
                 rowIndex = RenderDiffLines(lines, rowIndex);
             }
 
             UpdateDiffContentWidth();
+            QueueZoomToFitWidth();
             ScrollToPath(selectedPath);
+            RecordRenderMetrics("full", lineCount, files.Count, stopwatch.ElapsedMilliseconds);
         }
 
         private int RenderDiffLines(IReadOnlyList<string> lines, int startingRow)
@@ -354,6 +422,7 @@ namespace SelfContainedDeployment.Panes
                     }
                 }
 
+                _maxVisibleLineLength = Math.Max(_maxVisibleLineLength, line?.Length ?? 0);
                 FrameworkElement row = BuildDiffLineRow(leftNumber, rightNumber, line, kind);
                 AddDiffRow(row, nextRow++);
             }
@@ -363,8 +432,6 @@ namespace SelfContainedDeployment.Panes
 
         private void AddDiffRow(FrameworkElement row, int rowIndex)
         {
-            _diffLinesPanel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            Grid.SetRow(row, rowIndex);
             _diffLinesPanel.Children.Add(row);
         }
 
@@ -510,6 +577,55 @@ namespace SelfContainedDeployment.Panes
             _diffLinesPanel.MinWidth = width > 0 ? width : 0;
         }
 
+        private void QueueZoomToFitWidth()
+        {
+            if ((!_fitWidthRequested && !_autoFitWidthLocked) || DispatcherQueue is null)
+            {
+                return;
+            }
+
+            DispatcherQueue.TryEnqueue(ApplyZoomToFitWidth);
+        }
+
+        private void ApplyZoomToFitWidth()
+        {
+            if (!_fitWidthRequested && !_autoFitWidthLocked)
+            {
+                return;
+            }
+
+            double availableWidth = _scrollViewer.ActualWidth - _scrollViewer.Padding.Left - _scrollViewer.Padding.Right - 12;
+            if (availableWidth <= 1)
+            {
+                return;
+            }
+
+            double estimatedWidth = EstimateDesiredContentWidth();
+            float zoomFactor = estimatedWidth <= 0
+                ? 1.0f
+                : (float)Math.Clamp(availableWidth / estimatedWidth, MinFitWidthZoomFactor, 1.0);
+            if (zoomFactor >= 0.98f)
+            {
+                zoomFactor = 1.0f;
+            }
+
+            if (!float.IsNaN(_lastAppliedZoomFactor) && Math.Abs(_lastAppliedZoomFactor - zoomFactor) < 0.01f)
+            {
+                _fitWidthRequested = false;
+                return;
+            }
+
+            _lastAppliedZoomFactor = zoomFactor;
+            _fitWidthRequested = false;
+            _scrollViewer.ChangeView(null, null, zoomFactor, true);
+        }
+
+        private double EstimateDesiredContentWidth()
+        {
+            int maxLineLength = Math.Max(_maxVisibleLineLength, 18);
+            return 124d + (maxLineLength * DiffCharacterWidth);
+        }
+
         private TextBlock BuildLineNumberText(int? lineNumber)
         {
             return new TextBlock
@@ -647,6 +763,29 @@ namespace SelfContainedDeployment.Panes
                 null => null,
                 _ => brush.GetType().Name,
             };
+        }
+
+        private void UpdateHeaderVisibility()
+        {
+            _headerBorder.Visibility = _showHeader && !string.IsNullOrWhiteSpace(_currentPath) && _currentFiles.Count <= 1
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        }
+
+        private static void RecordRenderMetrics(string mode, int lineCount, int fileCount, long durationMs)
+        {
+            if (lineCount < 200 && durationMs < 60 && fileCount <= 1)
+            {
+                return;
+            }
+
+            NativeAutomationEventLog.Record("render", "diff.rendered", $"Rendered {mode} diff", new Dictionary<string, string>
+            {
+                ["mode"] = mode ?? "single",
+                ["lineCount"] = lineCount.ToString(),
+                ["fileCount"] = fileCount.ToString(),
+                ["durationMs"] = durationMs.ToString(),
+            });
         }
     }
 }

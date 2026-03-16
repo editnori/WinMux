@@ -3,6 +3,7 @@ using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Dispatching;
 using Microsoft.Web.WebView2.Core;
 using SelfContainedDeployment.Automation;
 using SelfContainedDeployment.Browser;
@@ -152,11 +153,19 @@ namespace SelfContainedDeployment.Panes
         private string _extensionImportStatus = "No browser extensions imported yet.";
         private string _credentialAutofillStatus = "No imported WinMux credentials.";
         private readonly List<BrowserTabSession> _browserTabs = new();
+        private readonly Dictionary<string, Button> _browserTabButtonsById = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, TextBlock> _browserTabTitlesById = new(StringComparer.Ordinal);
         private readonly List<BrowserExtensionSnapshot> _installedExtensions = new();
         private readonly Dictionary<int, BrowserCredentialMatch> _credentialContextMenuMatches = new();
         private bool _credentialCaptureScriptInjected;
         private string _selectedBrowserTabId;
         private ChromiumProfileSeedSource _profileSeedSource;
+        private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer _layoutTimer;
+        private bool _lastCompactLayout;
+        private double _lastBrowserTabTitleWidth = -1;
+        private int _lastResizeNotificationWidth;
+        private int _lastResizeNotificationHeight;
+        private double _lastAppliedZoomFactor = double.NaN;
 
         private sealed class BrowserCredentialCaptureMessage
         {
@@ -192,6 +201,10 @@ namespace SelfContainedDeployment.Panes
             GotFocus += OnInteractionRequested;
             SizeChanged += OnBrowserPaneSizeChanged;
             AddressBox.GotFocus += OnAddressBoxGotFocus;
+            _layoutTimer = DispatcherQueue.CreateTimer();
+            _layoutTimer.IsRepeating = false;
+            _layoutTimer.Interval = TimeSpan.FromMilliseconds(45);
+            _layoutTimer.Tick += OnLayoutTimerTick;
             RefreshBrowserTabStrip();
             UpdateNavigationButtons();
             UpdateAdaptiveChromeLayout();
@@ -279,12 +292,7 @@ namespace SelfContainedDeployment.Panes
 
         public void RequestLayout()
         {
-            UpdateAdaptiveChromeLayout();
-            BrowserView.InvalidateMeasure();
-            BrowserView.InvalidateArrange();
-            BrowserView.UpdateLayout();
-            UpdateAdaptiveZoomFactor();
-            _ = NotifyBrowserResizedAsync();
+            QueueLayoutRefresh();
         }
 
         public void RefreshCredentialAutofillState()
@@ -300,6 +308,7 @@ namespace SelfContainedDeployment.Panes
             }
 
             _disposed = true;
+            _layoutTimer.Stop();
             if (BrowserView.CoreWebView2 is not null)
             {
                 BrowserView.CoreWebView2.NavigationCompleted -= OnNavigationCompleted;
@@ -315,6 +324,7 @@ namespace SelfContainedDeployment.Panes
         {
             if (string.IsNullOrWhiteSpace(target))
             {
+                _lastAppliedZoomFactor = double.NaN;
                 _ = NavigateToStartPageAsync();
                 return;
             }
@@ -326,6 +336,7 @@ namespace SelfContainedDeployment.Panes
             if (_initialized && BrowserView.CoreWebView2 is not null)
             {
                 SyncSelectedBrowserTab(uri: normalized);
+                _lastAppliedZoomFactor = double.NaN;
                 BrowserView.CoreWebView2.Navigate(normalized);
                 LogBrowserEvent("navigate.requested", $"Navigating browser pane to {normalized}");
             }
@@ -617,6 +628,7 @@ namespace SelfContainedDeployment.Panes
         private void SyncSelectedBrowserTab(string uri = null, string title = null)
         {
             BrowserTabSession tab = GetSelectedBrowserTab();
+            bool titleChanged = false;
             if (!string.IsNullOrWhiteSpace(uri))
             {
                 tab.Uri = uri.Trim();
@@ -625,11 +637,18 @@ namespace SelfContainedDeployment.Panes
 
             if (!string.IsNullOrWhiteSpace(title))
             {
-                tab.Title = title.Trim();
+                string normalizedTitle = title.Trim();
+                titleChanged = !string.Equals(tab.Title, normalizedTitle, StringComparison.Ordinal);
+                tab.Title = normalizedTitle;
                 _currentTitle = tab.Title;
             }
 
-            RefreshBrowserTabStrip();
+            if (titleChanged)
+            {
+                UpdateBrowserTabStripTitles();
+            }
+
+            UpdateBrowserTabSelectionVisuals();
         }
 
         private async Task SelectBrowserTabAsync(string tabId)
@@ -644,7 +663,7 @@ namespace SelfContainedDeployment.Panes
             _currentTitle = string.IsNullOrWhiteSpace(nextTab.Title) ? "Preview" : nextTab.Title;
             _currentUri = string.IsNullOrWhiteSpace(nextTab.Uri) ? "winmux://start" : nextTab.Uri;
             AddressBox.Text = string.Equals(_currentUri, "winmux://start", StringComparison.OrdinalIgnoreCase) ? string.Empty : _currentUri;
-            RefreshBrowserTabStrip();
+            UpdateBrowserTabSelectionVisuals();
             UpdateNavigationButtons();
             StateChanged?.Invoke(this, EventArgs.Empty);
 
@@ -656,10 +675,12 @@ namespace SelfContainedDeployment.Panes
 
             if (string.Equals(_currentUri, "winmux://start", StringComparison.OrdinalIgnoreCase))
             {
+                _lastAppliedZoomFactor = double.NaN;
                 await NavigateToStartPageAsync().ConfigureAwait(true);
             }
             else
             {
+                _lastAppliedZoomFactor = double.NaN;
                 BrowserView.CoreWebView2.Navigate(_currentUri);
                 LogBrowserEvent("tab.selected", $"Selected browser tab {nextTab.Id}", new Dictionary<string, string>
                 {
@@ -718,6 +739,8 @@ namespace SelfContainedDeployment.Panes
             }
 
             BrowserTabStripPanel.Children.Clear();
+            _browserTabButtonsById.Clear();
+            _browserTabTitlesById.Clear();
             double targetTitleWidth = ResolveBrowserTabTitleWidth();
             bool compact = IsCompactPaneLayout();
             bool showInlineCloseButtons = !compact || _browserTabs.Count <= 2;
@@ -752,10 +775,15 @@ namespace SelfContainedDeployment.Panes
                 {
                     Text = string.IsNullOrWhiteSpace(tab.Title) ? "New tab" : tab.Title,
                     TextTrimming = TextTrimming.CharacterEllipsis,
+                    FontWeight = string.Equals(tab.Id, _selectedBrowserTabId, StringComparison.Ordinal)
+                        ? Microsoft.UI.Text.FontWeights.SemiBold
+                        : Microsoft.UI.Text.FontWeights.Normal,
                 };
                 AutomationProperties.SetAutomationId(tabTitle, $"browser-pane-tab-title-{tab.Id}");
                 tabButton.Content = tabTitle;
                 ApplyBrowserTabButtonState(tabButton, string.Equals(tab.Id, _selectedBrowserTabId, StringComparison.Ordinal));
+                _browserTabButtonsById[tab.Id] = tabButton;
+                _browserTabTitlesById[tab.Id] = tabTitle;
                 tabLayout.Children.Add(tabButton);
 
                 if (showInlineCloseButtons)
@@ -783,6 +811,48 @@ namespace SelfContainedDeployment.Panes
             }
         }
 
+        private void UpdateBrowserTabStripTitles()
+        {
+            if (_browserTabTitlesById.Count != _browserTabs.Count)
+            {
+                RefreshBrowserTabStrip();
+                return;
+            }
+
+            foreach (BrowserTabSession tab in _browserTabs)
+            {
+                if (_browserTabTitlesById.TryGetValue(tab.Id, out TextBlock title))
+                {
+                    title.Text = string.IsNullOrWhiteSpace(tab.Title) ? "New tab" : tab.Title;
+                }
+            }
+        }
+
+        private void UpdateBrowserTabSelectionVisuals()
+        {
+            if (_browserTabButtonsById.Count != _browserTabs.Count || _browserTabTitlesById.Count != _browserTabs.Count)
+            {
+                RefreshBrowserTabStrip();
+                return;
+            }
+
+            foreach (BrowserTabSession tab in _browserTabs)
+            {
+                bool isActive = string.Equals(tab.Id, _selectedBrowserTabId, StringComparison.Ordinal);
+                if (_browserTabButtonsById.TryGetValue(tab.Id, out Button button))
+                {
+                    ApplyBrowserTabButtonState(button, isActive);
+                }
+
+                if (_browserTabTitlesById.TryGetValue(tab.Id, out TextBlock title))
+                {
+                    title.FontWeight = isActive
+                        ? Microsoft.UI.Text.FontWeights.SemiBold
+                        : Microsoft.UI.Text.FontWeights.Normal;
+                }
+            }
+        }
+
         private bool IsCompactPaneLayout()
         {
             double width = BrowserRoot?.ActualWidth > 0 ? BrowserRoot.ActualWidth : ActualWidth;
@@ -806,14 +876,17 @@ namespace SelfContainedDeployment.Panes
             return Math.Clamp(slotWidth - (compact ? 10 : 34), compact ? 90 : 96, compact ? 176 : 192);
         }
 
-        private void UpdateAdaptiveChromeLayout()
+        private bool UpdateAdaptiveChromeLayout()
         {
             if (BrowserChromeBorder is null || BrowserChromeGrid is null || AddressBox is null)
             {
-                return;
+                return false;
             }
 
             bool compact = IsCompactPaneLayout();
+            double targetTitleWidth = ResolveBrowserTabTitleWidth();
+            bool refreshTabStrip = compact != _lastCompactLayout ||
+                Math.Abs(targetTitleWidth - _lastBrowserTabTitleWidth) >= 2;
             BrowserChromeBorder.Padding = compact ? new Thickness(6, 4, 6, 4) : new Thickness(8, 6, 8, 5);
             BrowserChromeGrid.RowSpacing = compact ? 4 : 6;
             BrowserTabStripPanel.Spacing = compact ? 2 : 4;
@@ -832,7 +905,14 @@ namespace SelfContainedDeployment.Panes
             ApplyChromeButtonMetrics(BrowserExtensionsButton, chromeButtonSize);
             ApplyChromeButtonMetrics(BrowserNewPaneButton, chromeButtonSize);
 
-            RefreshBrowserTabStrip();
+            _lastCompactLayout = compact;
+            _lastBrowserTabTitleWidth = targetTitleWidth;
+            if (refreshTabStrip)
+            {
+                RefreshBrowserTabStrip();
+            }
+
+            return refreshTabStrip;
         }
 
         private void ApplyChromeButtonMetrics(Button button, double size)
@@ -864,23 +944,59 @@ namespace SelfContainedDeployment.Panes
             double heightScale = Math.Min(1.0, height / 420d);
             double zoomFactor = Math.Min(widthScale, heightScale);
             zoomFactor = zoomFactor >= 0.96 ? 1.0 : Math.Clamp(zoomFactor, CompactBrowserZoomFloor, 1.0);
+            if (!double.IsNaN(_lastAppliedZoomFactor) && Math.Abs(_lastAppliedZoomFactor - zoomFactor) < 0.01)
+            {
+                return;
+            }
 
             string zoomText = zoomFactor.ToString("0.###", CultureInfo.InvariantCulture);
+            _lastAppliedZoomFactor = zoomFactor;
             _ = BrowserView.CoreWebView2.ExecuteScriptAsync(
                 $"(() => {{ document.documentElement.style.zoom = '{zoomText}'; if (document.body) document.body.style.zoom = '{zoomText}'; }})()").AsTask();
         }
 
-        private static void ApplyBrowserTabButtonState(Button button, bool active)
+        private Brush ResolveShellBrush(string key)
+        {
+            ElementTheme effectiveTheme = _themePreference == ElementTheme.Default
+                ? (ActualTheme == ElementTheme.Light ? ElementTheme.Light : ElementTheme.Dark)
+                : _themePreference;
+
+            Windows.UI.Color color = (effectiveTheme, key) switch
+            {
+                (ElementTheme.Light, "ShellMutedSurfaceBrush") => Windows.UI.Color.FromArgb(0xFF, 0xF4, 0xF4, 0xF5),
+                (ElementTheme.Light, "ShellNavActiveBrush") => Windows.UI.Color.FromArgb(0xFF, 0xE7, 0xE7, 0xEB),
+                (ElementTheme.Light, "ShellBorderBrush") => Windows.UI.Color.FromArgb(0xFF, 0xE4, 0xE4, 0xE7),
+                (ElementTheme.Light, "ShellPaneActiveBorderBrush") => Windows.UI.Color.FromArgb(0xFF, 0x25, 0x63, 0xEB),
+                (ElementTheme.Light, "ShellTextPrimaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0x18, 0x18, 0x1B),
+                (ElementTheme.Light, "ShellTextSecondaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0x52, 0x52, 0x5B),
+                (ElementTheme.Dark, "ShellMutedSurfaceBrush") => Windows.UI.Color.FromArgb(0xFF, 0x17, 0x18, 0x1C),
+                (ElementTheme.Dark, "ShellNavActiveBrush") => Windows.UI.Color.FromArgb(0xFF, 0x1F, 0x22, 0x28),
+                (ElementTheme.Dark, "ShellBorderBrush") => Windows.UI.Color.FromArgb(0xFF, 0x23, 0x25, 0x2B),
+                (ElementTheme.Dark, "ShellPaneActiveBorderBrush") => Windows.UI.Color.FromArgb(0xFF, 0x60, 0xA5, 0xFA),
+                (ElementTheme.Dark, "ShellTextPrimaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0xFA, 0xFA, 0xFA),
+                (ElementTheme.Dark, "ShellTextSecondaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0xA1, 0xA1, 0xAA),
+                _ => default,
+            };
+
+            if (color != default)
+            {
+                return new SolidColorBrush(color);
+            }
+
+            return (Brush)Application.Current.Resources[key];
+        }
+
+        private void ApplyBrowserTabButtonState(Button button, bool active)
         {
             if (button is null)
             {
                 return;
             }
 
-            button.Background = (Brush)Application.Current.Resources[active ? "ShellNavActiveBrush" : "ShellMutedSurfaceBrush"];
-            button.BorderBrush = (Brush)Application.Current.Resources[active ? "ShellPaneActiveBorderBrush" : "ShellBorderBrush"];
-            button.Foreground = (Brush)Application.Current.Resources[active ? "ShellTextPrimaryBrush" : "ShellTextSecondaryBrush"];
-            button.BorderThickness = active ? new Thickness(1) : new Thickness(1);
+            button.Background = null;
+            button.BorderBrush = null;
+            button.Foreground = ResolveShellBrush(active ? "ShellTextPrimaryBrush" : "ShellTextSecondaryBrush");
+            button.BorderThickness = new Thickness(0);
         }
 
         private void UpdateNavigationButtons()
@@ -916,6 +1032,20 @@ namespace SelfContainedDeployment.Panes
             RefreshBrowserTabStrip();
         }
 
+        private void QueueLayoutRefresh()
+        {
+            _layoutTimer.Stop();
+            _layoutTimer.Start();
+        }
+
+        private void OnLayoutTimerTick(Microsoft.UI.Dispatching.DispatcherQueueTimer sender, object args)
+        {
+            _layoutTimer.Stop();
+            UpdateAdaptiveChromeLayout();
+            UpdateAdaptiveZoomFactor();
+            _ = NotifyBrowserResizedAsync();
+        }
+
         private async Task NavigateToStartPageAsync()
         {
             RaiseInteractionRequested();
@@ -927,6 +1057,7 @@ namespace SelfContainedDeployment.Panes
             UpdateCredentialAutofillStatus();
             if (_initialized && BrowserView.CoreWebView2 is not null)
             {
+                _lastAppliedZoomFactor = double.NaN;
                 BrowserView.CoreWebView2.NavigateToString(BuildStartPageHtml());
                 LogBrowserEvent("start-page.shown", "Browser start page rendered");
             }
@@ -1188,9 +1319,12 @@ namespace SelfContainedDeployment.Panes
 
         private void OnBrowserPaneSizeChanged(object sender, SizeChangedEventArgs e)
         {
-            UpdateAdaptiveChromeLayout();
-            UpdateAdaptiveZoomFactor();
-            _ = NotifyBrowserResizedAsync();
+            if (e.NewSize.Width <= 1 || e.NewSize.Height <= 1)
+            {
+                return;
+            }
+
+            QueueLayoutRefresh();
         }
 
         private void RaiseInteractionRequested()
@@ -1260,6 +1394,8 @@ namespace SelfContainedDeployment.Panes
                 AddressBox.Text = BrowserView.Source?.ToString() ?? _currentUri ?? string.Empty;
             }
 
+            _lastAppliedZoomFactor = double.NaN;
+            UpdateAdaptiveZoomFactor();
             UpdateCredentialAutofillStatus();
             UpdateNavigationButtons();
             LogBrowserEvent("navigate.completed", $"Browser navigation completed for {_currentUri}", new Dictionary<string, string>
@@ -1299,6 +1435,7 @@ namespace SelfContainedDeployment.Panes
                 AddressBox.Text = _currentUri;
             }
 
+            _lastAppliedZoomFactor = double.NaN;
             SyncSelectedBrowserTab(uri: _currentUri);
             UpdateNavigationButtons();
             LogBrowserEvent("source.changed", $"Browser source changed to {_currentUri}");
@@ -1671,6 +1808,21 @@ namespace SelfContainedDeployment.Panes
             {
                 return;
             }
+
+            int width = (int)Math.Round(BrowserView.ActualWidth);
+            int height = (int)Math.Round(BrowserView.ActualHeight);
+            if (width <= 0 || height <= 0)
+            {
+                return;
+            }
+
+            if (width == _lastResizeNotificationWidth && height == _lastResizeNotificationHeight)
+            {
+                return;
+            }
+
+            _lastResizeNotificationWidth = width;
+            _lastResizeNotificationHeight = height;
 
             try
             {

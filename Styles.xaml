@@ -15,7 +15,7 @@
     <ResourceDictionary.ThemeDictionaries>
         <ResourceDictionary x:Key="Default">
             <SolidColorBrush x:Key="ShellPageBackgroundBrush" Color="#09090B" />
-            <SolidColorBrush x:Key="ShellPaneBackgroundBrush" Color="#0E1013" />
+            <SolidColorBrush x:Key="ShellPaneBackgroundBrush" Color="#09090B" />
             <SolidColorBrush x:Key="ShellSurfaceBackgroundBrush" Color="#111214" />
             <SolidColorBrush x:Key="ShellMutedSurfaceBrush" Color="#17181C" />
             <SolidColorBrush x:Key="ShellBorderBrush" Color="#23252B" />
@@ -30,6 +30,14 @@
             <SolidColorBrush x:Key="ShellWarningBrush" Color="#FBBF24" />
             <SolidColorBrush x:Key="ShellDangerBrush" Color="#F87171" />
             <SolidColorBrush x:Key="ShellInfoBrush" Color="#60A5FA" />
+            <SolidColorBrush x:Key="ShellCSharpBrush" Color="#4ADE80" />
+            <SolidColorBrush x:Key="ShellTypeScriptBrush" Color="#38BDF8" />
+            <SolidColorBrush x:Key="ShellJavaScriptBrush" Color="#FACC15" />
+            <SolidColorBrush x:Key="ShellScriptBrush" Color="#60A5FA" />
+            <SolidColorBrush x:Key="ShellConfigBrush" Color="#94A3B8" />
+            <SolidColorBrush x:Key="ShellMarkdownBrush" Color="#A1A1AA" />
+            <SolidColorBrush x:Key="ShellMarkupBrush" Color="#FB923C" />
+            <SolidColorBrush x:Key="ShellStyleBrush" Color="#2DD4BF" />
 
             <SolidColorBrush x:Key="TabViewBackground" Color="#111214" />
             <SolidColorBrush x:Key="TabViewItemHeaderBackground" Color="#111214" />
@@ -64,7 +72,7 @@
         </ResourceDictionary>
         <ResourceDictionary x:Key="Dark">
             <SolidColorBrush x:Key="ShellPageBackgroundBrush" Color="#09090B" />
-            <SolidColorBrush x:Key="ShellPaneBackgroundBrush" Color="#0E1013" />
+            <SolidColorBrush x:Key="ShellPaneBackgroundBrush" Color="#09090B" />
             <SolidColorBrush x:Key="ShellSurfaceBackgroundBrush" Color="#111214" />
             <SolidColorBrush x:Key="ShellMutedSurfaceBrush" Color="#17181C" />
             <SolidColorBrush x:Key="ShellBorderBrush" Color="#23252B" />
@@ -79,6 +87,14 @@
             <SolidColorBrush x:Key="ShellWarningBrush" Color="#FBBF24" />
             <SolidColorBrush x:Key="ShellDangerBrush" Color="#F87171" />
             <SolidColorBrush x:Key="ShellInfoBrush" Color="#60A5FA" />
+            <SolidColorBrush x:Key="ShellCSharpBrush" Color="#4ADE80" />
+            <SolidColorBrush x:Key="ShellTypeScriptBrush" Color="#38BDF8" />
+            <SolidColorBrush x:Key="ShellJavaScriptBrush" Color="#FACC15" />
+            <SolidColorBrush x:Key="ShellScriptBrush" Color="#60A5FA" />
+            <SolidColorBrush x:Key="ShellConfigBrush" Color="#94A3B8" />
+            <SolidColorBrush x:Key="ShellMarkdownBrush" Color="#A1A1AA" />
+            <SolidColorBrush x:Key="ShellMarkupBrush" Color="#FB923C" />
+            <SolidColorBrush x:Key="ShellStyleBrush" Color="#2DD4BF" />
 
             <SolidColorBrush x:Key="TabViewBackground" Color="#111214" />
             <SolidColorBrush x:Key="TabViewItemHeaderBackground" Color="#111214" />
@@ -113,7 +129,7 @@
         </ResourceDictionary>
         <ResourceDictionary x:Key="Light">
             <SolidColorBrush x:Key="ShellPageBackgroundBrush" Color="#FAFAFA" />
-            <SolidColorBrush x:Key="ShellPaneBackgroundBrush" Color="#F4F4F5" />
+            <SolidColorBrush x:Key="ShellPaneBackgroundBrush" Color="#FAFAFA" />
             <SolidColorBrush x:Key="ShellSurfaceBackgroundBrush" Color="#FFFFFF" />
             <SolidColorBrush x:Key="ShellMutedSurfaceBrush" Color="#F4F4F5" />
             <SolidColorBrush x:Key="ShellBorderBrush" Color="#E4E4E7" />
@@ -128,6 +144,14 @@
             <SolidColorBrush x:Key="ShellWarningBrush" Color="#CA8A04" />
             <SolidColorBrush x:Key="ShellDangerBrush" Color="#DC2626" />
             <SolidColorBrush x:Key="ShellInfoBrush" Color="#2563EB" />
+            <SolidColorBrush x:Key="ShellCSharpBrush" Color="#15803D" />
+            <SolidColorBrush x:Key="ShellTypeScriptBrush" Color="#0F6CAD" />
+            <SolidColorBrush x:Key="ShellJavaScriptBrush" Color="#A16207" />
+            <SolidColorBrush x:Key="ShellScriptBrush" Color="#1D4ED8" />
+            <SolidColorBrush x:Key="ShellConfigBrush" Color="#475569" />
+            <SolidColorBrush x:Key="ShellMarkdownBrush" Color="#6B7280" />
+            <SolidColorBrush x:Key="ShellMarkupBrush" Color="#C2410C" />
+            <SolidColorBrush x:Key="ShellStyleBrush" Color="#0F766E" />
 
             <SolidColorBrush x:Key="TabViewBackground" Color="#FFFFFF" />
             <SolidColorBrush x:Key="TabViewItemHeaderBackground" Color="#F8F8F9" />
@@ -257,8 +281,14 @@
 
     <Style x:Key="ShellBrowserTabButtonStyle" TargetType="Button" BasedOn="{StaticResource ShellButtonBaseStyle}">
         <Setter Property="Height" Value="24" />
-        <Setter Property="Padding" Value="8,2" />
-        <Setter Property="CornerRadius" Value="4" />
+        <Setter Property="Padding" Value="6,2" />
+        <Setter Property="CornerRadius" Value="0" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    </Style>
+
+    <Style x:Key="ShellDiffFileButtonStyle" TargetType="Button" BasedOn="{StaticResource ShellButtonBaseStyle}">
+        <Setter Property="Padding" Value="8,4" />
+        <Setter Property="MinHeight" Value="34" />
         <Setter Property="HorizontalContentAlignment" Value="Stretch" />
     </Style>
 
@@ -287,6 +317,16 @@
     <Style x:Key="ShellHintTextStyle" TargetType="TextBlock" BasedOn="{StaticResource BaseTextBlockStyle}">
         <Setter Property="FontSize" Value="11" />
         <Setter Property="Foreground" Value="{ThemeResource ShellTextTertiaryBrush}" />
+    </Style>
+
+    <Style x:Key="ShellInteractiveMetaTextStyle" TargetType="TextBlock" BasedOn="{StaticResource BaseTextBlockStyle}">
+        <Setter Property="FontSize" Value="11" />
+        <Setter Property="Opacity" Value="0.78" />
+    </Style>
+
+    <Style x:Key="ShellInteractiveHintTextStyle" TargetType="TextBlock" BasedOn="{StaticResource BaseTextBlockStyle}">
+        <Setter Property="FontSize" Value="10.5" />
+        <Setter Property="Opacity" Value="0.62" />
     </Style>
 
     <Style x:Key="ShellInspectorLabelTextStyle" TargetType="TextBlock" BasedOn="{StaticResource BaseTextBlockStyle}">

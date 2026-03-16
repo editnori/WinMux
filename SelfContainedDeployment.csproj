@@ -4,6 +4,9 @@
     <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
     <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
     <RootNamespace>SelfContainedDeployment</RootNamespace>
+    <Product>WinMux</Product>
+    <PackageId>WinMux</PackageId>
+    <Title>WinMux</Title>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <Platforms>x86;x64;ARM64</Platforms>
     <RuntimeIdentifiers>win-x86;win-x64;win-arm64</RuntimeIdentifiers>
@@ -31,6 +34,7 @@
     <Content Include="Assets\Square150x150Logo.png" />
     <Content Include="Assets\Square44x44Logo.png" />
     <Content Include="Assets\logo.png" />
+    <Content Include="Assets\winmux.ico" />
     <Content Include="Assets\Wide310x150Logo.png" />
     <Content Include="Assets\windows-sdk.ico" />
   </ItemGroup>

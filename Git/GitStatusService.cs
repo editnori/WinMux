@@ -2,6 +2,7 @@ using SelfContainedDeployment.Shell;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Text;
 
@@ -13,11 +14,17 @@ namespace SelfContainedDeployment.Git
 
         public string Path { get; set; }
 
+        public string OriginalPath { get; set; }
+
         public int AddedLines { get; set; }
 
         public int RemovedLines { get; set; }
 
         public string DiffText { get; set; }
+
+        public string OriginalText { get; set; }
+
+        public string ModifiedText { get; set; }
 
         public string DisplayName => string.IsNullOrWhiteSpace(Path)
             ? string.Empty
@@ -154,9 +161,12 @@ namespace SelfContainedDeployment.Git
                 {
                     Status = file.Status,
                     Path = file.Path,
+                    OriginalPath = file.OriginalPath,
                     AddedLines = file.AddedLines,
                     RemovedLines = file.RemovedLines,
                     DiffText = file.DiffText,
+                    OriginalText = file.OriginalText,
+                    ModifiedText = file.ModifiedText,
                 }).ToList(),
             };
         }
@@ -179,6 +189,33 @@ namespace SelfContainedDeployment.Git
             snapshot.SelectedPath = resolvedPath;
             GitChangedFile changedFile = snapshot.ChangedFiles.FirstOrDefault(file => string.Equals(file.Path, resolvedPath, StringComparison.Ordinal));
             snapshot.SelectedDiff = changedFile?.DiffText;
+        }
+
+        public static void EnsureCompareTexts(string workingPath, GitChangedFile changedFile)
+        {
+            if (changedFile is null ||
+                string.IsNullOrWhiteSpace(changedFile.Path) ||
+                (!string.IsNullOrWhiteSpace(changedFile.OriginalText) || !string.IsNullOrWhiteSpace(changedFile.ModifiedText)))
+            {
+                return;
+            }
+
+            PopulateCompareTexts(workingPath, changedFile);
+        }
+
+        public static void EnsureDiffText(string workingPath, GitChangedFile changedFile)
+        {
+            if (changedFile is null ||
+                string.IsNullOrWhiteSpace(changedFile.Path) ||
+                !string.IsNullOrWhiteSpace(changedFile.DiffText))
+            {
+                return;
+            }
+
+            GitCommandResult diffResult = RunGitDiff(workingPath, changedFile.Path, changedFile.Status);
+            changedFile.DiffText = diffResult.Ok
+                ? diffResult.Output
+                : NormalizeGitError(diffResult.Error);
         }
 
         private static string NormalizeGitError(string error)
@@ -234,12 +271,34 @@ namespace SelfContainedDeployment.Git
                     continue;
                 }
 
+                (string currentPath, string originalPath) = ParseTrackedPaths(line[3..].Trim());
                 snapshot.ChangedFiles.Add(new GitChangedFile
                 {
                     Status = line[..2].Trim(),
-                    Path = NormalizeTrackedPath(line[3..].Trim()),
+                    Path = currentPath,
+                    OriginalPath = originalPath,
                 });
             }
+        }
+
+        private static (string CurrentPath, string OriginalPath) ParseTrackedPaths(string path)
+        {
+            string normalized = path?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(normalized))
+            {
+                return (string.Empty, string.Empty);
+            }
+
+            int renameSeparator = normalized.LastIndexOf(" -> ", StringComparison.Ordinal);
+            if (renameSeparator >= 0 && renameSeparator + 4 < normalized.Length)
+            {
+                string originalPath = NormalizeTrackedPath(normalized[..renameSeparator].Trim());
+                string currentPath = NormalizeTrackedPath(normalized[(renameSeparator + 4)..].Trim());
+                return (currentPath, originalPath);
+            }
+
+            string current = NormalizeTrackedPath(normalized);
+            return (current, current);
         }
 
         private static string BuildStatusSummary(IReadOnlyCollection<GitChangedFile> files)
@@ -330,6 +389,124 @@ namespace SelfContainedDeployment.Git
         private static int ParseNumStatValue(string value)
         {
             return int.TryParse(value, out int parsed) ? parsed : 0;
+        }
+
+        private static void PopulateCompareTexts(string workingPath, GitChangedFile changedFile)
+        {
+            if (changedFile is null || string.IsNullOrWhiteSpace(changedFile.Path))
+            {
+                return;
+            }
+
+            string status = changedFile.Status?.Trim() ?? string.Empty;
+            changedFile.OriginalText = ResolveOriginalText(workingPath, changedFile, status);
+            changedFile.ModifiedText = ResolveModifiedText(workingPath, changedFile, status);
+        }
+
+        private static string ResolveOriginalText(string workingPath, GitChangedFile changedFile, string status)
+        {
+            if (string.Equals(status, "??", StringComparison.Ordinal))
+            {
+                return string.Empty;
+            }
+
+            if (status.IndexOf('A') >= 0 &&
+                status.IndexOf('R') < 0 &&
+                status.IndexOf('C') < 0 &&
+                status.IndexOf('M') < 0)
+            {
+                return string.Empty;
+            }
+
+            string path = string.IsNullOrWhiteSpace(changedFile.OriginalPath) ? changedFile.Path : changedFile.OriginalPath;
+            return ReadGitTextFile(workingPath, path);
+        }
+
+        private static string ResolveModifiedText(string workingPath, GitChangedFile changedFile, string status)
+        {
+            if (status.IndexOf('D') >= 0)
+            {
+                return string.Empty;
+            }
+
+            string projectPath = ShellProfiles.NormalizeProjectPath(workingPath);
+            string fullPath = Path.Combine(projectPath, changedFile.Path.Replace('/', Path.DirectorySeparatorChar));
+            return ReadLocalTextFile(fullPath);
+        }
+
+        private static string ReadGitTextFile(string workingPath, string path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return string.Empty;
+            }
+
+            string spec = $"HEAD:{NormalizeTrackedPath(path)}";
+            string script = $"git --no-optional-locks show {QuoteShellArgument(spec)} | base64 -w0";
+            GitCommandResult result = RunWslShell(workingPath, script);
+            if (!result.Ok || string.IsNullOrWhiteSpace(result.Output))
+            {
+                return string.Empty;
+            }
+
+            try
+            {
+                byte[] bytes = Convert.FromBase64String(result.Output);
+                return DecodeTextBytes(bytes);
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+
+        private static string ReadLocalTextFile(string fullPath)
+        {
+            if (string.IsNullOrWhiteSpace(fullPath) || !File.Exists(fullPath))
+            {
+                return string.Empty;
+            }
+
+            try
+            {
+                byte[] bytes = File.ReadAllBytes(fullPath);
+                return DecodeTextBytes(bytes);
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+
+        private static string DecodeTextBytes(byte[] bytes)
+        {
+            if (bytes is null || bytes.Length == 0)
+            {
+                return string.Empty;
+            }
+
+            if (LooksBinary(bytes))
+            {
+                return string.Empty;
+            }
+
+            using MemoryStream stream = new(bytes);
+            using StreamReader reader = new(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+            return reader.ReadToEnd();
+        }
+
+        private static bool LooksBinary(byte[] bytes)
+        {
+            int sampleLength = Math.Min(bytes.Length, 2048);
+            for (int index = 0; index < sampleLength; index++)
+            {
+                if (bytes[index] == 0)
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private static GitCommandResult RunGitSnapshot(string workingPath)

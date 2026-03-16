@@ -7,28 +7,60 @@
 
     <Grid x:Name="EditorRoot"
           AutomationProperties.AutomationId="editor-pane-root"
-          Background="{ThemeResource ShellPageBackgroundBrush}">
-        <WebView2 x:Name="EditorView"
-                  AutomationProperties.AutomationId="editor-pane-webview"
-                  Margin="0"
-                  HorizontalAlignment="Stretch"
-                  VerticalAlignment="Stretch" />
+          Background="{ThemeResource ShellSurfaceBackgroundBrush}">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
 
-        <Border x:Name="EditorOverlay"
-                Background="{ThemeResource ShellPageBackgroundBrush}"
-                Visibility="Visible">
-            <StackPanel HorizontalAlignment="Center"
-                        VerticalAlignment="Center"
-                        Spacing="6">
-                <TextBlock x:Name="EditorOverlayTitle"
-                           Style="{StaticResource ShellSectionTextStyle}"
-                           Text="Loading editor" />
-                <TextBlock x:Name="EditorOverlayText"
-                           Style="{StaticResource ShellHintTextStyle}"
-                           Text="Preparing the code surface..."
-                           TextAlignment="Center"
-                           TextWrapping="WrapWholeWords" />
-            </StackPanel>
+        <Border x:Name="EditorHeader"
+                AutomationProperties.AutomationId="editor-pane-header"
+                Background="{ThemeResource ShellSurfaceBackgroundBrush}"
+                BorderBrush="{ThemeResource ShellBorderBrush}"
+                BorderThickness="0,0,0,1"
+                Padding="10,5,40,5">
+            <Grid ColumnDefinitions="*,Auto"
+                  ColumnSpacing="10">
+                <TextBlock x:Name="EditorHeaderPathText"
+                           AutomationProperties.AutomationId="editor-pane-header-path"
+                           FontSize="10.5"
+                           FontWeight="SemiBold"
+                           Foreground="{ThemeResource ShellTextPrimaryBrush}"
+                           Text="Editor"
+                           TextTrimming="CharacterEllipsis" />
+                <TextBlock x:Name="EditorHeaderMetaText"
+                           Grid.Column="1"
+                           AutomationProperties.AutomationId="editor-pane-header-meta"
+                           FontSize="10.5"
+                           Foreground="{ThemeResource ShellTextSecondaryBrush}"
+                           Text="Waiting"
+                           TextTrimming="CharacterEllipsis" />
+            </Grid>
         </Border>
+
+        <Grid Grid.Row="1">
+            <WebView2 x:Name="EditorView"
+                      AutomationProperties.AutomationId="editor-pane-webview"
+                      Margin="0"
+                      HorizontalAlignment="Stretch"
+                      VerticalAlignment="Stretch" />
+
+            <Border x:Name="EditorOverlay"
+                    Background="{ThemeResource ShellSurfaceBackgroundBrush}"
+                    Visibility="Visible">
+                <StackPanel HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Spacing="6">
+                    <TextBlock x:Name="EditorOverlayTitle"
+                               Style="{StaticResource ShellSectionTextStyle}"
+                               Text="Loading editor" />
+                    <TextBlock x:Name="EditorOverlayText"
+                               Style="{StaticResource ShellHintTextStyle}"
+                               Text="Preparing the code surface..."
+                               TextAlignment="Center"
+                               TextWrapping="WrapWholeWords" />
+                </StackPanel>
+            </Border>
+        </Grid>
     </Grid>
 </UserControl>

@@ -1,8 +1,8 @@
 {
-  "name": "native-terminal-starter",
+  "name": "winmux",
   "private": true,
   "packageManager": "bun@1.3.10",
-  "description": "Playwright helpers for attaching to the native WebView2 terminal renderer.",
+  "description": "WinMux native shell, automation tooling, and cinematic demo recording helpers.",
   "scripts": {
     "webview2:start": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/start-webview2-debug.ps1\")\"",
     "webview2:targets": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-webview2-tool.ps1\")\" targets",
@@ -33,12 +33,18 @@
     "native:screenshot": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-automation.ps1\")\" screenshot",
     "native:screenshot:annotated": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-automation.ps1\")\" screenshot \"\" true",
     "native:smoke": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-automation-smoke.ps1\")\"",
+    "native:stress": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-interaction-stress.ps1\")\"",
     "native:demo-recording": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-demo-recording.ps1\")\" -Mode standard",
     "native:demo-recording:cinematic": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-demo-recording.ps1\")\" -Mode cinematic",
+    "native:feature-tour-recording": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-feature-tour-recording.ps1\")\"",
+    "native:workspace-showcase-recording": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-workspace-showcase-recording.ps1\")\"",
     "native:patch-review-recording": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-patch-review-recording.ps1\")\"",
     "native:new-project-recording": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-new-project-recording.ps1\")\" -KeepFrames",
     "native:tab-switch-recording": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-tab-switch-recording.ps1\")\"",
     "native:new-tab-recording": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-new-tab-recording.ps1\")\"",
+    "native:automation-tour-recording": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-automation-tour-recording.ps1\")\"",
+    "native:session-restore-recording": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-session-restore-recording.ps1\")\"",
+    "native:recording-suite": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-recording-suite.ps1\")\" -Mode cinematic",
     "native:agent-browser-smoke": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-terminal-browser-smoke.ps1\")\""
   },
   "devDependencies": {

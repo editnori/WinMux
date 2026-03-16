@@ -288,12 +288,14 @@ try {
     Focus-WinMuxWindow | Out-Null
 
     $null = Invoke-AutomationPost "/action" @{ action = "showTerminal" }
-    $null = Invoke-AutomationPost "/action" @{ action = "setTheme"; value = "dark" }
+    $null = Invoke-AutomationPost "/action" @{ action = "setTheme"; value = "light" }
 
     $initialState = Invoke-AutomationGet "/state"
     $originalProjectId = $initialState.projectId
     $originalThreadId = $initialState.activeThreadId
     $originalProject = Get-ProjectById -State $initialState -ProjectId $originalProjectId
+    $originalThread = Get-ThreadById -Project $originalProject -ThreadId $originalThreadId
+    $initialTerminalTab = @($originalThread.tabs) | Where-Object { $_.kind -eq "terminal" } | Select-Object -First 1
 
     $recordingStart = Invoke-AutomationPost "/recording/start" @{
         fps = $defaultFps
@@ -312,9 +314,10 @@ try {
     $null = Invoke-AutomationPost "/ui-action" @{ action = "click"; automationId = "shell-pane-toggle" }
     Pause-Step 1000
 
-    if ($initialState.activeTabId) {
+    if ($null -ne $initialTerminalTab) {
         Focus-WinMuxWindow | Out-Null
-        Wait-ForTerminalReady -TabId $initialState.activeTabId | Out-Null
+        $null = Invoke-AutomationPost "/action" @{ action = "selectTab"; tabId = $initialTerminalTab.id }
+        Wait-ForTerminalReady -TabId $initialTerminalTab.id | Out-Null
         $null = Invoke-AutomationPost "/action" @{ action = "input"; value = "pwd`r" }
         Pause-Step 1200
         $null = Invoke-AutomationPost "/action" @{ action = "input"; value = "ls`r" }
@@ -415,14 +418,14 @@ try {
         return $null
     } | Out-Null
     Pause-Step 1200
-    Show-Hover -AutomationId "settings-theme-light" -PauseMs 700
-    $null = Invoke-AutomationPost "/ui-action" @{ action = "click"; automationId = "settings-theme-light" }
-    Pause-Step 1300
     $null = Invoke-AutomationPost "/ui-action" @{ action = "click"; automationId = "settings-shell-powershell" }
     Pause-Step 1000
     $null = Invoke-AutomationPost "/ui-action" @{ action = "click"; automationId = "settings-shell-wsl" }
     Pause-Step 1000
+    Show-Hover -AutomationId "settings-theme-dark" -PauseMs 700
     $null = Invoke-AutomationPost "/ui-action" @{ action = "click"; automationId = "settings-theme-dark" }
+    Pause-Step 1200
+    $null = Invoke-AutomationPost "/ui-action" @{ action = "click"; automationId = "settings-theme-light" }
     Pause-Step 1200
     $null = Invoke-AutomationPost "/action" @{ action = "showTerminal" }
     Pause-Step 1000
@@ -464,7 +467,7 @@ try {
     $null = Invoke-AutomationPost "/ui-action" @{
         action = "invokeMenuItem"
         automationId = "shell-thread-$duplicateThreadId"
-        menuItemText = "Delete"
+        menuItemText = "Clear thread"
     }
     $state = Wait-Until -FailureMessage "Duplicate thread did not delete." -Condition {
         $latestState = Invoke-AutomationGet "/state"

@@ -3,6 +3,7 @@
 
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Windowing;
 using SelfContainedDeployment.Automation;
 using System;
 using System.Collections.Generic;
@@ -21,6 +22,7 @@ namespace SelfContainedDeployment
     public partial class MainWindow : Window
     {
         private readonly NativeWindowRecorder _windowRecorder;
+        private readonly AppWindow _appWindow;
 
         public MainWindow()
         {
@@ -30,9 +32,75 @@ namespace SelfContainedDeployment
             Title = SampleConfig.FeatureName;
 
             HWND hwnd = (HWND)WinRT.Interop.WindowNative.GetWindowHandle(this);
-            LoadIcon(hwnd, "Assets/windows-sdk.ico");
+            _appWindow = ResolveAppWindow(hwnd);
+            Activated += OnWindowActivated;
+            LoadIcon(hwnd, "Assets/winmux.ico");
+            ApplyChromeTheme(SampleConfig.CurrentTheme);
             SetWindowSize(hwnd, 1240, 860);
             PlacementCenterWindowInMonitorWin32(hwnd);
+        }
+
+        internal void ApplyChromeTheme(ElementTheme theme)
+        {
+            if (!AppWindowTitleBar.IsCustomizationSupported() || _appWindow?.TitleBar is not AppWindowTitleBar titleBar)
+            {
+                return;
+            }
+
+            ElementTheme resolvedTheme = ResolveChromeTheme(theme);
+            Windows.UI.Color background = resolvedTheme == ElementTheme.Light
+                ? Windows.UI.Color.FromArgb(0xFF, 0xFA, 0xFA, 0xFA)
+                : Windows.UI.Color.FromArgb(0xFF, 0x09, 0x09, 0x0B);
+            Windows.UI.Color hoverBackground = resolvedTheme == ElementTheme.Light
+                ? Windows.UI.Color.FromArgb(0xFF, 0xF1, 0xF1, 0xF3)
+                : Windows.UI.Color.FromArgb(0xFF, 0x17, 0x19, 0x1E);
+            Windows.UI.Color pressedBackground = resolvedTheme == ElementTheme.Light
+                ? Windows.UI.Color.FromArgb(0xFF, 0xEC, 0xEC, 0xF0)
+                : Windows.UI.Color.FromArgb(0xFF, 0x1F, 0x22, 0x28);
+            Windows.UI.Color foreground = resolvedTheme == ElementTheme.Light
+                ? Windows.UI.Color.FromArgb(0xFF, 0x18, 0x18, 0x1B)
+                : Windows.UI.Color.FromArgb(0xFF, 0xFA, 0xFA, 0xFA);
+            Windows.UI.Color inactiveForeground = resolvedTheme == ElementTheme.Light
+                ? Windows.UI.Color.FromArgb(0xFF, 0x71, 0x71, 0x7A)
+                : Windows.UI.Color.FromArgb(0xFF, 0xA1, 0xA1, 0xAA);
+
+            titleBar.BackgroundColor = background;
+            titleBar.ForegroundColor = foreground;
+            titleBar.InactiveBackgroundColor = background;
+            titleBar.InactiveForegroundColor = inactiveForeground;
+            titleBar.ButtonBackgroundColor = background;
+            titleBar.ButtonForegroundColor = foreground;
+            titleBar.ButtonHoverBackgroundColor = hoverBackground;
+            titleBar.ButtonHoverForegroundColor = foreground;
+            titleBar.ButtonPressedBackgroundColor = pressedBackground;
+            titleBar.ButtonPressedForegroundColor = foreground;
+            titleBar.ButtonInactiveBackgroundColor = background;
+            titleBar.ButtonInactiveForegroundColor = inactiveForeground;
+        }
+
+        private void OnWindowActivated(object sender, WindowActivatedEventArgs args)
+        {
+            ApplyChromeTheme(SampleConfig.CurrentTheme);
+        }
+
+        private ElementTheme ResolveChromeTheme(ElementTheme requestedTheme)
+        {
+            if (requestedTheme == ElementTheme.Light || requestedTheme == ElementTheme.Dark)
+            {
+                return requestedTheme;
+            }
+
+            if (Content is FrameworkElement root && root.ActualTheme == ElementTheme.Light)
+            {
+                return ElementTheme.Light;
+            }
+
+            return ElementTheme.Dark;
+        }
+
+        private static AppWindow ResolveAppWindow(HWND hwnd)
+        {
+            return AppWindow.GetFromWindowId(Microsoft.UI.Win32Interop.GetWindowIdFromWindow(hwnd));
         }
 
         internal MainPage MainPage => Content as MainPage;

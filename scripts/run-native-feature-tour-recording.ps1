@@ -214,7 +214,7 @@ try {
     }
 
     $null = Invoke-AutomationPost "/action" @{ action = "showTerminal" }
-    $null = Invoke-AutomationPost "/action" @{ action = "setTheme"; value = "dark" }
+    $null = Invoke-AutomationPost "/action" @{ action = "setTheme"; value = "light" }
 
     $recordingStart = Invoke-AutomationPost "/recording/start" @{
         fps = $Fps
@@ -377,9 +377,9 @@ try {
         return $null
     } | Out-Null
     Pause-Step 1000
-    $null = Invoke-AutomationPost "/ui-action" @{ action = "click"; automationId = "settings-theme-light" }
-    Pause-Step 1000
     $null = Invoke-AutomationPost "/ui-action" @{ action = "click"; automationId = "settings-theme-dark" }
+    Pause-Step 1000
+    $null = Invoke-AutomationPost "/ui-action" @{ action = "click"; automationId = "settings-theme-light" }
     Pause-Step 1000
     $null = Invoke-AutomationPost "/action" @{ action = "showTerminal" }
     Pause-Step 900

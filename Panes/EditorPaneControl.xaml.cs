@@ -2,15 +2,19 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Dispatching;
 using Microsoft.Web.WebView2.Core;
 using SelfContainedDeployment.Terminal;
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
+using Windows.UI;
 
 namespace SelfContainedDeployment.Panes
 {
@@ -96,13 +100,23 @@ namespace SelfContainedDeployment.Panes
             public string Type { get; set; }
 
             public string Text { get; set; }
+
+            public string RequestId { get; set; }
         }
 
         private sealed class EditorDocumentPayload
         {
+            public string RequestId { get; set; }
+
+            public string Mode { get; set; }
+
             public string Path { get; set; }
 
             public string Text { get; set; }
+
+            public string OriginalText { get; set; }
+
+            public string ModifiedText { get; set; }
 
             public string Language { get; set; }
 
@@ -111,9 +125,22 @@ namespace SelfContainedDeployment.Panes
             public string LineEnding { get; set; }
 
             public bool ReadOnly { get; set; }
+
+            public string LineNumbers { get; set; }
+
+            public string RenderLineHighlight { get; set; }
+
+            public string EmptyTitle { get; set; }
+
+            public string EmptyBody { get; set; }
         }
 
         private readonly List<EditorPaneFileEntry> _files = new();
+        private const string DiffEmptyTitle = "No patch selected";
+        private const string DiffEmptyBody = "Select a changed file from the review list.";
+        private const double MinFitWidthZoomFactor = 0.62;
+        private const double EditorCharacterWidth = 7.45;
+        private const double CompareCharacterWidth = 7.2;
         private Task _initializationTask;
         private bool _loaded;
         private bool _webViewInitialized;
@@ -124,12 +151,26 @@ namespace SelfContainedDeployment.Panes
         private string _selectedRelativePath;
         private string _loadedText = string.Empty;
         private string _currentText = string.Empty;
+        private string _compareOriginalText = string.Empty;
+        private string _compareModifiedText = string.Empty;
+        private string _compareRawDiffText = string.Empty;
         private string _lineEnding = "\n";
         private string _statusText = "Preparing the editor.";
+        private string _diffSummary = "Patch view";
         private Encoding _loadedEncoding = new UTF8Encoding(false);
         private ElementTheme _themePreference = ElementTheme.Default;
         private bool _dirty;
         private bool _readOnly;
+        private readonly DispatcherQueueTimer _layoutTimer;
+        private bool _forceLayoutPending;
+        private double _lastLayoutWidth = -1;
+        private double _lastLayoutHeight = -1;
+        private string _lastAppliedDocumentRequestId;
+        private bool _showCompactHeader = true;
+        private bool _autoFitWidthLocked;
+        private bool _fitWidthRequested;
+        private double _lastAppliedZoomFactor = double.NaN;
+        private int _maxVisibleLineLength;
 
         public EditorPaneControl()
         {
@@ -137,6 +178,14 @@ namespace SelfContainedDeployment.Panes
             PointerPressed += (_, _) => RaiseInteractionRequested();
             GotFocus += (_, _) => RaiseInteractionRequested();
             EditorView.GotFocus += (_, _) => RaiseInteractionRequested();
+            ActualThemeChanged += OnActualThemeChanged;
+            SizeChanged += OnEditorSizeChanged;
+            _layoutTimer = DispatcherQueue.CreateTimer();
+            _layoutTimer.IsRepeating = false;
+            _layoutTimer.Interval = TimeSpan.FromMilliseconds(45);
+            _layoutTimer.Tick += OnLayoutTimerTick;
+            UpdateCompactHeader();
+            ApplyEditorSurfaceTheme();
         }
 
         public event EventHandler<string> TitleChanged;
@@ -165,10 +214,30 @@ namespace SelfContainedDeployment.Panes
 
         public int FileCount => _files.Count;
 
+        public bool DiffModeEnabled { get; set; }
+
+        public bool ShowCompactHeader
+        {
+            get => _showCompactHeader;
+            set
+            {
+                if (_showCompactHeader == value)
+                {
+                    return;
+                }
+
+                _showCompactHeader = value;
+                UpdateCompactHeader();
+            }
+        }
+
         public void ApplyTheme(ElementTheme theme)
         {
             _themePreference = theme;
             RequestedTheme = theme;
+            UpdateCompactHeader();
+            ApplyEditorSurfaceTheme();
+            _ = ApplyEditorShellThemeAsync();
             _ = ApplyEditorThemeAsync();
         }
 
@@ -180,15 +249,29 @@ namespace SelfContainedDeployment.Panes
 
         public void RequestLayout()
         {
-            InvalidateMeasure();
-            InvalidateArrange();
-            UpdateLayout();
-            _ = ExecuteEditorScriptAsync("window.__winmuxEditorHost?.layout?.();");
+            QueueEditorLayout(force: true);
+        }
+
+        public void ApplyFitToWidth(bool autoLock)
+        {
+            _autoFitWidthLocked = autoLock;
+            _fitWidthRequested = true;
+            QueueEditorLayout(force: true);
+        }
+
+        public void SetAutoFitWidth(bool enabled)
+        {
+            _autoFitWidthLocked = enabled;
+            if (enabled)
+            {
+                _fitWidthRequested = true;
+            }
         }
 
         public void DisposePane()
         {
             _disposed = true;
+            _layoutTimer.Stop();
 
             if (EditorView.CoreWebView2 is not null)
             {
@@ -199,6 +282,11 @@ namespace SelfContainedDeployment.Panes
 
         internal async Task OpenFilePathAsync(string path)
         {
+            if (DiffModeEnabled)
+            {
+                return;
+            }
+
             await EnsureInitializedAsync().ConfigureAwait(true);
             await EnsureFileListLoadedAsync().ConfigureAwait(true);
             await OpenFileAsync(path).ConfigureAwait(true);
@@ -206,6 +294,11 @@ namespace SelfContainedDeployment.Panes
 
         internal async Task ReloadCurrentFileAsync()
         {
+            if (DiffModeEnabled)
+            {
+                return;
+            }
+
             await EnsureInitializedAsync().ConfigureAwait(true);
             await EnsureFileListLoadedAsync().ConfigureAwait(true);
 
@@ -221,6 +314,46 @@ namespace SelfContainedDeployment.Panes
         internal async Task SaveCurrentFilePublicAsync()
         {
             await SaveCurrentFileAsync(silent: false).ConfigureAwait(true);
+        }
+
+        internal void SetCompareDocument(string path, string originalText, string modifiedText, string diffText, string summary = null)
+        {
+            DiffModeEnabled = true;
+            _selectedFullPath = null;
+            _selectedRelativePath = string.IsNullOrWhiteSpace(path) ? string.Empty : path.Replace('\\', '/');
+            _compareOriginalText = originalText ?? string.Empty;
+            _compareModifiedText = modifiedText ?? string.Empty;
+            _compareRawDiffText = diffText ?? string.Empty;
+            _loadedText = _compareModifiedText;
+            _currentText = _compareModifiedText;
+            _loadedEncoding = new UTF8Encoding(false);
+            _lineEnding = DetectLineEnding(_compareModifiedText);
+            _dirty = false;
+            _readOnly = true;
+            _diffSummary = string.IsNullOrWhiteSpace(summary)
+                ? (string.IsNullOrWhiteSpace(_selectedRelativePath) ? "Patch review" : "Patch view")
+                : summary;
+            UpdateContentMetrics();
+            SetStatusText(string.IsNullOrWhiteSpace(_selectedRelativePath)
+                ? _diffSummary
+                : $"Reviewing {_selectedRelativePath}");
+            UpdateTitle();
+
+            if (!HasCompareContent() && string.IsNullOrWhiteSpace(_compareRawDiffText))
+            {
+                ShowOverlay(DiffEmptyTitle, DiffEmptyBody);
+            }
+            else if (_editorReady && HasCompareContent())
+            {
+                HideOverlay();
+            }
+            else
+            {
+                ShowOverlay("Loading patch", "Preparing the review surface...");
+            }
+
+            _ = PushDocumentToEditorAsync();
+            RaiseStateChanged();
         }
 
         internal static List<EditorPaneFileEntry> EnumerateProjectFilesForRoot(string rootPath)
@@ -254,7 +387,41 @@ namespace SelfContainedDeployment.Panes
             };
         }
 
-        public void ApplyAutomationIdentity(string paneId)
+        internal DiffPaneRenderSnapshot GetDiffRenderSnapshot(int maxLines = 0)
+        {
+            string rawText = _compareRawDiffText ?? string.Empty;
+            string[] allLines = string.IsNullOrEmpty(rawText)
+                ? Array.Empty<string>()
+                : rawText.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+
+            IEnumerable<(string Line, int Index)> selectedLines = allLines
+                .Select((line, index) => (line, index));
+            if (maxLines > 0)
+            {
+                selectedLines = selectedLines.Take(maxLines);
+            }
+
+            return new DiffPaneRenderSnapshot
+            {
+                Path = _selectedRelativePath ?? string.Empty,
+                Summary = _diffSummary ?? string.Empty,
+                RawText = rawText,
+                LineCount = allLines.Length,
+                Lines = selectedLines.Select(entry =>
+                {
+                    string kind = ClassifyDiffLine(entry.Line);
+                    return new DiffPaneRenderLine
+                    {
+                        Index = entry.Index,
+                        Kind = kind,
+                        Text = entry.Line,
+                        Foreground = SerializeBrush(ResolveDiffBrush(kind)),
+                    };
+                }).ToList(),
+            };
+        }
+
+        public void ApplyAutomationIdentity(string paneId, string automationPrefix = "shell-editor-pane", string viewName = "Code editor")
         {
             if (string.IsNullOrWhiteSpace(paneId))
             {
@@ -262,11 +429,15 @@ namespace SelfContainedDeployment.Panes
             }
 
             _paneId = paneId;
-            AutomationProperties.SetAutomationId(this, $"shell-editor-pane-{paneId}");
-            AutomationProperties.SetName(this, "Editor pane");
-            AutomationProperties.SetAutomationId(EditorRoot, $"shell-editor-pane-root-{paneId}");
-            AutomationProperties.SetAutomationId(EditorView, $"shell-editor-pane-webview-{paneId}");
-            AutomationProperties.SetName(EditorView, "Code editor");
+            AutomationProperties.SetAutomationId(this, $"{automationPrefix}-{paneId}");
+            AutomationProperties.SetName(this, viewName);
+            AutomationProperties.SetAutomationId(EditorRoot, $"{automationPrefix}-root-{paneId}");
+            AutomationProperties.SetAutomationId(EditorHeader, $"{automationPrefix}-header-{paneId}");
+            AutomationProperties.SetName(EditorHeader, $"{viewName} header");
+            AutomationProperties.SetAutomationId(EditorHeaderPathText, $"{automationPrefix}-header-path-{paneId}");
+            AutomationProperties.SetAutomationId(EditorHeaderMetaText, $"{automationPrefix}-header-meta-{paneId}");
+            AutomationProperties.SetAutomationId(EditorView, $"{automationPrefix}-webview-{paneId}");
+            AutomationProperties.SetName(EditorView, viewName);
         }
 
         private async void OnLoaded(object sender, RoutedEventArgs e)
@@ -277,9 +448,16 @@ namespace SelfContainedDeployment.Panes
             }
 
             _loaded = true;
+            UpdateCompactHeader();
+            ApplyEditorSurfaceTheme();
             try
             {
                 await EnsureInitializedAsync().ConfigureAwait(true);
+                if (DiffModeEnabled)
+                {
+                    return;
+                }
+
                 await EnsureFileListLoadedAsync().ConfigureAwait(true);
                 await OpenInitialFileAsync().ConfigureAwait(true);
             }
@@ -292,7 +470,20 @@ namespace SelfContainedDeployment.Panes
 
         private void OnUnloaded(object sender, RoutedEventArgs e)
         {
-            DisposePane();
+            _layoutTimer.Stop();
+        }
+
+        private void OnActualThemeChanged(FrameworkElement sender, object args)
+        {
+            if (_themePreference != ElementTheme.Default)
+            {
+                return;
+            }
+
+            UpdateCompactHeader();
+            ApplyEditorSurfaceTheme();
+            _ = ApplyEditorShellThemeAsync();
+            _ = ApplyEditorThemeAsync();
         }
 
         private async Task EnsureInitializedAsync()
@@ -328,8 +519,8 @@ namespace SelfContainedDeployment.Panes
             }
 
             ConfigureInitializedEditor(core);
-            string editorHostPath = ResolveEditorHostPath();
-            EditorView.Source = new Uri(editorHostPath);
+            Uri editorHostUri = BuildEditorHostUri();
+            EditorView.Source = editorHostUri;
             _webViewInitialized = true;
             ShowOverlay("Loading editor", "Preparing the code surface...");
         }
@@ -380,6 +571,8 @@ namespace SelfContainedDeployment.Panes
                 return;
             }
 
+            ApplyEditorSurfaceTheme();
+            _ = ApplyEditorShellThemeAsync();
             _ = ApplyEditorThemeAsync();
         }
 
@@ -395,18 +588,51 @@ namespace SelfContainedDeployment.Panes
             {
                 case "ready":
                     _editorReady = true;
-                    HideOverlay();
                     await PushDocumentToEditorAsync().ConfigureAwait(true);
+                    if (DiffModeEnabled)
+                    {
+                        if (!HasCompareContent())
+                        {
+                            ShowOverlay(DiffEmptyTitle, DiffEmptyBody);
+                        }
+                        else
+                        {
+                            HideOverlay();
+                        }
+                    }
+                    else
+                    {
+                        HideOverlay();
+                    }
+
+                    QueueEditorLayout(force: true);
                     break;
                 case "contentchanged":
                     _currentText = message.Text ?? string.Empty;
                     _dirty = !string.Equals(_currentText, _loadedText, StringComparison.Ordinal);
+                    UpdateContentMetrics();
                     SetStatusText(_dirty
                         ? $"{_selectedRelativePath} - unsaved changes"
                         : string.IsNullOrWhiteSpace(_selectedRelativePath)
                             ? "Select a file to start editing."
                             : $"Editing {_selectedRelativePath}");
+                    if (_autoFitWidthLocked)
+                    {
+                        QueueEditorLayout(force: true);
+                    }
                     RaiseStateChanged();
+                    break;
+                case "documentapplied":
+                    if (!string.IsNullOrWhiteSpace(message.RequestId))
+                    {
+                        _lastAppliedDocumentRequestId = message.RequestId;
+                    }
+
+                    if (_fitWidthRequested || _autoFitWidthLocked)
+                    {
+                        QueueEditorLayout(force: true);
+                    }
+
                     break;
                 case "saverequested":
                     await SaveCurrentFileAsync(silent: false).ConfigureAwait(true);
@@ -474,6 +700,7 @@ namespace SelfContainedDeployment.Panes
                 _loadedText = string.Empty;
                 _dirty = false;
                 _readOnly = false;
+                UpdateContentMetrics();
                 SetStatusText("No editable files were found in this project.");
                 ShowOverlay("No file selected", "Use the Files inspector tab to open a file.");
                 await PushDocumentToEditorAsync().ConfigureAwait(true);
@@ -537,6 +764,7 @@ namespace SelfContainedDeployment.Panes
                     _lineEnding = "\n";
                     _dirty = false;
                     _readOnly = true;
+                    UpdateContentMetrics();
                     SetStatusText("This file looks binary and cannot be edited here.");
                     UpdateTitle();
                     ShowOverlay("File unavailable", "This file looks binary and cannot be edited in the GUI editor.");
@@ -554,6 +782,7 @@ namespace SelfContainedDeployment.Panes
                 _currentText = text;
                 _dirty = false;
                 _readOnly = false;
+                UpdateContentMetrics();
                 SetStatusText($"Editing {relativePath}");
                 UpdateTitle();
                 HideOverlay();
@@ -570,6 +799,7 @@ namespace SelfContainedDeployment.Panes
                 _lineEnding = "\n";
                 _dirty = false;
                 _readOnly = true;
+                UpdateContentMetrics();
                 SetStatusText($"Could not load file: {ex.Message}");
                 UpdateTitle();
                 ShowOverlay("File unavailable", ex.Message);
@@ -580,7 +810,7 @@ namespace SelfContainedDeployment.Panes
 
         private async Task<bool> SaveCurrentFileAsync(bool silent, bool skipIfClean = false)
         {
-            if (string.IsNullOrWhiteSpace(_selectedFullPath) || _readOnly)
+            if (DiffModeEnabled || string.IsNullOrWhiteSpace(_selectedFullPath) || _readOnly)
             {
                 return true;
             }
@@ -612,6 +842,7 @@ namespace SelfContainedDeployment.Panes
                 _loadedText = textToWrite;
                 _currentText = textToWrite;
                 _dirty = false;
+                UpdateContentMetrics();
                 SetStatusText($"Saved {_selectedRelativePath}");
                 await PushDocumentToEditorAsync().ConfigureAwait(true);
                 RaiseStateChanged();
@@ -632,20 +863,33 @@ namespace SelfContainedDeployment.Panes
                 return;
             }
 
+            string requestId = Guid.NewGuid().ToString("N");
             EditorDocumentPayload payload = new()
             {
+                RequestId = requestId,
+                Mode = DiffModeEnabled ? "compare" : "file",
                 Path = _selectedRelativePath ?? string.Empty,
-                Text = _currentText ?? string.Empty,
+                Text = DiffModeEnabled ? (_compareModifiedText ?? string.Empty) : (_currentText ?? string.Empty),
+                OriginalText = DiffModeEnabled ? (_compareOriginalText ?? string.Empty) : string.Empty,
+                ModifiedText = DiffModeEnabled ? (_compareModifiedText ?? string.Empty) : string.Empty,
                 Language = ResolveLanguage(_selectedRelativePath),
-                Theme = ResolveThemeName(_themePreference),
+                Theme = ResolveCurrentThemeName(),
                 LineEnding = _lineEnding,
-                ReadOnly = _readOnly || string.IsNullOrWhiteSpace(_selectedFullPath),
+                ReadOnly = DiffModeEnabled || _readOnly || string.IsNullOrWhiteSpace(_selectedFullPath),
+                LineNumbers = "on",
+                RenderLineHighlight = DiffModeEnabled ? "line" : "gutter",
+                EmptyTitle = DiffModeEnabled ? DiffEmptyTitle : "No file selected",
+                EmptyBody = DiffModeEnabled ? DiffEmptyBody : "Use the Files tab in the inspector to open a file.",
             };
 
-            string json = JsonSerializer.Serialize(payload, JsonOptions)
-                .Replace("\\", "\\\\", StringComparison.Ordinal)
-                .Replace("'", "\\'", StringComparison.Ordinal);
-            await ExecuteEditorScriptAsync($"window.__winmuxEditorHost?.setDocument?.(JSON.parse('{json}'));").ConfigureAwait(true);
+            PostEditorMessage("document", payload);
+            await Task.Delay(140).ConfigureAwait(true);
+            if (!string.Equals(_lastAppliedDocumentRequestId, requestId, StringComparison.Ordinal))
+            {
+                string json = JsonSerializer.Serialize(payload, JsonOptions);
+                string base64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(json));
+                await ExecuteEditorScriptAsync($"window.__winmuxEditorHost?.setDocument?.(JSON.parse(atob('{base64}')));").ConfigureAwait(true);
+            }
         }
 
         private async Task ApplyEditorThemeAsync()
@@ -655,8 +899,70 @@ namespace SelfContainedDeployment.Panes
                 return;
             }
 
-            string theme = ResolveThemeName(_themePreference);
+            string theme = ResolveCurrentThemeName();
             await ExecuteEditorScriptAsync($"window.__winmuxEditorHost?.setTheme?.('{theme}');").ConfigureAwait(true);
+        }
+
+        private async Task ApplyEditorShellThemeAsync()
+        {
+            string theme = ResolveCurrentThemeName();
+            await ExecuteEditorScriptAsync(
+                $"(() => {{ document.documentElement.dataset.theme = '{theme}'; if (document.body) document.body.dataset.theme = '{theme}'; }})()")
+                .ConfigureAwait(true);
+        }
+
+        private void ApplyEditorSurfaceTheme()
+        {
+            Color backgroundColor = ResolveCurrentThemeName() == "light"
+                ? Color.FromArgb(0xFF, 0xFF, 0xFF, 0xFF)
+                : Color.FromArgb(0xFF, 0x11, 0x12, 0x14);
+
+            if (EditorView is not null)
+            {
+                EditorView.DefaultBackgroundColor = backgroundColor;
+            }
+        }
+
+        private void OnEditorSizeChanged(object sender, SizeChangedEventArgs e)
+        {
+            if (e.NewSize.Width <= 1 || e.NewSize.Height <= 1)
+            {
+                return;
+            }
+
+            QueueEditorLayout(force: false);
+        }
+
+        private void QueueEditorLayout(bool force)
+        {
+            _forceLayoutPending |= force;
+            _layoutTimer.Stop();
+            _layoutTimer.Start();
+        }
+
+        private async void OnLayoutTimerTick(DispatcherQueueTimer sender, object args)
+        {
+            _layoutTimer.Stop();
+
+            double width = Math.Round(ActualWidth);
+            double height = Math.Round(ActualHeight);
+            if (width <= 1 || height <= 1)
+            {
+                return;
+            }
+
+            if (!_forceLayoutPending &&
+                Math.Abs(_lastLayoutWidth - width) < 1 &&
+                Math.Abs(_lastLayoutHeight - height) < 1)
+            {
+                return;
+            }
+
+            _lastLayoutWidth = width;
+            _lastLayoutHeight = height;
+            _forceLayoutPending = false;
+            await ExecuteEditorScriptAsync("window.__winmuxEditorHost?.layout?.();").ConfigureAwait(true);
+            await ApplyFitWidthAsync().ConfigureAwait(true);
         }
 
         private async Task ExecuteEditorScriptAsync(string script)
@@ -675,10 +981,31 @@ namespace SelfContainedDeployment.Panes
             }
         }
 
+        private void PostEditorMessage<TPayload>(string type, TPayload payload)
+        {
+            if (_disposed || !_webViewInitialized || EditorView.CoreWebView2 is null || string.IsNullOrWhiteSpace(type))
+            {
+                return;
+            }
+
+            try
+            {
+                string json = JsonSerializer.Serialize(new
+                {
+                    type,
+                    payload,
+                }, JsonOptions);
+                EditorView.CoreWebView2.PostWebMessageAsString(json);
+            }
+            catch
+            {
+            }
+        }
+
         private void UpdateTitle()
         {
             string title = string.IsNullOrWhiteSpace(_selectedRelativePath)
-                ? "Editor"
+                ? (DiffModeEnabled ? "Patch review" : "Editor")
                 : Path.GetFileName(_selectedRelativePath);
             TitleChanged?.Invoke(this, title);
         }
@@ -698,6 +1025,7 @@ namespace SelfContainedDeployment.Panes
         private void SetStatusText(string status)
         {
             _statusText = status ?? string.Empty;
+            UpdateCompactHeader();
         }
 
         private void RaiseInteractionRequested()
@@ -708,6 +1036,202 @@ namespace SelfContainedDeployment.Panes
         private void RaiseStateChanged()
         {
             StateChanged?.Invoke(this, EventArgs.Empty);
+        }
+
+        private bool HasCompareContent()
+        {
+            return !string.IsNullOrWhiteSpace(_compareOriginalText) ||
+                !string.IsNullOrWhiteSpace(_compareModifiedText);
+        }
+
+        private void UpdateCompactHeader()
+        {
+            if (EditorHeader is null)
+            {
+                return;
+            }
+
+            EditorHeader.Visibility = _showCompactHeader ? Visibility.Visible : Visibility.Collapsed;
+            if (!_showCompactHeader)
+            {
+                return;
+            }
+
+            EditorHeaderPathText.Text = string.IsNullOrWhiteSpace(_selectedRelativePath)
+                ? (DiffModeEnabled ? "Patch review" : "No file selected")
+                : _selectedRelativePath.Replace('\\', '/');
+            EditorHeaderMetaText.Text = ResolveHeaderMetaText();
+        }
+
+        private string ResolveHeaderMetaText()
+        {
+            if (DiffModeEnabled)
+            {
+                return string.IsNullOrWhiteSpace(_diffSummary) ? "Patch view" : _diffSummary;
+            }
+
+            if (_readOnly)
+            {
+                return "Read only";
+            }
+
+            if (_dirty)
+            {
+                return "Unsaved";
+            }
+
+            return string.IsNullOrWhiteSpace(_selectedRelativePath) ? "Waiting" : "Ready";
+        }
+
+        private void UpdateContentMetrics()
+        {
+            _maxVisibleLineLength = DiffModeEnabled
+                ? Math.Max(
+                    Math.Max(EstimateLongestLineLength(_compareOriginalText), EstimateLongestLineLength(_compareModifiedText)),
+                    EstimateLongestLineLength(_compareRawDiffText))
+                : EstimateLongestLineLength(_currentText);
+
+            if (_autoFitWidthLocked)
+            {
+                _fitWidthRequested = true;
+            }
+        }
+
+        private static int EstimateLongestLineLength(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return 0;
+            }
+
+            int longest = 0;
+            int current = 0;
+            foreach (char ch in text)
+            {
+                if (ch == '\r')
+                {
+                    continue;
+                }
+
+                if (ch == '\n')
+                {
+                    if (current > longest)
+                    {
+                        longest = current;
+                    }
+
+                    current = 0;
+                    continue;
+                }
+
+                current++;
+            }
+
+            return Math.Max(longest, current);
+        }
+
+        private async Task ApplyFitWidthAsync()
+        {
+            if ((!_fitWidthRequested && !_autoFitWidthLocked) || _disposed || !_webViewInitialized || EditorView.CoreWebView2 is null)
+            {
+                return;
+            }
+
+            double availableWidth = Math.Max(0, EditorRoot.ActualWidth - 24);
+            if (_showCompactHeader && EditorHeader is not null)
+            {
+                availableWidth = Math.Max(0, availableWidth - 6);
+            }
+
+            if (availableWidth <= 1)
+            {
+                return;
+            }
+
+            double estimatedWidth = EstimateDesiredContentWidth();
+            double zoomFactor = estimatedWidth <= 0
+                ? 1.0
+                : Math.Clamp(availableWidth / estimatedWidth, MinFitWidthZoomFactor, 1.0);
+            zoomFactor = zoomFactor >= 0.98 ? 1.0 : zoomFactor;
+            if (!double.IsNaN(_lastAppliedZoomFactor) && Math.Abs(_lastAppliedZoomFactor - zoomFactor) < 0.01)
+            {
+                _fitWidthRequested = false;
+                return;
+            }
+
+            string zoomText = zoomFactor.ToString("0.###", CultureInfo.InvariantCulture);
+            _lastAppliedZoomFactor = zoomFactor;
+            _fitWidthRequested = false;
+            await ExecuteEditorScriptAsync(
+                $"(() => {{ document.documentElement.style.zoom = '{zoomText}'; if (document.body) document.body.style.zoom = '{zoomText}'; }})()")
+                .ConfigureAwait(true);
+        }
+
+        private double EstimateDesiredContentWidth()
+        {
+            int maxLineLength = Math.Max(_maxVisibleLineLength, 24);
+            double gutterWidth = DiffModeEnabled ? 128d : 96d;
+            double paddingWidth = DiffModeEnabled ? 64d : 44d;
+            double characterWidth = DiffModeEnabled ? CompareCharacterWidth : EditorCharacterWidth;
+            return gutterWidth + paddingWidth + (maxLineLength * characterWidth);
+        }
+
+        private Brush ResolveDiffBrush(string kind)
+        {
+            string key = kind switch
+            {
+                "addition" => "ShellSuccessBrush",
+                "deletion" => "ShellDangerBrush",
+                "hunk" => "ShellInfoBrush",
+                "metadata" => "ShellTextSecondaryBrush",
+                "empty" => "ShellTextSecondaryBrush",
+                _ => "ShellTextPrimaryBrush",
+            };
+            return (Brush)Application.Current.Resources[key];
+        }
+
+        private static string ClassifyDiffLine(string line)
+        {
+            if (string.IsNullOrEmpty(line))
+            {
+                return "empty";
+            }
+
+            if (line.StartsWith("+", StringComparison.Ordinal) && !line.StartsWith("+++", StringComparison.Ordinal))
+            {
+                return "addition";
+            }
+
+            if (line.StartsWith("-", StringComparison.Ordinal) && !line.StartsWith("---", StringComparison.Ordinal))
+            {
+                return "deletion";
+            }
+
+            if (line.StartsWith("@@", StringComparison.Ordinal))
+            {
+                return "hunk";
+            }
+
+            if (line.StartsWith("diff ", StringComparison.Ordinal) ||
+                line.StartsWith("index ", StringComparison.Ordinal) ||
+                line.StartsWith("---", StringComparison.Ordinal) ||
+                line.StartsWith("+++", StringComparison.Ordinal) ||
+                line.StartsWith("\\", StringComparison.Ordinal))
+            {
+                return "metadata";
+            }
+
+            return "context";
+        }
+
+        private static string SerializeBrush(Brush brush)
+        {
+            return brush switch
+            {
+                SolidColorBrush solid => $"#{solid.Color.A:X2}{solid.Color.R:X2}{solid.Color.G:X2}{solid.Color.B:X2}",
+                null => null,
+                _ => brush.GetType().Name,
+            };
         }
 
         private static string ResolveEditorHostPath()
@@ -723,6 +1247,32 @@ namespace SelfContainedDeployment.Panes
             }
 
             return Path.Combine(AppContext.BaseDirectory, "Web", "editor-host.html");
+        }
+
+        private Uri BuildEditorHostUri()
+        {
+            Uri baseUri = new(ResolveEditorHostPath());
+            string theme = ResolveCurrentThemeName();
+            UriBuilder builder = new(baseUri)
+            {
+                Query = $"theme={theme}",
+            };
+            return builder.Uri;
+        }
+
+        private string ResolveCurrentThemeName()
+        {
+            ElementTheme resolvedTheme = _themePreference == ElementTheme.Default ? ActualTheme : _themePreference;
+            if (resolvedTheme == ElementTheme.Default)
+            {
+                resolvedTheme = SelfContainedDeployment.MainPage.Current?.ActualTheme == ElementTheme.Light
+                    ? ElementTheme.Light
+                    : SelfContainedDeployment.SampleConfig.CurrentTheme == ElementTheme.Light
+                        ? ElementTheme.Light
+                        : ElementTheme.Dark;
+            }
+
+            return ResolveThemeName(resolvedTheme);
         }
 
         private static string ResolveThemeName(ElementTheme theme)

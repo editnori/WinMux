@@ -75,6 +75,8 @@ namespace SelfContainedDeployment.Persistence
 
         public double SecondarySplitRatio { get; set; }
 
+        public bool AutoFitPaneContentLocked { get; set; }
+
         public List<GitCheckpointSessionSnapshot> DiffCheckpoints { get; set; } = new();
 
         public List<PaneSessionSnapshot> Panes { get; set; } = new();
@@ -118,11 +120,17 @@ namespace SelfContainedDeployment.Persistence
 
         public string Path { get; set; }
 
+        public string OriginalPath { get; set; }
+
         public int AddedLines { get; set; }
 
         public int RemovedLines { get; set; }
 
         public string DiffText { get; set; }
+
+        public string OriginalText { get; set; }
+
+        public string ModifiedText { get; set; }
     }
 
     internal sealed class PaneSessionSnapshot

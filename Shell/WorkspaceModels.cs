@@ -443,6 +443,10 @@ namespace SelfContainedDeployment.Shell
 
         public double SecondarySplitRatio { get; set; } = 0.5;
 
+        public bool AutoFitPaneContentLocked { get; set; }
+
+        public string ZoomedPaneId { get; set; }
+
         public List<WorkspacePaneRecord> Panes { get; } = new();
 
         internal List<WorkspaceDiffCheckpoint> DiffCheckpoints { get; } = new();
@@ -478,6 +482,8 @@ namespace SelfContainedDeployment.Shell
         public bool ReplayRestorePending { get; set; }
 
         public bool ReplayRestoreFailed { get; set; }
+
+        public bool RequiresAttention { get; set; }
 
         public bool PersistExitedState { get; set; }
 
@@ -587,14 +593,14 @@ namespace SelfContainedDeployment.Shell
 
     public sealed class DiffPaneRecord : WorkspacePaneRecord
     {
-        public DiffPaneRecord(string title, DiffPaneControl diffPane, string diffPath = null, string id = null)
+        public DiffPaneRecord(string title, DiffPaneHostControl diffPane, string diffPath = null, string id = null)
             : base(title, WorkspacePaneKind.Diff, id)
         {
             DiffPane = diffPane;
             DiffPath = diffPath;
         }
 
-        public DiffPaneControl DiffPane { get; }
+        public DiffPaneHostControl DiffPane { get; }
 
         public string DiffPath { get; set; }
 
@@ -606,8 +612,6 @@ namespace SelfContainedDeployment.Shell
 
         public override void RequestLayout() => DiffPane.RequestLayout();
 
-        public override void DisposePane()
-        {
-        }
+        public override void DisposePane() => DiffPane.DisposePane();
     }
 }

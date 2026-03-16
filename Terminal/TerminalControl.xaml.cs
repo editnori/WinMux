@@ -29,6 +29,7 @@ namespace SelfContainedDeployment.Terminal
         private static readonly Regex CodexResumeInlineRegex = new(@"^codex\s+resume\s+([0-9a-f-]+)\s*(.*)$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
         private static readonly Regex ClaudeResumeInlineRegex = new(@"^claude\s+--resume\s+([0-9a-f-]+)\s*(.*)$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
         private static readonly Regex AnsiEscapeRegex = new(@"\u001B(?:\[[0-9;?]*[ -/]*[@-~]|\][^\u0007]*\u0007)", RegexOptions.Compiled);
+        private static readonly Regex ShellPromptRegex = new(@"(?:^|\n)\s*(?:[>$#]|❯|\?)\s*$", RegexOptions.Compiled);
 
         private ConPtyConnection _connection;
         private Task _initializationTask;
@@ -54,16 +55,21 @@ namespace SelfContainedDeployment.Terminal
         private readonly Dictionary<string, TaskCompletionSource<NativeAutomationTerminalSnapshot>> _inspectionRequests = new();
         private readonly DispatcherQueueTimer _fitTimer;
         private readonly DispatcherQueueTimer _replayRestoreTimer;
+        private string _activeToolSession;
         private string _replayTool;
         private string _replaySessionId;
         private string _replayCommand;
         private string _restoreReplayCommand;
         private string _toolLaunchArguments;
+        private string _headerTitleOverride;
 
         public event EventHandler<string> SessionTitleChanged;
         public event EventHandler RendererReady;
         public event EventHandler SessionExited;
         public event EventHandler InteractionRequested;
+        public event EventHandler OutputActivity;
+        public event EventHandler ToolInteractionCompleted;
+        public event EventHandler ToolSessionStateChanged;
         public event EventHandler ReplayStateChanged;
         public event EventHandler ReplayRestoreStateChanged;
 
@@ -84,6 +90,7 @@ namespace SelfContainedDeployment.Terminal
             _replayRestoreTimer.Tick += OnReplayRestoreTimerTick;
             ApplyBackgroundColor();
             UpdateStartupMask();
+            UpdateTerminalHeader();
         }
 
         public string ShellCommand { get; set; }
@@ -110,6 +117,8 @@ namespace SelfContainedDeployment.Terminal
 
         public string SessionTitle => _sessionTitle;
 
+        public string HeaderTitleOverride => _headerTitleOverride;
+
         public string InitialTitleHint => GetInitialTitle();
 
         public string ReplayTool => _replayTool;
@@ -121,6 +130,10 @@ namespace SelfContainedDeployment.Terminal
         public bool ReplayRestorePending => _replayRestorePending;
 
         public bool ReplayRestoreFailed => _replayRestoreFailed;
+
+        public string ActiveToolSession => _activeToolSession;
+
+        public bool HasLiveToolSession => !_sessionExited && !string.IsNullOrWhiteSpace(_activeToolSession);
 
         private void LogTerminalEvent(string name, string message = null, IReadOnlyDictionary<string, string> data = null)
         {
@@ -135,6 +148,7 @@ namespace SelfContainedDeployment.Terminal
         private async void OnLoaded(object sender, RoutedEventArgs e)
         {
             UpdateStartupMask();
+            UpdateTerminalHeader();
             await EnsureInitializedAsync();
         }
 
@@ -411,6 +425,7 @@ namespace SelfContainedDeployment.Terminal
 
                 AppendOutput(text);
                 UpdateReplayCommandFromOutput();
+                UpdateLiveToolSessionFromOutput();
                 if (ContainsDisplayText(text))
                 {
                     _hasDisplayOutput = true;
@@ -425,6 +440,7 @@ namespace SelfContainedDeployment.Terminal
 
                 PostMessage(new HostMessage { Type = "output", Data = text });
                 HideStatus();
+                OutputActivity?.Invoke(this, EventArgs.Empty);
             });
         }
 
@@ -439,6 +455,7 @@ namespace SelfContainedDeployment.Terminal
 
                 _started = false;
                 _sessionExited = true;
+                SetActiveToolSession(null);
                 HideStartupMask();
                 PostMessage(new HostMessage { Type = "exit", Text = "Shell exited. Close the tab or open a new one." });
                 if (_replayRestorePending)
@@ -478,8 +495,22 @@ namespace SelfContainedDeployment.Terminal
         public void ApplyTheme(ElementTheme theme)
         {
             _themePreference = theme;
+            RequestedTheme = theme;
             ApplyBackgroundColor();
+            UpdateTerminalHeader();
             PostCurrentTheme();
+        }
+
+        public void SetHeaderTitleOverride(string title)
+        {
+            string normalized = string.IsNullOrWhiteSpace(title) ? null : title.Trim();
+            if (string.Equals(_headerTitleOverride, normalized, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _headerTitleOverride = normalized;
+            UpdateTerminalHeader();
         }
 
         public void SendInput(string text)
@@ -721,6 +752,7 @@ namespace SelfContainedDeployment.Terminal
             {
                 ["title"] = normalizedTitle,
             });
+            UpdateTerminalHeader();
             SessionTitleChanged?.Invoke(this, normalizedTitle);
         }
 
@@ -917,6 +949,7 @@ namespace SelfContainedDeployment.Terminal
             string trimmed = line.Trim();
             if (trimmed.StartsWith("codex", StringComparison.OrdinalIgnoreCase))
             {
+                SetActiveToolSession("codex");
                 _replayTool = "codex";
                 Match resumeMatch = CodexResumeInlineRegex.Match(trimmed);
                 if (resumeMatch.Success)
@@ -931,6 +964,7 @@ namespace SelfContainedDeployment.Terminal
 
             if (trimmed.StartsWith("claude", StringComparison.OrdinalIgnoreCase))
             {
+                SetActiveToolSession("claude");
                 _replayTool = "claude";
                 Match resumeMatch = ClaudeResumeInlineRegex.Match(trimmed);
                 if (resumeMatch.Success)
@@ -985,6 +1019,47 @@ namespace SelfContainedDeployment.Terminal
             _replaySessionId = sessionId;
             _replayCommand = command;
             return true;
+        }
+
+        private void UpdateLiveToolSessionFromOutput()
+        {
+            if (string.IsNullOrWhiteSpace(_activeToolSession))
+            {
+                return;
+            }
+
+            string buffer = _outputBuffer.ToString();
+            if (buffer.Length > 2000)
+            {
+                buffer = buffer[^2000..];
+            }
+
+            string sanitized = AnsiEscapeRegex.Replace(buffer, string.Empty)
+                .Replace("\r\n", "\n", StringComparison.Ordinal)
+                .Replace('\r', '\n');
+            if (ShellPromptRegex.IsMatch(sanitized))
+            {
+                SetActiveToolSession(null);
+            }
+        }
+
+        private void SetActiveToolSession(string tool)
+        {
+            string previous = _activeToolSession;
+            string normalized = string.IsNullOrWhiteSpace(tool)
+                ? null
+                : tool.Trim().ToLowerInvariant();
+            if (string.Equals(previous, normalized, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _activeToolSession = normalized;
+            ToolSessionStateChanged?.Invoke(this, EventArgs.Empty);
+            if (!string.IsNullOrWhiteSpace(previous) && string.IsNullOrWhiteSpace(normalized))
+            {
+                ToolInteractionCompleted?.Invoke(this, EventArgs.Empty);
+            }
         }
 
         private static string BuildReplayCommand(string tool, string sessionId, string arguments)
@@ -1076,6 +1151,7 @@ namespace SelfContainedDeployment.Terminal
         private void OnActualThemeChanged(FrameworkElement sender, object args)
         {
             ApplyBackgroundColor();
+            UpdateTerminalHeader();
             if (_themePreference == ElementTheme.Default)
             {
                 PostCurrentTheme();
@@ -1159,6 +1235,8 @@ namespace SelfContainedDeployment.Terminal
 
                 StartupDetailText.Text = detail;
             }
+
+            UpdateTerminalHeader();
         }
 
         private string ResolveStartupTitle()
@@ -1368,6 +1446,7 @@ namespace SelfContainedDeployment.Terminal
         {
             StatusText.Text = text;
             StatusBadge.Visibility = Visibility.Visible;
+            UpdateTerminalHeader();
             LogTerminalEvent("status.shown", text);
 
             if (!keepVisible)
@@ -1379,6 +1458,43 @@ namespace SelfContainedDeployment.Terminal
         private void HideStatus()
         {
             StatusBadge.Visibility = Visibility.Collapsed;
+            UpdateTerminalHeader();
+        }
+
+        private void UpdateTerminalHeader()
+        {
+            if (TerminalHeaderTitleText is null || TerminalHeaderMetaText is null)
+            {
+                return;
+            }
+
+            TerminalHeaderTitleText.Text = string.IsNullOrWhiteSpace(_sessionTitle) ? "Terminal" : _sessionTitle;
+            if (!string.IsNullOrWhiteSpace(_headerTitleOverride))
+            {
+                TerminalHeaderTitleText.Text = _headerTitleOverride;
+            }
+            TerminalHeaderMetaText.Text = ResolveTerminalHeaderMeta();
+        }
+
+        private string ResolveTerminalHeaderMeta()
+        {
+            if (StatusBadge?.Visibility == Visibility.Visible && !string.IsNullOrWhiteSpace(StatusText?.Text))
+            {
+                return StatusText.Text;
+            }
+
+            string detail = DisplayWorkingDirectory;
+            if (string.IsNullOrWhiteSpace(detail))
+            {
+                detail = InitialWorkingDirectory;
+            }
+
+            if (!AutoStartSession && !string.IsNullOrWhiteSpace(SuspendedStatusText))
+            {
+                detail = SuspendedStatusText;
+            }
+
+            return string.IsNullOrWhiteSpace(detail) ? "Interactive shell" : detail;
         }
 
         private sealed class RendererMessage
