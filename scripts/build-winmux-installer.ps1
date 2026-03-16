@@ -4,7 +4,10 @@ param(
     [string]$OutputPath = "",
     [string]$AppVersion = "0.0.0-local",
     [string]$InnoSetupCompilerPath = "",
-    [string]$InstallerScriptPath = ""
+    [string]$InstallerScriptPath = "",
+    [string]$WebView2BootstrapperPath = "",
+    [string]$WebView2BootstrapperUrl = "https://go.microsoft.com/fwlink/p/?LinkId=2124703&clcid=0x409",
+    [switch]$SkipWebView2Bootstrapper
 )
 
 $ErrorActionPreference = "Stop"
@@ -65,6 +68,45 @@ function Convert-ToNumericVersion {
     return (($parts | Select-Object -First 4) -join ".")
 }
 
+function Resolve-WebView2BootstrapperPath {
+    param(
+        [string]$PreferredPath,
+        [string]$DownloadUrl,
+        [string]$DownloadDirectory
+    )
+
+    $candidates = [System.Collections.Generic.List[string]]::new()
+
+    if (-not [string]::IsNullOrWhiteSpace($PreferredPath)) {
+        $candidates.Add($PreferredPath)
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($env:WEBVIEW2_BOOTSTRAPPER_PATH)) {
+        $candidates.Add($env:WEBVIEW2_BOOTSTRAPPER_PATH)
+    }
+
+    foreach ($candidate in $candidates | Select-Object -Unique) {
+        if (Test-Path $candidate) {
+            return (Resolve-Path $candidate).Path
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($DownloadUrl)) {
+        throw "WebView2 bootstrapper path not provided and no download URL was configured."
+    }
+
+    New-Item -ItemType Directory -Path $DownloadDirectory -Force | Out-Null
+    $downloadPath = Join-Path $DownloadDirectory "MicrosoftEdgeWebview2Setup.exe"
+
+    Invoke-WebRequest -Uri $DownloadUrl -OutFile $downloadPath
+
+    if (-not (Test-Path $downloadPath)) {
+        throw "Failed to download WebView2 bootstrapper from '$DownloadUrl'."
+    }
+
+    return $downloadPath
+}
+
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $publishDirectory = (Resolve-Path $PublishDirectory).Path
 
@@ -87,24 +129,43 @@ $outputDirectory = Split-Path $outputPath -Parent
 $outputBaseFilename = [System.IO.Path]::GetFileNameWithoutExtension($outputPath)
 $innoSetupCompilerPath = Resolve-InnoSetupCompilerPath -PreferredPath $InnoSetupCompilerPath
 $numericVersion = Convert-ToNumericVersion -Version $AppVersion
+$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("winmux-installer-" + [Guid]::NewGuid().ToString("N"))
+$resolvedWebView2BootstrapperPath = $null
 
 New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
 
-$arguments = @(
-    "/Qp",
-    "/DPublishDir=$publishDirectory",
-    "/DOutputDir=$outputDirectory",
-    "/DOutputBaseFilename=$outputBaseFilename",
-    "/DAppVersion=$AppVersion",
-    "/DAppVersionNumeric=$numericVersion",
-    "/DRepoRoot=$repoRoot",
-    $installerScriptPath
-)
+try {
+    if (-not $SkipWebView2Bootstrapper) {
+        $resolvedWebView2BootstrapperPath = Resolve-WebView2BootstrapperPath `
+            -PreferredPath $WebView2BootstrapperPath `
+            -DownloadUrl $WebView2BootstrapperUrl `
+            -DownloadDirectory $tempRoot
+    }
 
-& $innoSetupCompilerPath @arguments
+    $arguments = @(
+        "/Qp",
+        "/DPublishDir=$publishDirectory",
+        "/DOutputDir=$outputDirectory",
+        "/DOutputBaseFilename=$outputBaseFilename",
+        "/DAppVersion=$AppVersion",
+        "/DAppVersionNumeric=$numericVersion",
+        "/DRepoRoot=$repoRoot"
+    )
 
-if (-not (Test-Path $outputPath)) {
-    throw "Installer build completed but '$outputPath' was not created."
+    if (-not [string]::IsNullOrWhiteSpace($resolvedWebView2BootstrapperPath)) {
+        $arguments += "/DWebView2BootstrapperFile=$resolvedWebView2BootstrapperPath"
+    }
+
+    $arguments += $installerScriptPath
+
+    & $innoSetupCompilerPath @arguments
+
+    if (-not (Test-Path $outputPath)) {
+        throw "Installer build completed but '$outputPath' was not created."
+    }
+}
+finally {
+    Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 [pscustomobject]@{
@@ -114,4 +175,5 @@ if (-not (Test-Path $outputPath)) {
     innoSetupCompilerPath = $innoSetupCompilerPath
     outputPath = $outputPath
     publishDirectory = $publishDirectory
+    webView2BootstrapperPath = $resolvedWebView2BootstrapperPath
 } | ConvertTo-Json -Depth 5

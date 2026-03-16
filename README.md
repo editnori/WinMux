@@ -146,6 +146,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-winmux-insta
   -AppVersion 0.1.0
 ```
 
+The installer now bundles a WebView2 bootstrapper for machines that do not already have the runtime, excludes release `.pdb` files, uses a branded wizard header, and defaults to a faster non-solid compression profile so installation feels smoother.
+
 Tagged pushes like `alpha-v0.1.0` run `.github/workflows/windows-release.yml`, publish the x64 build, compile the installer, and attach `WinMux-win-x64-installer.exe` directly to the GitHub Release.
 
 ## Repo structure
