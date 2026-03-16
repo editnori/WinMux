@@ -29,6 +29,7 @@ namespace SelfContainedDeployment.Panes
         private const string SharedBrowserProfileFolderName = "browser-profile-shared";
         private const string LegacyBrowserProfilesFolderName = "browser-profiles";
         private const string ProfileSeedMetadataFileName = "profile-source.json";
+        private const int CurrentProfileSeedFormatVersion = 1;
         private const double CompactPaneWidthThreshold = 560;
         private const double CompactPaneHeightThreshold = 320;
         private const double CompactBrowserZoomFloor = 0.72;
@@ -97,6 +98,10 @@ namespace SelfContainedDeployment.Panes
             public string ProfileDisplayName { get; set; }
 
             public string ImportedAtUtc { get; set; }
+
+            public int SeedFormatVersion { get; set; }
+
+            public bool RepairComplete { get; set; }
         }
 
         private static readonly string[] ChromiumProfileFilesToSeed =
@@ -1894,6 +1899,14 @@ namespace SelfContainedDeployment.Panes
                 return;
             }
 
+            bool requiresSeedRepair = RequiresSharedProfileSeed(hasExistingEntries, existingMetadata);
+            if (!requiresSeedRepair)
+            {
+                _profileSeedSource = source;
+                _profileSeedStatus = $"Reusing shared browser profile from {existingMetadata.BrowserName} · {existingMetadata.ProfileDisplayName}";
+                return;
+            }
+
             try
             {
                 Stopwatch stopwatch = Stopwatch.StartNew();
@@ -1906,10 +1919,11 @@ namespace SelfContainedDeployment.Panes
                     ["targetRoot"] = targetRoot,
                 });
 
-                bool overwriteExisting = ShouldOverwriteExistingSeed(hasExistingEntries, existingMetadata, source);
+                bool overwriteExisting = ShouldOverwriteExistingSeed(hasExistingEntries, existingMetadata);
                 SeedCopySummary summary = CopyChromiumProfileSeed(source, targetRoot, overwriteExisting: overwriteExisting);
                 string sourceLabel = FormatProfileSeedLabel(source);
                 string eventName;
+                bool repairComplete = summary.SkippedFiles == 0;
 
                 stopwatch.Stop();
                 if (!hasExistingEntries)
@@ -1926,13 +1940,15 @@ namespace SelfContainedDeployment.Panes
                 }
                 else
                 {
+                    SaveProfileSeedMetadata(targetRoot, source, repairComplete);
+                    _profileSeedSource = source;
                     _profileSeedStatus = existingMetadata is null
                         ? $"Reusing shared browser profile from {sourceLabel}"
                         : $"Reusing shared browser profile from {existingMetadata.BrowserName} · {existingMetadata.ProfileDisplayName}";
                     return;
                 }
 
-                SaveProfileSeedMetadata(targetRoot, source);
+                SaveProfileSeedMetadata(targetRoot, source, repairComplete);
                 _profileSeedSource = source;
                 LogBrowserEvent(eventName, $"Seeded browser profile from {source.UserDataRoot}", new Dictionary<string, string>
                 {
@@ -2030,10 +2046,7 @@ namespace SelfContainedDeployment.Panes
                 : $"{source.BrowserName} · {source.ProfileDisplayName}";
         }
 
-        private static bool ShouldOverwriteExistingSeed(
-            bool hasExistingEntries,
-            ProfileSeedMetadata existingMetadata,
-            ChromiumProfileSeedSource source)
+        private static bool RequiresSharedProfileSeed(bool hasExistingEntries, ProfileSeedMetadata existingMetadata)
         {
             if (!hasExistingEntries)
             {
@@ -2045,14 +2058,21 @@ namespace SelfContainedDeployment.Panes
                 return true;
             }
 
-            if (source is null)
+            return existingMetadata.SeedFormatVersion < CurrentProfileSeedFormatVersion ||
+                !existingMetadata.RepairComplete;
+        }
+
+        private static bool ShouldOverwriteExistingSeed(
+            bool hasExistingEntries,
+            ProfileSeedMetadata existingMetadata)
+        {
+            if (!hasExistingEntries)
             {
-                return false;
+                return true;
             }
 
-            return !string.Equals(existingMetadata.BrowserName, source.BrowserName, StringComparison.OrdinalIgnoreCase) ||
-                !string.Equals(existingMetadata.UserDataRoot, source.UserDataRoot, StringComparison.OrdinalIgnoreCase) ||
-                !string.Equals(existingMetadata.ProfileDirectoryName, source.ProfileDirectoryName, StringComparison.OrdinalIgnoreCase);
+            return existingMetadata is null ||
+                existingMetadata.SeedFormatVersion < CurrentProfileSeedFormatVersion;
         }
 
         private static ProfileSeedMetadata TryLoadProfileSeedMetadata(string targetRoot)
@@ -2074,7 +2094,7 @@ namespace SelfContainedDeployment.Panes
             }
         }
 
-        private static void SaveProfileSeedMetadata(string targetRoot, ChromiumProfileSeedSource source)
+        private static void SaveProfileSeedMetadata(string targetRoot, ChromiumProfileSeedSource source, bool repairComplete)
         {
             if (string.IsNullOrWhiteSpace(targetRoot) || source is null)
             {
@@ -2088,6 +2108,8 @@ namespace SelfContainedDeployment.Panes
                 ProfileDirectoryName = source.ProfileDirectoryName,
                 ProfileDisplayName = source.ProfileDisplayName,
                 ImportedAtUtc = DateTimeOffset.UtcNow.ToString("O"),
+                SeedFormatVersion = CurrentProfileSeedFormatVersion,
+                RepairComplete = repairComplete,
             };
 
             string metadataPath = Path.Combine(targetRoot, ProfileSeedMetadataFileName);

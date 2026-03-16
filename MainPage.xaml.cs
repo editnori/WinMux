@@ -1739,20 +1739,22 @@ namespace SelfContainedDeployment
 
             InspectorDirectoryRootText.Text = directoryTitle;
             ToolTipService.SetToolTip(InspectorDirectoryRootText, ShellProfiles.ResolveDisplayPath(rootPath, _activeProject?.ShellProfileId ?? SampleConfig.DefaultShellProfileId));
+            bool bypassFileCache = false;
             bool shouldRebuild = forceRebuild ||
                 !string.Equals(_lastInspectorDirectoryRootPath, rootPath, StringComparison.OrdinalIgnoreCase);
-            if (!shouldRebuild && ResolveDisplayedGitSnapshot()?.ChangedFiles is IReadOnlyList<GitChangedFile> liveFiles)
+            if (ResolveDisplayedGitSnapshot()?.ChangedFiles is IReadOnlyList<GitChangedFile> liveFiles)
             {
                 string renderKey = string.Join("|", liveFiles.Select(file => $"{file.Path}:{file.Status}:{file.AddedLines}:{file.RemovedLines}"));
                 if (!string.Equals(InspectorDirectoryTree.Tag as string, renderKey, StringComparison.Ordinal))
                 {
                     shouldRebuild = true;
+                    bypassFileCache = true;
                 }
             }
 
             if (shouldRebuild)
             {
-                BuildInspectorDirectoryTree(rootPath, bypassCache: forceRebuild);
+                BuildInspectorDirectoryTree(rootPath, bypassCache: bypassFileCache);
                 _lastInspectorDirectoryRootPath = rootPath;
             }
 

@@ -143,12 +143,12 @@ Install Inno Setup 6 so `ISCC.exe` is available on your machine, then build the 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-winmux-installer.ps1 `
   -PublishDirectory .\bin\Release\net8.0-windows10.0.19041.0\win-x64\publish `
-  -AppVersion 0.1.0
+  -AppVersion 0.1.3
 ```
 
 The installer now bundles a WebView2 bootstrapper for machines that do not already have the runtime, excludes release `.pdb` files, uses a branded wizard header, and defaults to a faster non-solid compression profile so installation feels smoother.
 
-Tagged pushes like `alpha-v0.1.0` run `.github/workflows/windows-release.yml`, publish the x64 build, compile the installer, and attach `WinMux-win-x64-installer.exe` directly to the GitHub Release.
+Tagged pushes like `alpha-v0.1.3` run `.github/workflows/windows-release.yml`, publish the x64 build, compile the installer, and attach `WinMux-win-x64-installer.exe` directly to the GitHub Release.
 
 ## Repo structure
 
