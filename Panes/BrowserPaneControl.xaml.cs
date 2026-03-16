@@ -1906,7 +1906,8 @@ namespace SelfContainedDeployment.Panes
                     ["targetRoot"] = targetRoot,
                 });
 
-                SeedCopySummary summary = CopyChromiumProfileSeed(source, targetRoot, overwriteExisting: !hasExistingEntries);
+                bool overwriteExisting = ShouldOverwriteExistingSeed(hasExistingEntries, existingMetadata, source);
+                SeedCopySummary summary = CopyChromiumProfileSeed(source, targetRoot, overwriteExisting: overwriteExisting);
                 string sourceLabel = FormatProfileSeedLabel(source);
                 string eventName;
 
@@ -2027,6 +2028,31 @@ namespace SelfContainedDeployment.Panes
             return string.IsNullOrWhiteSpace(source.ProfileDisplayName)
                 ? source.BrowserName ?? "Chromium"
                 : $"{source.BrowserName} · {source.ProfileDisplayName}";
+        }
+
+        private static bool ShouldOverwriteExistingSeed(
+            bool hasExistingEntries,
+            ProfileSeedMetadata existingMetadata,
+            ChromiumProfileSeedSource source)
+        {
+            if (!hasExistingEntries)
+            {
+                return true;
+            }
+
+            if (existingMetadata is null)
+            {
+                return true;
+            }
+
+            if (source is null)
+            {
+                return false;
+            }
+
+            return !string.Equals(existingMetadata.BrowserName, source.BrowserName, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(existingMetadata.UserDataRoot, source.UserDataRoot, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(existingMetadata.ProfileDirectoryName, source.ProfileDirectoryName, StringComparison.OrdinalIgnoreCase);
         }
 
         private static ProfileSeedMetadata TryLoadProfileSeedMetadata(string targetRoot)

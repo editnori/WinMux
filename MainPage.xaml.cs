@@ -1752,7 +1752,7 @@ namespace SelfContainedDeployment
 
             if (shouldRebuild)
             {
-                BuildInspectorDirectoryTree(rootPath);
+                BuildInspectorDirectoryTree(rootPath, bypassCache: forceRebuild);
                 _lastInspectorDirectoryRootPath = rootPath;
             }
 
@@ -1765,14 +1765,14 @@ namespace SelfContainedDeployment
             UpdateInspectorFileActionState();
         }
 
-        private void BuildInspectorDirectoryTree(string rootPath)
+        private void BuildInspectorDirectoryTree(string rootPath, bool bypassCache = false)
         {
             _inspectorDirectoryNodesByPath.Clear();
             _inspectorDirectoryItemsByNode.Clear();
             InspectorDirectoryTree.SelectedNode = null;
             InspectorDirectoryTree.RootNodes.Clear();
 
-            List<EditorPaneFileEntry> files = EditorPaneControl.EnumerateProjectFilesForRoot(rootPath);
+            List<EditorPaneFileEntry> files = EditorPaneControl.EnumerateProjectFilesForRoot(rootPath, bypassCache);
             IReadOnlyList<GitChangedFile> changedFiles = ResolveDisplayedGitSnapshot()?.ChangedFiles?.ToList() ?? new List<GitChangedFile>();
             Dictionary<string, InspectorDirectoryDecoration> decorationsByPath = BuildInspectorDirectoryDecorations(changedFiles);
             InspectorDirectoryTree.Tag = string.Join("|", changedFiles.Select(file => $"{file.Path}:{file.Status}:{file.AddedLines}:{file.RemovedLines}"));

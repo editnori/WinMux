@@ -369,9 +369,9 @@ namespace SelfContainedDeployment.Panes
             RaiseStateChanged();
         }
 
-        internal static List<EditorPaneFileEntry> EnumerateProjectFilesForRoot(string rootPath)
+        internal static List<EditorPaneFileEntry> EnumerateProjectFilesForRoot(string rootPath, bool bypassCache = false)
         {
-            return EnumerateProjectFiles(rootPath);
+            return EnumerateProjectFiles(rootPath, bypassCache);
         }
 
         internal EditorPaneRenderSnapshot GetRenderSnapshot(int maxChars = 0, int maxFiles = 0)
@@ -1341,7 +1341,7 @@ namespace SelfContainedDeployment.Panes
                 : normalized;
         }
 
-        private static List<EditorPaneFileEntry> EnumerateProjectFiles(string rootPath)
+        private static List<EditorPaneFileEntry> EnumerateProjectFiles(string rootPath, bool bypassCache = false)
         {
             string normalizedRootPath = NormalizeRootPath(rootPath);
             if (string.IsNullOrWhiteSpace(normalizedRootPath) || !Directory.Exists(normalizedRootPath))
@@ -1349,12 +1349,15 @@ namespace SelfContainedDeployment.Panes
                 return new List<EditorPaneFileEntry>();
             }
 
-            lock (ProjectFileCacheGate)
+            if (!bypassCache)
             {
-                if (ProjectFileCache.TryGetValue(normalizedRootPath, out CachedProjectFileSnapshot cached) &&
-                    DateTimeOffset.UtcNow - cached.CapturedAt <= ProjectFileCacheLifetime)
+                lock (ProjectFileCacheGate)
                 {
-                    return CloneFileEntries(cached.Files);
+                    if (ProjectFileCache.TryGetValue(normalizedRootPath, out CachedProjectFileSnapshot cached) &&
+                        DateTimeOffset.UtcNow - cached.CapturedAt <= ProjectFileCacheLifetime)
+                    {
+                        return CloneFileEntries(cached.Files);
+                    }
                 }
             }
 
