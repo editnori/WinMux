@@ -25,7 +25,9 @@ try {
 catch {
 }
 
-Get-Process SelfContainedDeployment -ErrorAction SilentlyContinue | Stop-Process -Force
+@("WinMux", "SelfContainedDeployment") | ForEach-Object {
+    Get-Process $_ -ErrorAction SilentlyContinue | Stop-Process -Force
+}
 Start-Sleep -Milliseconds 750
 
 if (-not $SkipBuild) {
@@ -45,7 +47,8 @@ function Resolve-AppExecutablePath {
         return $null
     }
 
-    return Get-ChildItem -Path $candidateRoot -Filter "SelfContainedDeployment.exe" -Recurse -File |
+    return Get-ChildItem -Path $candidateRoot -Filter "*.exe" -Recurse -File |
+        Where-Object { $_.Name -in @("WinMux.exe", "SelfContainedDeployment.exe") } |
         Sort-Object LastWriteTimeUtc -Descending |
         Select-Object -First 1 -ExpandProperty FullName
 }

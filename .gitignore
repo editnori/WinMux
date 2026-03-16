@@ -6,3 +6,10 @@ obj/
 node_modules/
 tmp/
 file_12E1A98C-BEA9-4026-807A-453C1E51FB4D.jpeg
+
+# Local-only markdown notes
+/AGENTS.md
+/ASKS_AUDIT.md
+/NEXT_AGENT_HANDOFF.md
+*.local.md
+*.scratch.md

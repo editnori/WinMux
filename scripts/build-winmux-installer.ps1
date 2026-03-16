@@ -2,83 +2,116 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$PublishDirectory,
     [string]$OutputPath = "",
-    [string]$InstallPath = "%LocalAppData%\\Programs\\WinMux",
-    [string]$SevenZipPath = "C:\Users\lqassem\scoop\shims\7z.exe",
-    [string]$SevenZipSfxPath = "C:\Users\lqassem\scoop\apps\7zip\current\7z.sfx"
+    [string]$AppVersion = "0.0.0-local",
+    [string]$InnoSetupCompilerPath = "",
+    [string]$InstallerScriptPath = ""
 )
 
 $ErrorActionPreference = "Stop"
 
+function Resolve-InnoSetupCompilerPath {
+    param(
+        [string]$PreferredPath
+    )
+
+    $candidates = [System.Collections.Generic.List[string]]::new()
+
+    if (-not [string]::IsNullOrWhiteSpace($PreferredPath)) {
+        $candidates.Add($PreferredPath)
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($env:ISCC_PATH)) {
+        $candidates.Add($env:ISCC_PATH)
+    }
+
+    $command = Get-Command "iscc.exe" -ErrorAction SilentlyContinue
+    if ($null -ne $command -and -not [string]::IsNullOrWhiteSpace($command.Source)) {
+        $candidates.Add($command.Source)
+    }
+
+    $candidates.Add("C:\Program Files (x86)\Inno Setup 6\ISCC.exe")
+    $candidates.Add("C:\Program Files\Inno Setup 6\ISCC.exe")
+
+    foreach ($candidate in $candidates | Select-Object -Unique) {
+        if (Test-Path $candidate) {
+            return (Resolve-Path $candidate).Path
+        }
+    }
+
+    throw "Inno Setup compiler not found. Install Inno Setup 6 or pass -InnoSetupCompilerPath."
+}
+
+function Convert-ToNumericVersion {
+    param(
+        [string]$Version
+    )
+
+    $match = [System.Text.RegularExpressions.Regex]::Match($Version, '\d+(?:\.\d+){0,3}')
+    if (-not $match.Success) {
+        return "0.0.0.0"
+    }
+
+    $parts = [System.Collections.Generic.List[string]]::new()
+    foreach ($part in $match.Value.Split('.')) {
+        if (-not [string]::IsNullOrWhiteSpace($part)) {
+            $parts.Add($part)
+        }
+    }
+
+    while ($parts.Count -lt 4) {
+        $parts.Add("0")
+    }
+
+    return (($parts | Select-Object -First 4) -join ".")
+}
+
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $publishDirectory = (Resolve-Path $PublishDirectory).Path
+
 if (-not (Test-Path (Join-Path $publishDirectory "WinMux.exe"))) {
     throw "Publish directory '$publishDirectory' does not contain WinMux.exe."
 }
+
+if ([string]::IsNullOrWhiteSpace($InstallerScriptPath)) {
+    $InstallerScriptPath = Join-Path $repoRoot "installer\WinMuxInstaller.iss"
+}
+
+$installerScriptPath = (Resolve-Path $InstallerScriptPath).Path
 
 if ([string]::IsNullOrWhiteSpace($OutputPath)) {
     $OutputPath = Join-Path (Split-Path $publishDirectory -Parent) "WinMux-win-x64-installer.exe"
 }
 
-if (-not (Test-Path $SevenZipPath)) {
-    throw "7-Zip executable not found at '$SevenZipPath'."
-}
-
-if (-not (Test-Path $SevenZipSfxPath)) {
-    throw "7-Zip SFX module not found at '$SevenZipSfxPath'."
-}
-
 $outputPath = [System.IO.Path]::GetFullPath($OutputPath)
 $outputDirectory = Split-Path $outputPath -Parent
+$outputBaseFilename = [System.IO.Path]::GetFileNameWithoutExtension($outputPath)
+$innoSetupCompilerPath = Resolve-InnoSetupCompilerPath -PreferredPath $InnoSetupCompilerPath
+$numericVersion = Convert-ToNumericVersion -Version $AppVersion
+
 New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
 
-$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("winmux-installer-" + [Guid]::NewGuid().ToString("N"))
-$archivePath = Join-Path $tempRoot "payload.7z"
-$configPath = Join-Path $tempRoot "config.txt"
-New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+$arguments = @(
+    "/Qp",
+    "/DPublishDir=$publishDirectory",
+    "/DOutputDir=$outputDirectory",
+    "/DOutputBaseFilename=$outputBaseFilename",
+    "/DAppVersion=$AppVersion",
+    "/DAppVersionNumeric=$numericVersion",
+    "/DRepoRoot=$repoRoot",
+    $installerScriptPath
+)
 
-try {
-    Push-Location $publishDirectory
-    & $SevenZipPath a -t7z -mx=9 -mmt=on $archivePath * | Out-Null
-    Pop-Location
+& $innoSetupCompilerPath @arguments
 
-    $config = @"
-;!@Install@!UTF-8!
-Title="WinMux"
-BeginPrompt="Install WinMux to $InstallPath ?"
-ExtractTitle="Installing WinMux"
-ExtractDialogText="Extracting WinMux files..."
-InstallPath="$InstallPath"
-OverwriteMode="2"
-RunProgram="WinMux.exe"
-GUIMode="1"
-;!@InstallEnd@!
-"@
-    [System.IO.File]::WriteAllText($configPath, $config, [System.Text.UTF8Encoding]::new($false))
-
-    $sfxBytes = [System.IO.File]::ReadAllBytes($SevenZipSfxPath)
-    $configBytes = [System.IO.File]::ReadAllBytes($configPath)
-    $archiveBytes = [System.IO.File]::ReadAllBytes($archivePath)
-
-    $stream = [System.IO.File]::Open($outputPath, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
-    try {
-        $stream.Write($sfxBytes, 0, $sfxBytes.Length)
-        $stream.Write($configBytes, 0, $configBytes.Length)
-        $stream.Write($archiveBytes, 0, $archiveBytes.Length)
-    }
-    finally {
-        $stream.Dispose()
-    }
-
-    [pscustomobject]@{
-        ok = $true
-        outputPath = $outputPath
-        publishDirectory = $publishDirectory
-        installPath = $InstallPath
-    } | ConvertTo-Json -Depth 5
+if (-not (Test-Path $outputPath)) {
+    throw "Installer build completed but '$outputPath' was not created."
 }
-finally {
-    if (Get-Location | Where-Object { $_.Path -eq $publishDirectory }) {
-        Pop-Location
-    }
 
-    Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
-}
+[pscustomobject]@{
+    ok = $true
+    appVersion = $AppVersion
+    installerScriptPath = $installerScriptPath
+    innoSetupCompilerPath = $innoSetupCompilerPath
+    outputPath = $outputPath
+    publishDirectory = $publishDirectory
+} | ConvertTo-Json -Depth 5

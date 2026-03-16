@@ -1,0 +1,85 @@
+name: Windows Release
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build-installer:
+    runs-on: windows-2022
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: 1
+      NUGET_XMLDOC_MODE: skip
+      INSTALLER_PATH: ${{ github.workspace }}\artifacts\WinMux-win-x64-installer.exe
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Compute build metadata
+        id: meta
+        run: |
+          if ("${{ github.ref_type }}" -eq "tag") {
+            $version = "${{ github.ref_name }}".TrimStart("v")
+          }
+          else {
+            $version = "0.0.0-ci.${{ github.run_number }}"
+          }
+
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Install Inno Setup
+        run: choco install innosetup --yes --no-progress
+
+      - name: Publish WinMux x64
+        run: |
+          & "C:\Program Files\dotnet\dotnet.exe" publish .\SelfContainedDeployment.csproj `
+            -c Release `
+            -p:Platform=x64 `
+            -p:RuntimeIdentifier=win-x64 `
+            -p:PublishProfile=Properties\PublishProfiles\win10-x64.pubxml `
+            -p:Version=${{ steps.meta.outputs.version }}
+
+      - name: Locate publish directory
+        id: publish
+        run: |
+          $publishExe = Get-ChildItem -Path .\bin -Filter WinMux.exe -Recurse -File |
+            Where-Object { $_.FullName -like "*\publish\WinMux.exe" } |
+            Sort-Object LastWriteTimeUtc -Descending |
+            Select-Object -First 1
+
+          if ($null -eq $publishExe) {
+            throw "Could not locate WinMux.exe inside a publish directory."
+          }
+
+          "directory=$($publishExe.Directory.FullName)" >> $env:GITHUB_OUTPUT
+
+      - name: Build installer
+        run: |
+          & .\scripts\build-winmux-installer.ps1 `
+            -PublishDirectory "${{ steps.publish.outputs.directory }}" `
+            -OutputPath "$env:INSTALLER_PATH" `
+            -AppVersion "${{ steps.meta.outputs.version }}"
+
+      - name: Upload release asset
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: WinMux ${{ github.ref_name }}
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          files: ${{ env.INSTALLER_PATH }}

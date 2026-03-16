@@ -9,24 +9,24 @@ It combines terminals, browser panes, editor panes, patch review, worktree-aware
 ## Download
 
 - [Latest Windows installer (.exe)](https://github.com/editnori/WinMux/releases/latest/download/WinMux-win-x64-installer.exe)
-- [Latest portable build (.zip)](https://github.com/editnori/WinMux/releases/latest/download/WinMux-win-x64.zip)
 - [Latest release notes and assets](https://github.com/editnori/WinMux/releases/latest)
 
-The installer extracts WinMux to `%LocalAppData%\Programs\WinMux` and launches it. The zip is the portable self-contained build if you want the raw files instead.
+The release asset is a real installer `.exe` that installs WinMux under `%LocalAppData%\Programs\WinMux` and can launch it immediately after setup.
 
 ## Demo
 
-[![Watch the WinMux demo](docs/media/winmux-demo-preview.gif)](https://github.com/editnori/WinMux/releases/latest/download/WinMux-demo.mp4)
+[![Watch the WinMux demo](docs/media/winmux-demo-preview.gif)](docs/media/winmux-demo.mp4)
 
-[Watch the full demo video](https://github.com/editnori/WinMux/releases/latest/download/WinMux-demo.mp4)
+[Watch the overview clip](docs/media/winmux-demo.mp4)
 
-The demo shows:
+The overview clip shows:
 
-- dense multi-pane terminal, editor, browser, and diff workspaces
-- project and thread organization with worktree-aware flows
-- inline review and file navigation
-- session persistence and fast shell switching
-- Bun-driven native automation so LLMs can inspect and control the real app
+- a dense quad-pane workspace with terminal, editor, browser, and diff review in one shell
+- project and thread flows with overflow behavior instead of endlessly shrinking panes
+- inspector-side file navigation and live git context while review panes stay in the workspace
+- the real native app being driven and captured through the built-in automation surface
+
+![WinMux overview](docs/media/winmux-overview-light.png)
 
 ## What WinMux does
 
@@ -138,12 +138,15 @@ For an x64 release publish:
 
 The publish output lands under the standard `bin/Release/.../publish/` path for the target runtime.
 
-To build the self-extracting installer used on the release page:
+Install Inno Setup 6 so `ISCC.exe` is available on your machine, then build the installer used on the release page:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-winmux-installer.ps1 `
-  -PublishDirectory .\bin\x64\Release\net8.0-windows10.0.19041.0\win-x64\publish
+  -PublishDirectory .\bin\Release\net8.0-windows10.0.19041.0\win-x64\publish `
+  -AppVersion 0.1.0
 ```
+
+Tagged pushes like `v0.1.0` run `.github/workflows/windows-release.yml`, publish the x64 build, compile the installer, and attach `WinMux-win-x64-installer.exe` directly to the GitHub Release.
 
 ## Repo structure
 
