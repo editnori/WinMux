@@ -4,6 +4,21 @@ WinMux is a native Windows workspace shell built with WinUI 3, ConPTY, and WebVi
 
 It combines terminals, browser panes, editor panes, patch review, worktree-aware threads, session restore, and a full native automation surface that can be driven from Bun. The repo is set up so a human can use the shell directly while an LLM can inspect, drive, screenshot, and record the exact same native app.
 
+![WinMux light-mode workspace](docs/media/winmux-overview-light.png)
+
+## Download
+
+- [Latest Windows x64 build](https://github.com/editnori/WinMux/releases/latest/download/WinMux-win-x64.zip)
+- [Latest release notes and assets](https://github.com/editnori/WinMux/releases/latest)
+
+The release build is a self-contained Windows package. Download the zip, extract it, and launch `WinMux.exe`.
+
+## Demo videos
+
+- [Overview demo](https://github.com/editnori/WinMux/releases/latest/download/winmux-overview.mp4)
+- [Workspace showcase](https://github.com/editnori/WinMux/releases/latest/download/winmux-workspace-showcase.mp4)
+- [Feature tour](https://github.com/editnori/WinMux/releases/latest/download/winmux-feature-tour.mp4)
+
 ## What WinMux does
 
 - Native WinUI 3 shell with a dense multi-pane workspace.

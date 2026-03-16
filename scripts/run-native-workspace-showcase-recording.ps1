@@ -400,25 +400,64 @@ try {
     Pause-Step 1200
 
     $null = Invoke-AutomationPost "/action" @{ action = "refreshDiff" }
-    Wait-Until -FailureMessage "Git diff state did not refresh for the workspace showcase project." -Condition {
+    $diffSnapshotState = Wait-Until -FailureMessage "Git diff state did not refresh for the workspace showcase project." -Condition {
         $latestState = Invoke-AutomationGet "/state"
-        if ($latestState.projectId -eq $workspaceProjectId -and $latestState.changedFileCount -ge 1) {
-            return $latestState
+        $latestProject = Get-ProjectById -State $latestState -ProjectId $workspaceProjectId
+        $latestThread = if ($null -eq $latestProject) { $null } else { Get-ThreadById -Project $latestProject -ThreadId $workspaceThreadId }
+        if ($null -eq $latestThread) {
+            return $null
+        }
+
+        if ($latestState.projectId -eq $workspaceProjectId -and
+            $latestThread.changedFileCount -ge 1 -and
+            -not [string]::IsNullOrWhiteSpace($latestThread.selectedDiffPath)) {
+            return [pscustomobject]@{
+                State = $latestState
+                Thread = $latestThread
+            }
         }
 
         return $null
-    } -Attempts 40 -DelayMilliseconds 300 | Out-Null
-    $null = Invoke-AutomationPost "/action" @{ action = "selectDiffFile"; value = "notes.txt" }
-    Pause-Step 1400
-    $latestState = Invoke-AutomationGet "/state"
-    $latestProject = Get-ProjectById -State $latestState -ProjectId $latestState.projectId
-    $latestThread = Get-ThreadById -Project $latestProject -ThreadId $workspaceThreadId
-    $diffTab = @($latestThread.tabs) | Where-Object { $_.kind -eq "diff" } | Select-Object -First 1
-    if ($null -eq $diffTab) {
-        throw "The workspace showcase diff pane did not appear."
+    } -Attempts 50 -DelayMilliseconds 300
+
+    $diffPath = if (-not [string]::IsNullOrWhiteSpace($diffSnapshotState.Thread.selectedDiffPath)) {
+        [string]$diffSnapshotState.Thread.selectedDiffPath
+    } else {
+        "notes.txt"
     }
 
-    $diffTabId = $diffTab.id
+    $null = Invoke-AutomationPost "/action" @{ action = "selectDiffFile"; value = $diffPath }
+    $diffSelection = Wait-Until -FailureMessage "The workspace showcase diff pane did not appear." -Condition {
+        $latestState = Invoke-AutomationGet "/state"
+        $latestProject = Get-ProjectById -State $latestState -ProjectId $workspaceProjectId
+        $latestThread = if ($null -eq $latestProject) { $null } else { Get-ThreadById -Project $latestProject -ThreadId $workspaceThreadId }
+        if ($null -eq $latestThread) {
+            return $null
+        }
+
+        $diffTab = @($latestThread.tabs) | Where-Object { $_.kind -eq "diff" } | Select-Object -First 1
+        if ($null -eq $diffTab -or $latestThread.selectedDiffPath -ne $diffPath) {
+            return $null
+        }
+
+        $diffState = Invoke-AutomationPost "/diff-state" @{ paneId = $diffTab.id; maxLines = 20 }
+        $diffPane = @($diffState.panes) | Where-Object { $_.paneId -eq $diffTab.id } | Select-Object -First 1
+        if ($null -eq $diffPane) {
+            return $null
+        }
+
+        if ($diffPane.path -eq $diffPath -and $diffPane.hasDiff -eq $true) {
+            return [pscustomobject]@{
+                State = $latestState
+                Thread = $latestThread
+                DiffTab = $diffTab
+            }
+        }
+
+        return $null
+    } -Attempts 45 -DelayMilliseconds 300
+
+    $diffTabId = $diffSelection.DiffTab.id
     Pause-Step 1200
 
     $null = Invoke-AutomationPost "/action" @{ action = "setLayout"; threadId = $workspaceThreadId; value = "quad" }

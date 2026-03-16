@@ -203,6 +203,33 @@ function Wait-ForDiffPaneReady {
     } -Attempts 40 -DelayMilliseconds 300
 }
 
+function Wait-ForThreadDiffSnapshot {
+    param(
+        [string]$ProjectId,
+        [string]$ThreadId
+    )
+
+    return Wait-Until -FailureMessage "Git diff state did not refresh for the feature-tour project." -Condition {
+        $latestState = Invoke-AutomationGet "/state"
+        $latestProject = Get-ProjectById -State $latestState -ProjectId $ProjectId
+        $latestThread = if ($null -eq $latestProject) { $null } else { Get-ThreadById -Project $latestProject -ThreadId $ThreadId }
+        if ($null -eq $latestThread) {
+            return $null
+        }
+
+        if ($latestState.projectId -eq $ProjectId -and
+            $latestThread.changedFileCount -ge 1 -and
+            -not [string]::IsNullOrWhiteSpace($latestThread.selectedDiffPath)) {
+            return [pscustomobject]@{
+                State = $latestState
+                Thread = $latestThread
+            }
+        }
+
+        return $null
+    } -Attempts 50 -DelayMilliseconds 300
+}
+
 Initialize-FeatureTourGitRepo -Path $tempProjectPath
 
 $recordingStop = $null
@@ -344,7 +371,11 @@ try {
 
         return $null
     }
+    $latestProject = Get-ProjectById -State $state -ProjectId $featureProjectId
+    $latestThread = Get-ThreadById -Project $latestProject -ThreadId $featureThreadId
+    $browserTab = @($latestThread.tabs) | Where-Object { $_.kind -eq "browser" } | Select-Object -First 1
     Pause-Step 1200
+    $null = Invoke-AutomationPost "/events/clear" $null
     $null = Invoke-AutomationPost "/action" @{ action = "navigateBrowser"; value = "https://example.com" }
     Wait-Until -FailureMessage "Browser did not complete navigation." -Condition {
         $events = Invoke-AutomationGet "/events"
@@ -357,8 +388,8 @@ try {
     Pause-Step 1400
     $null = Invoke-AutomationPost "/action" @{ action = "newBrowserTab"; value = "https://example.org" }
     Wait-Until -FailureMessage "Browser tab did not appear." -Condition {
-        $browserState = Invoke-AutomationPost "/browser-state" @{}
-        $pane = @($browserState.panes) | Select-Object -First 1
+        $browserState = Invoke-AutomationPost "/browser-state" @{ paneId = $browserTab.id }
+        $pane = @($browserState.panes) | Where-Object { $_.paneId -eq $browserTab.id } | Select-Object -First 1
         if ($null -ne $pane -and $pane.tabCount -ge 2) {
             return $pane
         }
@@ -387,16 +418,14 @@ try {
     $null = Invoke-AutomationPost "/action" @{ action = "setTheme"; value = "light" }
     Pause-Step 900
     $null = Invoke-AutomationPost "/action" @{ action = "refreshDiff" }
-    Wait-Until -FailureMessage "Git diff state did not refresh for the feature-tour project." -Condition {
-        $latestState = Invoke-AutomationGet "/state"
-        if ($latestState.projectId -eq $featureProjectId -and $latestState.changedFileCount -ge 1) {
-            return $latestState
-        }
-
-        return $null
-    } | Out-Null
-    $null = Invoke-AutomationPost "/action" @{ action = "selectDiffFile"; value = "notes.txt" }
-    $diffReady = Wait-ForDiffPaneReady -ThreadId $featureThreadId -Path "notes.txt"
+    $diffSnapshot = Wait-ForThreadDiffSnapshot -ProjectId $featureProjectId -ThreadId $featureThreadId
+    $diffPath = if (-not [string]::IsNullOrWhiteSpace($diffSnapshot.Thread.selectedDiffPath)) {
+        [string]$diffSnapshot.Thread.selectedDiffPath
+    } else {
+        "notes.txt"
+    }
+    $null = Invoke-AutomationPost "/action" @{ action = "selectDiffFile"; value = $diffPath }
+    $diffReady = Wait-ForDiffPaneReady -ThreadId $featureThreadId -Path $diffPath
     $null = Invoke-AutomationPost "/action" @{ action = "selectTab"; tabId = $diffReady.DiffTab.id }
     Pause-Step 1400
 
