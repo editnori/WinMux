@@ -4982,10 +4982,6 @@ namespace SelfContainedDeployment
             PaneWorkspaceGrid.Children.Add(border);
             UpdatePaneZoomButtonState(border, pane);
 
-            if (pane is BrowserPaneRecord browserPane)
-            {
-                _ = browserPane.Browser.EnsureInitializedAsync();
-            }
         }
 
         private Grid BuildPaneContainerContent(WorkspacePaneRecord pane)

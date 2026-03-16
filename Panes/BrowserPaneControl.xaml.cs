@@ -9,6 +9,7 @@ using SelfContainedDeployment.Automation;
 using SelfContainedDeployment.Browser;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Globalization;
 using System.Net;
@@ -102,42 +103,15 @@ namespace SelfContainedDeployment.Panes
         {
             "Bookmarks",
             "Bookmarks.bak",
-            "Account Web Data",
-            "Account Web Data-journal",
-            "Affiliation Database",
-            "Affiliation Database-journal",
-            "Favicons",
-            "Favicons-journal",
-            "History",
-            "History-journal",
-            "Last Tabs",
-            "Last Session",
-            "Login Data",
-            "Login Data For Account",
-            "Login Data-journal",
             "Preferences",
             "Secure Preferences",
-            "Shortcuts",
-            "Shortcuts-journal",
-            "Top Sites",
-            "Top Sites-journal",
-            "Visited Links",
-            "Web Data",
-            "Web Data-journal",
         };
 
         private static readonly string[] ChromiumProfileDirectoriesToSeed =
         {
             "Extensions",
             "Extension State",
-            "IndexedDB",
             "Local Extension Settings",
-            "Local Storage",
-            "Service Worker",
-            "Session Storage",
-            "Sessions",
-            "Shared Dictionary",
-            "Storage",
             "Sync Extension Settings",
         };
 
@@ -1835,19 +1809,39 @@ namespace SelfContainedDeployment.Panes
 
         private async Task<CoreWebView2Environment> GetEnvironmentAsync()
         {
-            string key = ResolveProfileRoot();
+            string key = GetSharedBrowserProfileRootPath();
             Task<CoreWebView2Environment> environmentTask;
 
             lock (EnvironmentSync)
             {
                 if (!EnvironmentTasks.TryGetValue(key, out environmentTask))
                 {
-                    environmentTask = CreateEnvironmentAsync(key);
+                    environmentTask = CreateEnvironmentForProfileRootAsync(key);
                     EnvironmentTasks[key] = environmentTask;
                 }
             }
 
             return await environmentTask.ConfigureAwait(true);
+        }
+
+        private static string GetSharedBrowserProfileRootPath()
+        {
+            return Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "WinMux",
+                SharedBrowserProfileFolderName);
+        }
+
+        private async Task<CoreWebView2Environment> CreateEnvironmentForProfileRootAsync(string userDataFolder)
+        {
+            string resolvedRoot = await Task.Run(() =>
+            {
+                Directory.CreateDirectory(userDataFolder);
+                TrySeedProfileRootFromChromium(userDataFolder);
+                return userDataFolder;
+            }).ConfigureAwait(true);
+
+            return await CreateEnvironmentAsync(resolvedRoot).ConfigureAwait(true);
         }
 
         private static async Task<CoreWebView2Environment> CreateEnvironmentAsync(string userDataFolder)
@@ -1865,13 +1859,8 @@ namespace SelfContainedDeployment.Panes
 
         private string ResolveProfileRoot()
         {
-            string root = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "WinMux",
-                SharedBrowserProfileFolderName);
-
+            string root = GetSharedBrowserProfileRootPath();
             Directory.CreateDirectory(root);
-            TrySeedProfileRootFromChromium(root);
             return root;
         }
 
@@ -1883,12 +1872,22 @@ namespace SelfContainedDeployment.Panes
 
         private void TrySeedProfileRootFromChromium(string targetRoot)
         {
+            ProfileSeedMetadata existingMetadata = TryLoadProfileSeedMetadata(targetRoot);
+            bool hasExistingEntries = Directory.EnumerateFileSystemEntries(targetRoot).Any();
+
+            if (hasExistingEntries)
+            {
+                _profileSeedStatus = existingMetadata is null
+                    ? "Reusing existing shared WinMux browser profile"
+                    : $"Reusing shared browser profile from {existingMetadata.BrowserName} · {existingMetadata.ProfileDisplayName}";
+                return;
+            }
+
             if (TryMigrateLegacyWinMuxProfile(targetRoot))
             {
                 return;
             }
 
-            ProfileSeedMetadata existingMetadata = TryLoadProfileSeedMetadata(targetRoot);
             ChromiumProfileSeedSource source = ResolveChromiumProfileSeedSource();
             if (source is null)
             {
@@ -1900,35 +1899,34 @@ namespace SelfContainedDeployment.Panes
 
             try
             {
-                using IEnumerator<string> entries = Directory.EnumerateFileSystemEntries(targetRoot).GetEnumerator();
-                bool hasExistingEntries = entries.MoveNext();
-                SeedCopySummary summary = CopyChromiumProfileSeed(source, targetRoot, overwriteExisting: !hasExistingEntries);
-                string eventName;
+                Stopwatch stopwatch = Stopwatch.StartNew();
+                LogBrowserEvent("profile.seed_started", $"Seeding shared browser profile from {source.UserDataRoot}", new Dictionary<string, string>
+                {
+                    ["browserName"] = source.BrowserName,
+                    ["profileDirectoryName"] = source.ProfileDirectoryName,
+                    ["sourceRoot"] = source.UserDataRoot,
+                    ["sourceProfile"] = source.ProfilePath,
+                    ["targetRoot"] = targetRoot,
+                });
+
+                SeedCopySummary summary = CopyChromiumProfileSeed(source, targetRoot, overwriteExisting: true);
                 string sourceLabel = FormatProfileSeedLabel(source);
 
-                if (!hasExistingEntries)
+                stopwatch.Stop();
+                if (summary.SkippedFiles > 0)
                 {
-                    eventName = summary.SkippedFiles > 0 ? "profile.seeded_partial" : "profile.seeded";
                     _profileSeedStatus = summary.SkippedFiles > 0
                         ? $"Partially seeded shared browser profile from {sourceLabel} ({summary.CopiedFiles} copied, {summary.SkippedFiles} skipped)"
                         : $"Seeded shared browser profile from {sourceLabel} ({summary.CopiedFiles} files copied)";
                 }
-                else if (summary.CopiedFiles > 0)
-                {
-                    eventName = "profile.seed_repaired";
-                    _profileSeedStatus = $"Completed shared browser profile repair from {sourceLabel} ({summary.CopiedFiles} copied)";
-                }
                 else
                 {
-                    _profileSeedStatus = existingMetadata is null
-                        ? $"Reusing shared browser profile from {sourceLabel}"
-                        : $"Reusing shared browser profile from {existingMetadata.BrowserName} · {existingMetadata.ProfileDisplayName}";
-                    return;
+                    _profileSeedStatus = $"Seeded shared browser profile from {sourceLabel} ({summary.CopiedFiles} files copied)";
                 }
 
                 SaveProfileSeedMetadata(targetRoot, source);
                 _profileSeedSource = source;
-                LogBrowserEvent(eventName, $"Seeded browser profile from {source.UserDataRoot}", new Dictionary<string, string>
+                LogBrowserEvent(summary.SkippedFiles > 0 ? "profile.seeded_partial" : "profile.seeded", $"Seeded browser profile from {source.UserDataRoot}", new Dictionary<string, string>
                 {
                     ["browserName"] = source.BrowserName,
                     ["profileDirectoryName"] = source.ProfileDirectoryName,
@@ -1937,6 +1935,7 @@ namespace SelfContainedDeployment.Panes
                     ["targetRoot"] = targetRoot,
                     ["copiedFiles"] = summary.CopiedFiles.ToString(),
                     ["skippedFiles"] = summary.SkippedFiles.ToString(),
+                    ["durationMs"] = stopwatch.ElapsedMilliseconds.ToString(CultureInfo.InvariantCulture),
                 });
             }
             catch (Exception ex)
