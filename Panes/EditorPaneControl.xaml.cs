@@ -5,6 +5,7 @@ using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Dispatching;
 using Microsoft.Web.WebView2.Core;
+using SelfContainedDeployment.Shell;
 using SelfContainedDeployment.Terminal;
 using System;
 using System.Collections.Generic;
@@ -95,6 +96,10 @@ namespace SelfContainedDeployment.Panes
             ".zip",
         };
 
+        private static readonly TimeSpan ProjectFileCacheLifetime = TimeSpan.FromSeconds(3);
+        private static readonly object ProjectFileCacheGate = new();
+        private static readonly Dictionary<string, CachedProjectFileSnapshot> ProjectFileCache = new(StringComparer.OrdinalIgnoreCase);
+
         private sealed class EditorWebMessage
         {
             public string Type { get; set; }
@@ -135,7 +140,15 @@ namespace SelfContainedDeployment.Panes
             public string EmptyBody { get; set; }
         }
 
+        private sealed class CachedProjectFileSnapshot
+        {
+            public DateTimeOffset CapturedAt { get; init; }
+
+            public List<EditorPaneFileEntry> Files { get; init; } = new();
+        }
+
         private readonly List<EditorPaneFileEntry> _files = new();
+        private bool _fileListLoaded;
         private const string DiffEmptyTitle = "No patch selected";
         private const string DiffEmptyBody = "Select a changed file from the review list.";
         private const double MinFitWidthZoomFactor = 0.62;
@@ -610,13 +623,14 @@ namespace SelfContainedDeployment.Panes
                 case "contentchanged":
                     _currentText = message.Text ?? string.Empty;
                     _dirty = !string.Equals(_currentText, _loadedText, StringComparison.Ordinal);
+                    int previousMaxVisibleLineLength = _maxVisibleLineLength;
                     UpdateContentMetrics();
                     SetStatusText(_dirty
                         ? $"{_selectedRelativePath} - unsaved changes"
                         : string.IsNullOrWhiteSpace(_selectedRelativePath)
                             ? "Select a file to start editing."
                             : $"Editing {_selectedRelativePath}");
-                    if (_autoFitWidthLocked)
+                    if (_autoFitWidthLocked && previousMaxVisibleLineLength != _maxVisibleLineLength)
                     {
                         QueueEditorLayout(force: true);
                     }
@@ -663,7 +677,7 @@ namespace SelfContainedDeployment.Panes
 
         private async Task EnsureFileListLoadedAsync()
         {
-            if (_files.Count > 0)
+            if (_fileListLoaded)
             {
                 return;
             }
@@ -680,6 +694,7 @@ namespace SelfContainedDeployment.Panes
             List<EditorPaneFileEntry> files = await Task.Run(() => EnumerateProjectFiles(rootPath)).ConfigureAwait(true);
             _files.Clear();
             _files.AddRange(files);
+            _fileListLoaded = true;
             RaiseStateChanged();
         }
 
@@ -718,8 +733,8 @@ namespace SelfContainedDeployment.Panes
                 return null;
             }
 
-            string candidate = ResolvePath(rootPath, InitialFilePath);
-            if (!string.IsNullOrWhiteSpace(candidate) && File.Exists(candidate))
+            string candidate = ResolveExistingFilePath(rootPath, InitialFilePath);
+            if (!string.IsNullOrWhiteSpace(candidate))
             {
                 return candidate;
             }
@@ -748,7 +763,7 @@ namespace SelfContainedDeployment.Panes
             RaiseInteractionRequested();
 
             string rootPath = NormalizeRootPath(ProjectRootPath);
-            string fullPath = ResolvePath(rootPath, path);
+            string fullPath = ResolveExistingFilePath(rootPath, path);
             string relativePath = MakeRelativePath(rootPath, fullPath);
 
             try
@@ -1328,9 +1343,24 @@ namespace SelfContainedDeployment.Panes
 
         private static List<EditorPaneFileEntry> EnumerateProjectFiles(string rootPath)
         {
+            string normalizedRootPath = NormalizeRootPath(rootPath);
+            if (string.IsNullOrWhiteSpace(normalizedRootPath) || !Directory.Exists(normalizedRootPath))
+            {
+                return new List<EditorPaneFileEntry>();
+            }
+
+            lock (ProjectFileCacheGate)
+            {
+                if (ProjectFileCache.TryGetValue(normalizedRootPath, out CachedProjectFileSnapshot cached) &&
+                    DateTimeOffset.UtcNow - cached.CapturedAt <= ProjectFileCacheLifetime)
+                {
+                    return CloneFileEntries(cached.Files);
+                }
+            }
+
             List<EditorPaneFileEntry> results = new();
             Stack<string> stack = new();
-            stack.Push(rootPath);
+            stack.Push(normalizedRootPath);
 
             while (stack.Count > 0)
             {
@@ -1358,7 +1388,7 @@ namespace SelfContainedDeployment.Panes
                         results.Add(new EditorPaneFileEntry
                         {
                             FullPath = file,
-                            RelativePath = MakeRelativePath(rootPath, file),
+                            RelativePath = MakeRelativePath(normalizedRootPath, file),
                         });
                     }
                 }
@@ -1367,9 +1397,20 @@ namespace SelfContainedDeployment.Panes
                 }
             }
 
-            return results
+            List<EditorPaneFileEntry> ordered = results
                 .OrderBy(item => item.RelativePath, StringComparer.OrdinalIgnoreCase)
                 .ToList();
+
+            lock (ProjectFileCacheGate)
+            {
+                ProjectFileCache[normalizedRootPath] = new CachedProjectFileSnapshot
+                {
+                    CapturedAt = DateTimeOffset.UtcNow,
+                    Files = CloneFileEntries(ordered),
+                };
+            }
+
+            return ordered;
         }
 
         private static bool IsProbablyEditableFile(string filePath)
@@ -1416,6 +1457,28 @@ namespace SelfContainedDeployment.Panes
             return (text, encoding);
         }
 
+        private string ResolveExistingFilePath(string rootPath, string candidatePath)
+        {
+            string resolvedPath = ResolvePath(rootPath, candidatePath);
+            if (!string.IsNullOrWhiteSpace(resolvedPath) && File.Exists(resolvedPath))
+            {
+                return resolvedPath;
+            }
+
+            string normalizedCandidatePath = NormalizeComparablePath(candidatePath);
+            if (!string.IsNullOrWhiteSpace(normalizedCandidatePath))
+            {
+                EditorPaneFileEntry match = _files.FirstOrDefault(file =>
+                    string.Equals(file.RelativePath, normalizedCandidatePath, StringComparison.OrdinalIgnoreCase));
+                if (match is not null && File.Exists(match.FullPath))
+                {
+                    return match.FullPath;
+                }
+            }
+
+            return resolvedPath;
+        }
+
         private static string ResolvePath(string rootPath, string candidatePath)
         {
             if (string.IsNullOrWhiteSpace(candidatePath))
@@ -1423,9 +1486,18 @@ namespace SelfContainedDeployment.Panes
                 return null;
             }
 
-            return Path.IsPathRooted(candidatePath)
-                ? Path.GetFullPath(candidatePath)
-                : Path.GetFullPath(Path.Combine(rootPath, candidatePath));
+            string normalizedCandidatePath = NormalizeRootPath(candidatePath);
+            if (Path.IsPathRooted(candidatePath) || candidatePath.StartsWith("file://", StringComparison.OrdinalIgnoreCase))
+            {
+                return normalizedCandidatePath;
+            }
+
+            if (string.IsNullOrWhiteSpace(rootPath))
+            {
+                return normalizedCandidatePath;
+            }
+
+            return NormalizeRootPath(Path.Combine(rootPath, candidatePath));
         }
 
         private static string MakeRelativePath(string rootPath, string fullPath)
@@ -1460,12 +1532,57 @@ namespace SelfContainedDeployment.Panes
 
             try
             {
-                return Path.GetFullPath(rootPath);
+                string candidate = rootPath.Trim();
+                if (Uri.TryCreate(candidate, UriKind.Absolute, out Uri fileUri) && fileUri.IsFile)
+                {
+                    candidate = fileUri.LocalPath;
+                }
+
+                string normalizedPath = ShellProfiles.NormalizeProjectPath(candidate);
+                if (ShellProfiles.TryResolveLocalStoragePath(normalizedPath, out string localPath))
+                {
+                    return Path.GetFullPath(localPath);
+                }
+
+                return normalizedPath;
             }
             catch
             {
                 return null;
             }
+        }
+
+        private static List<EditorPaneFileEntry> CloneFileEntries(IEnumerable<EditorPaneFileEntry> files)
+        {
+            return files?
+                .Select(file => new EditorPaneFileEntry
+                {
+                    FullPath = file.FullPath,
+                    RelativePath = file.RelativePath,
+                })
+                .ToList()
+                ?? new List<EditorPaneFileEntry>();
+        }
+
+        private static string NormalizeComparablePath(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return null;
+            }
+
+            try
+            {
+                if (Uri.TryCreate(path.Trim(), UriKind.Absolute, out Uri fileUri) && fileUri.IsFile)
+                {
+                    path = fileUri.LocalPath;
+                }
+            }
+            catch
+            {
+            }
+
+            return path.Trim().Replace('\\', '/');
         }
     }
 }

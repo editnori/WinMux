@@ -111,7 +111,12 @@ namespace SelfContainedDeployment.Panes
         {
             "Extensions",
             "Extension State",
+            "IndexedDB",
             "Local Extension Settings",
+            "Local Storage",
+            "Service Worker",
+            "Session Storage",
+            "Storage",
             "Sync Extension Settings",
         };
 
@@ -1875,14 +1880,6 @@ namespace SelfContainedDeployment.Panes
             ProfileSeedMetadata existingMetadata = TryLoadProfileSeedMetadata(targetRoot);
             bool hasExistingEntries = Directory.EnumerateFileSystemEntries(targetRoot).Any();
 
-            if (hasExistingEntries)
-            {
-                _profileSeedStatus = existingMetadata is null
-                    ? "Reusing existing shared WinMux browser profile"
-                    : $"Reusing shared browser profile from {existingMetadata.BrowserName} · {existingMetadata.ProfileDisplayName}";
-                return;
-            }
-
             if (TryMigrateLegacyWinMuxProfile(targetRoot))
             {
                 return;
@@ -1909,24 +1906,34 @@ namespace SelfContainedDeployment.Panes
                     ["targetRoot"] = targetRoot,
                 });
 
-                SeedCopySummary summary = CopyChromiumProfileSeed(source, targetRoot, overwriteExisting: true);
+                SeedCopySummary summary = CopyChromiumProfileSeed(source, targetRoot, overwriteExisting: !hasExistingEntries);
                 string sourceLabel = FormatProfileSeedLabel(source);
+                string eventName;
 
                 stopwatch.Stop();
-                if (summary.SkippedFiles > 0)
+                if (!hasExistingEntries)
                 {
+                    eventName = summary.SkippedFiles > 0 ? "profile.seeded_partial" : "profile.seeded";
                     _profileSeedStatus = summary.SkippedFiles > 0
                         ? $"Partially seeded shared browser profile from {sourceLabel} ({summary.CopiedFiles} copied, {summary.SkippedFiles} skipped)"
                         : $"Seeded shared browser profile from {sourceLabel} ({summary.CopiedFiles} files copied)";
                 }
+                else if (summary.CopiedFiles > 0)
+                {
+                    eventName = "profile.seed_repaired";
+                    _profileSeedStatus = $"Completed shared browser profile repair from {sourceLabel} ({summary.CopiedFiles} copied)";
+                }
                 else
                 {
-                    _profileSeedStatus = $"Seeded shared browser profile from {sourceLabel} ({summary.CopiedFiles} files copied)";
+                    _profileSeedStatus = existingMetadata is null
+                        ? $"Reusing shared browser profile from {sourceLabel}"
+                        : $"Reusing shared browser profile from {existingMetadata.BrowserName} · {existingMetadata.ProfileDisplayName}";
+                    return;
                 }
 
                 SaveProfileSeedMetadata(targetRoot, source);
                 _profileSeedSource = source;
-                LogBrowserEvent(summary.SkippedFiles > 0 ? "profile.seeded_partial" : "profile.seeded", $"Seeded browser profile from {source.UserDataRoot}", new Dictionary<string, string>
+                LogBrowserEvent(eventName, $"Seeded browser profile from {source.UserDataRoot}", new Dictionary<string, string>
                 {
                     ["browserName"] = source.BrowserName,
                     ["profileDirectoryName"] = source.ProfileDirectoryName,

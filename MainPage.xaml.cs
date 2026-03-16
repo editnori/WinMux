@@ -2251,6 +2251,20 @@ namespace SelfContainedDeployment
             }
         }
 
+        private void RefreshInspectorFileBrowserStatus()
+        {
+            if (InspectorDirectoryMetaText is null)
+            {
+                return;
+            }
+
+            EditorPaneRecord editorPane = ResolveInspectorEditorPane(createIfNeeded: false);
+            InspectorDirectoryMetaText.Text = editorPane is null
+                ? "Select a file to open it in a new editor pane."
+                : editorPane.Editor.StatusText;
+            UpdateInspectorFileActionState();
+        }
+
         private EditorPaneRecord ResolveInspectorEditorPane(bool createIfNeeded)
         {
             if (_activeThread is null)
@@ -3004,6 +3018,10 @@ namespace SelfContainedDeployment
             editor.SetAutoFitWidth(thread.AutoFitPaneContentLocked);
 
             EditorPaneRecord pane = new(baseTitle, editor, paneId);
+            string lastSelectedFilePath = editor.SelectedFilePath;
+            int lastFileCount = editor.FileCount;
+            bool lastCanSave = editor.CanSave;
+            string lastStatusText = editor.StatusText;
             editor.ApplyAutomationIdentity(pane.Id);
             AttachPaneInteraction(project, thread, pane);
             editor.TitleChanged += (_, title) =>
@@ -3029,12 +3047,31 @@ namespace SelfContainedDeployment
             };
             editor.StateChanged += (_, _) =>
             {
+                bool selectedFileChanged = !string.Equals(lastSelectedFilePath, editor.SelectedFilePath, StringComparison.OrdinalIgnoreCase);
+                bool fileCountChanged = lastFileCount != editor.FileCount;
+                bool canSaveChanged = lastCanSave != editor.CanSave;
+                bool statusChanged = !string.Equals(lastStatusText, editor.StatusText, StringComparison.Ordinal);
+                lastSelectedFilePath = editor.SelectedFilePath;
+                lastFileCount = editor.FileCount;
+                lastCanSave = editor.CanSave;
+                lastStatusText = editor.StatusText;
+
                 if (thread == _activeThread)
                 {
-                    RefreshInspectorFileBrowser();
+                    if (selectedFileChanged || fileCountChanged)
+                    {
+                        RefreshInspectorFileBrowser();
+                    }
+                    else if (canSaveChanged || statusChanged)
+                    {
+                        RefreshInspectorFileBrowserStatus();
+                    }
                 }
 
-                QueueSessionSave();
+                if (selectedFileChanged || fileCountChanged)
+                {
+                    QueueSessionSave();
+                }
             };
             return pane;
         }
