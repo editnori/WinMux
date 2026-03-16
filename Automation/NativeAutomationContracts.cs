@@ -463,6 +463,47 @@ namespace SelfContainedDeployment.Automation
         public string Foreground { get; set; }
     }
 
+    public sealed class NativeAutomationEditorStateRequest
+    {
+        public string PaneId { get; set; }
+
+        public int MaxChars { get; set; }
+
+        public int MaxFiles { get; set; }
+    }
+
+    public sealed class NativeAutomationEditorStateResponse
+    {
+        public string SelectedPaneId { get; set; }
+
+        public List<NativeAutomationEditorSnapshot> Panes { get; set; } = new();
+    }
+
+    public sealed class NativeAutomationEditorSnapshot
+    {
+        public string PaneId { get; set; }
+
+        public string ThreadId { get; set; }
+
+        public string ProjectId { get; set; }
+
+        public string Title { get; set; }
+
+        public string SelectedPath { get; set; }
+
+        public string Status { get; set; }
+
+        public bool Dirty { get; set; }
+
+        public bool ReadOnly { get; set; }
+
+        public int FileCount { get; set; }
+
+        public List<string> Files { get; set; } = new();
+
+        public string Text { get; set; }
+    }
+
     public sealed class NativeAutomationEventsResponse
     {
         public long NextSequence { get; set; }

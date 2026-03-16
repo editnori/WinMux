@@ -220,9 +220,12 @@ namespace SelfContainedDeployment.Panes
 
         internal DiffPaneRenderSnapshot GetRenderSnapshot(int maxLines = 0)
         {
-            string[] allLines = string.IsNullOrEmpty(_currentDiff)
+            string rawText = _currentFiles.Count > 1
+                ? BuildCombinedDiffText(_currentFiles)
+                : _currentDiff ?? string.Empty;
+            string[] allLines = string.IsNullOrEmpty(rawText)
                 ? Array.Empty<string>()
-                : _currentDiff.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+                : rawText.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
 
             IEnumerable<(string Line, int Index)> selectedLines = allLines
                 .Select((line, index) => (line, index));
@@ -235,7 +238,7 @@ namespace SelfContainedDeployment.Panes
             {
                 Path = _currentPath ?? string.Empty,
                 Summary = _summaryText.Text ?? string.Empty,
-                RawText = _currentDiff ?? string.Empty,
+                RawText = rawText,
                 LineCount = allLines.Length,
                 Lines = selectedLines.Select(entry =>
                 {
@@ -436,9 +439,13 @@ namespace SelfContainedDeployment.Panes
 
             return string.Join(
                 Environment.NewLine + Environment.NewLine,
-                files
-                    .Where(file => !string.IsNullOrWhiteSpace(file?.DiffText))
-                    .Select(file => file.DiffText.TrimEnd()));
+                files.Select(file =>
+                {
+                    string diffText = string.IsNullOrWhiteSpace(file?.DiffText)
+                        ? "Patch unavailable for this file."
+                        : file.DiffText.TrimEnd();
+                    return diffText;
+                }));
         }
 
         private static string ResolveDiffLineBrushKey(string kind)
@@ -600,19 +607,25 @@ namespace SelfContainedDeployment.Panes
             Windows.UI.Color color = (effectiveTheme, key) switch
             {
                 (ElementTheme.Light, "ShellSurfaceBackgroundBrush") => Windows.UI.Color.FromArgb(0xFF, 0xFF, 0xFF, 0xFF),
+                (ElementTheme.Light, "ShellMutedSurfaceBrush") => Windows.UI.Color.FromArgb(0xFF, 0xF4, 0xF4, 0xF5),
                 (ElementTheme.Light, "ShellBorderBrush") => Windows.UI.Color.FromArgb(0xFF, 0xE4, 0xE4, 0xE7),
+                (ElementTheme.Light, "ShellPaneActiveBorderBrush") => Windows.UI.Color.FromArgb(0xFF, 0x25, 0x63, 0xEB),
                 (ElementTheme.Light, "ShellTextPrimaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0x18, 0x18, 0x1B),
                 (ElementTheme.Light, "ShellTextSecondaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0x52, 0x52, 0x5B),
                 (ElementTheme.Light, "ShellTextTertiaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0x71, 0x71, 0x7A),
                 (ElementTheme.Light, "ShellSuccessBrush") => Windows.UI.Color.FromArgb(0xFF, 0x16, 0xA3, 0x4A),
+                (ElementTheme.Light, "ShellWarningBrush") => Windows.UI.Color.FromArgb(0xFF, 0xCA, 0x8A, 0x04),
                 (ElementTheme.Light, "ShellDangerBrush") => Windows.UI.Color.FromArgb(0xFF, 0xDC, 0x26, 0x26),
                 (ElementTheme.Light, "ShellInfoBrush") => Windows.UI.Color.FromArgb(0xFF, 0x25, 0x63, 0xEB),
                 (ElementTheme.Dark, "ShellSurfaceBackgroundBrush") => Windows.UI.Color.FromArgb(0xFF, 0x11, 0x12, 0x14),
+                (ElementTheme.Dark, "ShellMutedSurfaceBrush") => Windows.UI.Color.FromArgb(0xFF, 0x17, 0x18, 0x1C),
                 (ElementTheme.Dark, "ShellBorderBrush") => Windows.UI.Color.FromArgb(0xFF, 0x23, 0x25, 0x2B),
+                (ElementTheme.Dark, "ShellPaneActiveBorderBrush") => Windows.UI.Color.FromArgb(0xFF, 0x60, 0xA5, 0xFA),
                 (ElementTheme.Dark, "ShellTextPrimaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0xFA, 0xFA, 0xFA),
                 (ElementTheme.Dark, "ShellTextSecondaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0xA1, 0xA1, 0xAA),
                 (ElementTheme.Dark, "ShellTextTertiaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0x71, 0x71, 0x7A),
                 (ElementTheme.Dark, "ShellSuccessBrush") => Windows.UI.Color.FromArgb(0xFF, 0x4A, 0xDE, 0x80),
+                (ElementTheme.Dark, "ShellWarningBrush") => Windows.UI.Color.FromArgb(0xFF, 0xFB, 0xBF, 0x24),
                 (ElementTheme.Dark, "ShellDangerBrush") => Windows.UI.Color.FromArgb(0xFF, 0xF8, 0x71, 0x71),
                 (ElementTheme.Dark, "ShellInfoBrush") => Windows.UI.Color.FromArgb(0xFF, 0x60, 0xA5, 0xFA),
                 _ => default,

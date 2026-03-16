@@ -564,6 +564,27 @@ namespace SelfContainedDeployment.Shell
         public override void DisposePane() => Browser.DisposePane();
     }
 
+    public sealed class EditorPaneRecord : WorkspacePaneRecord
+    {
+        public EditorPaneRecord(string title, EditorPaneControl editor, string id = null)
+            : base(title, WorkspacePaneKind.Editor, id)
+        {
+            Editor = editor;
+        }
+
+        public EditorPaneControl Editor { get; }
+
+        public override FrameworkElement View => Editor;
+
+        public override void ApplyTheme(ElementTheme theme) => Editor.ApplyTheme(theme);
+
+        public override void FocusPane() => Editor.FocusPane();
+
+        public override void RequestLayout() => Editor.RequestLayout();
+
+        public override void DisposePane() => Editor.DisposePane();
+    }
+
     public sealed class DiffPaneRecord : WorkspacePaneRecord
     {
         public DiffPaneRecord(string title, DiffPaneControl diffPane, string diffPath = null, string id = null)

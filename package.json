@@ -24,6 +24,7 @@
     "native:terminal-state": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-automation.ps1\")\" terminal-state",
     "native:browser-state": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-automation.ps1\")\" browser-state",
     "native:diff-state": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-automation.ps1\")\" diff-state",
+    "native:editor-state": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-automation.ps1\")\" editor-state",
     "native:browser-eval": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-automation.ps1\")\" browser-eval",
     "native:browser-screenshot": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-automation.ps1\")\" browser-screenshot",
     "native:recording-start": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-automation.ps1\")\" recording-start",
@@ -41,6 +42,7 @@
     "native:agent-browser-smoke": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-terminal-browser-smoke.ps1\")\""
   },
   "devDependencies": {
+    "monaco-editor": "^0.55.1",
     "playwright": "^1.58.2"
   }
 }

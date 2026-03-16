@@ -169,6 +169,12 @@ namespace SelfContainedDeployment.Automation
                         await WriteJsonAsync(stream, 200, diffState).ConfigureAwait(false);
                         break;
 
+                    case ("POST", "/editor-state"):
+                        var editorStateRequest = ReadJson<NativeAutomationEditorStateRequest>(request.Body);
+                        var editorState = await InvokeOnUiThreadAsync(() => _window.GetEditorState(editorStateRequest)).ConfigureAwait(false);
+                        await WriteJsonAsync(stream, 200, editorState).ConfigureAwait(false);
+                        break;
+
                     case ("POST", "/browser-eval"):
                         var browserEvalRequest = ReadJson<NativeAutomationBrowserEvalRequest>(request.Body);
                         var browserEval = await InvokeOnUiThreadAsync(() => _window.EvaluateBrowserAsync(browserEvalRequest)).ConfigureAwait(false);

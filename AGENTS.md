@@ -1,4 +1,4 @@
-# AGENTS.md
+﻿# AGENTS.md
 
 ## Purpose
 
@@ -14,7 +14,7 @@ The current shape of the app is:
 - Bun-managed debug helpers for attaching Playwright to the embedded renderer
 - native automation endpoints for shell state, UI-tree inspection, style metadata, generic UI actions, desktop window automation, render tracing, event logging, terminal inspection, and screenshots
 - native frame recording and external semantic UIA helpers for OS-owned windows
-
+c
 This file is the handoff document for future agents.
 
 ## Current product state
@@ -35,7 +35,7 @@ What exists now:
 - browser panes backed by `WebView2` with a built-in start page, lightweight in-pane tabs, and a shared WinMux browser profile
 - imported browser-password CSV support backed by a WinMux-encrypted credential store
 - Preferences management for the WinMux credential vault: import, per-site delete, clear, and manual autofill
-- editor panes backed by `TerminalControl` launching `hx .`
+- editor panes backed by a WebView2 `EditorPaneControl` with a Monaco code surface, plus inspector-side file navigation and in-pane editing
 - ConPTY process bridge in C#
 - shared renderer under `Web/` hosted inside `WebView2`
 - WebView2 CDP debug workflow for Playwright-style inspection
@@ -69,6 +69,8 @@ What does not exist yet:
 
 - [Panes/BrowserPaneControl.xaml](/mnt/c/Users/lqassem/native-terminal-starter/Panes/BrowserPaneControl.xaml)
 - [Panes/BrowserPaneControl.xaml.cs](/mnt/c/Users/lqassem/native-terminal-starter/Panes/BrowserPaneControl.xaml.cs)
+- [Panes/EditorPaneControl.xaml](/mnt/c/Users/lqassem/native-terminal-starter/Panes/EditorPaneControl.xaml)
+- [Panes/EditorPaneControl.xaml.cs](/mnt/c/Users/lqassem/native-terminal-starter/Panes/EditorPaneControl.xaml.cs)
 
 ### Native automation
 

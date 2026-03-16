@@ -93,6 +93,11 @@ namespace SelfContainedDeployment
             return MainPage?.GetDiffState(request) ?? new NativeAutomationDiffStateResponse();
         }
 
+        public NativeAutomationEditorStateResponse GetEditorState(NativeAutomationEditorStateRequest request)
+        {
+            return MainPage?.GetEditorState(request) ?? new NativeAutomationEditorStateResponse();
+        }
+
         public Task<NativeAutomationBrowserEvalResponse> EvaluateBrowserAsync(NativeAutomationBrowserEvalRequest request)
         {
             return MainPage?.EvaluateBrowserAsync(request) ?? Task.FromResult(new NativeAutomationBrowserEvalResponse

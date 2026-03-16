@@ -147,6 +147,8 @@ namespace SelfContainedDeployment.Persistence
 
         public string DiffPath { get; set; }
 
+        public string EditorFilePath { get; set; }
+
         public string ReplayTool { get; set; }
 
         public string ReplaySessionId { get; set; }

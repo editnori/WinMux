@@ -270,48 +270,78 @@
                             <Grid Padding="12,10,12,10"
                                   BorderBrush="{ThemeResource ShellBorderBrush}"
                                   BorderThickness="0,0,0,1"
-                                  ColumnDefinitions="*,Auto"
-                                  ColumnSpacing="12">
-                                <TextBlock Text="Review"
-                                           Style="{StaticResource ShellSectionTextStyle}"
-                                           TextTrimming="CharacterEllipsis"
-                                           TextWrapping="NoWrap"
-                                           VerticalAlignment="Center" />
+                                  ColumnDefinitions="Auto,*,Auto"
+                                  ColumnSpacing="8">
+                                <StackPanel Orientation="Horizontal"
+                                            Spacing="6"
+                                            VerticalAlignment="Center">
+                                    <Button x:Name="InspectorReviewTabButton"
+                                            AutomationProperties.AutomationId="shell-inspector-tab-review"
+                                            Click="OnInspectorReviewTabClicked"
+                                            Style="{StaticResource ShellSubItemButtonStyle}"
+                                            Height="28"
+                                            Padding="10,3"
+                                            MinWidth="56">
+                                        <TextBlock Text="Review"
+                                                   FontSize="12" />
+                                    </Button>
 
-                                <StackPanel Grid.Column="1"
+                                    <Button x:Name="InspectorFilesTabButton"
+                                            AutomationProperties.AutomationId="shell-inspector-tab-files"
+                                            Click="OnInspectorFilesTabClicked"
+                                            Style="{StaticResource ShellSubItemButtonStyle}"
+                                            Height="28"
+                                            Padding="10,3"
+                                            MinWidth="48">
+                                        <TextBlock Text="Files"
+                                                   FontSize="12" />
+                                    </Button>
+                                </StackPanel>
+
+                                <StackPanel x:Name="InspectorReviewActionsPanel"
+                                            Grid.Column="2"
                                             Orientation="Horizontal"
-                                            Spacing="6">
+                                            Spacing="4"
+                                            VerticalAlignment="Center">
                                     <Button x:Name="CaptureCheckpointButton"
                                             AutomationProperties.AutomationId="shell-diff-capture-checkpoint"
                                             Click="OnCaptureCheckpointClicked"
-                                            Style="{StaticResource ShellSubItemButtonStyle}">
-                                        <Grid ColumnDefinitions="16,*"
-                                              ColumnSpacing="8">
-                                            <FontIcon FontSize="11"
-                                                      Glyph="&#xE823;" />
-                                            <TextBlock Grid.Column="1"
-                                                       FontSize="12"
-                                                       Text="Checkpoint" />
-                                        </Grid>
+                                            Style="{StaticResource ShellChromeButtonStyle}"
+                                            ToolTipService.ToolTip="Capture checkpoint">
+                                        <FontIcon FontSize="11"
+                                                  Glyph="&#xE823;" />
                                     </Button>
 
                                     <Button x:Name="RefreshDiffButton"
                                             AutomationProperties.AutomationId="shell-diff-refresh"
                                             Click="OnRefreshDiffClicked"
-                                            Style="{StaticResource ShellSubItemButtonStyle}">
-                                        <Grid ColumnDefinitions="16,*"
-                                              ColumnSpacing="8">
-                                            <FontIcon FontSize="11"
-                                                      Glyph="&#xE72C;" />
-                                            <TextBlock Grid.Column="1"
-                                                       FontSize="12"
-                                                       Text="Refresh" />
-                                        </Grid>
+                                            Style="{StaticResource ShellChromeButtonStyle}"
+                                            ToolTipService.ToolTip="Refresh review">
+                                        <FontIcon FontSize="11"
+                                                  Glyph="&#xE72C;" />
                                     </Button>
+                                </StackPanel>
+
+                                <StackPanel x:Name="InspectorFileActionsPanel"
+                                            Grid.Column="2"
+                                            Orientation="Horizontal"
+                                            Spacing="4"
+                                            VerticalAlignment="Center"
+                                            Visibility="Collapsed">
+                                    <Button x:Name="InspectorSaveFileButton"
+                                            AutomationProperties.AutomationId="shell-editor-save-file"
+                                            Click="OnInspectorSaveFileClicked"
+                                            Style="{StaticResource ShellChromeButtonStyle}"
+                                            ToolTipService.ToolTip="Save file">
+                                        <FontIcon FontSize="11"
+                                                  Glyph="&#xE74E;" />
+                                    </Button>
+
                                 </StackPanel>
                             </Grid>
 
-                            <ScrollViewer Grid.Row="1"
+                            <ScrollViewer x:Name="InspectorReviewContent"
+                                          Grid.Row="1"
                                           VerticalScrollBarVisibility="Auto"
                                           HorizontalScrollBarVisibility="Disabled">
                                 <StackPanel Padding="12,12,12,14"
@@ -369,6 +399,44 @@
                                                    Text="No changed files in this thread."
                                                    Visibility="Collapsed" />
                                     </StackPanel>
+                                </StackPanel>
+                            </ScrollViewer>
+
+                            <ScrollViewer x:Name="InspectorFilesContent"
+                                          Grid.Row="1"
+                                          Visibility="Collapsed"
+                                          VerticalScrollBarVisibility="Auto"
+                                          HorizontalScrollBarVisibility="Disabled">
+                                <StackPanel Padding="12,12,12,14"
+                                            Spacing="12">
+                                    <StackPanel Spacing="4">
+                                        <TextBlock Text="DIRECTORY"
+                                                   Style="{StaticResource ShellInspectorLabelTextStyle}" />
+                                        <TextBlock x:Name="InspectorDirectoryRootText"
+                                                   AutomationProperties.AutomationId="shell-directory-root"
+                                                   Style="{StaticResource ShellBodyTextStyle}"
+                                                   Text="No active project"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   TextWrapping="NoWrap" />
+                                        <TextBlock x:Name="InspectorDirectoryMetaText"
+                                                   AutomationProperties.AutomationId="shell-directory-meta"
+                                                   Style="{StaticResource ShellHintTextStyle}"
+                                                   Text="Open an editor pane to browse files."
+                                                   TextWrapping="WrapWholeWords" />
+                                    </StackPanel>
+
+                                    <TreeView x:Name="InspectorDirectoryTree"
+                                              AutomationProperties.AutomationId="shell-directory-tree"
+                                              DoubleTapped="OnInspectorDirectoryTreeDoubleTapped"
+                                              KeyDown="OnInspectorDirectoryTreeKeyDown"
+                                              SelectionMode="Single" />
+
+                                    <TextBlock x:Name="InspectorDirectoryEmptyText"
+                                               AutomationProperties.AutomationId="shell-directory-empty"
+                                               Style="{StaticResource ShellHintTextStyle}"
+                                               Text="No editable files were found for this thread."
+                                               Visibility="Collapsed"
+                                               TextWrapping="WrapWholeWords" />
                                 </StackPanel>
                             </ScrollViewer>
                         </Grid>

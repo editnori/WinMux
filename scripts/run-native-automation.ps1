@@ -108,6 +108,14 @@ switch ($Tool) {
         Invoke-RestMethod -Method Post -Uri "$baseUrl/diff-state" -ContentType "application/json" -Body $body | ConvertTo-Json -Depth 30
         break
     }
+    "editor-state" {
+        $paneId = if ($ForwardArgs.Count -gt 0) { $ForwardArgs[0] } else { "" }
+        $maxChars = if ($ForwardArgs.Count -gt 1) { [int]$ForwardArgs[1] } else { 0 }
+        $maxFiles = if ($ForwardArgs.Count -gt 2) { [int]$ForwardArgs[2] } else { 0 }
+        $body = @{ paneId = $paneId; maxChars = $maxChars; maxFiles = $maxFiles } | ConvertTo-Json -Depth 10
+        Invoke-RestMethod -Method Post -Uri "$baseUrl/editor-state" -ContentType "application/json" -Body $body | ConvertTo-Json -Depth 30
+        break
+    }
     "browser-eval" {
         $paneId = ""
         $script = "document.title"
@@ -154,6 +162,6 @@ switch ($Tool) {
         break
     }
     default {
-        throw "Unknown automation tool '$Tool'. Expected one of: health, state, ui-tree, ui-refs, desktop-windows, desktop-uia-tree, events, events-clear, recording-status, action, ui-action, desktop-action, desktop-uia-action, terminal-state, browser-state, diff-state, browser-eval, browser-screenshot, recording-start, recording-stop, render-trace, screenshot"
+        throw "Unknown automation tool '$Tool'. Expected one of: health, state, ui-tree, ui-refs, desktop-windows, desktop-uia-tree, events, events-clear, recording-status, action, ui-action, desktop-action, desktop-uia-action, terminal-state, browser-state, diff-state, editor-state, browser-eval, browser-screenshot, recording-start, recording-stop, render-trace, screenshot"
     }
 }

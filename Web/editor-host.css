@@ -1,0 +1,55 @@
+html,
+body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #09090b;
+  color: #fafafa;
+  font-family: "Cascadia Code", "Consolas", monospace;
+}
+
+body[data-theme="light"] {
+  background: #ffffff;
+  color: #18181b;
+}
+
+.editor-shell {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+#editor-root {
+  position: absolute;
+  inset: 0;
+}
+
+.empty-state {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: inherit;
+  color: inherit;
+  pointer-events: none;
+  text-align: center;
+}
+
+.empty-state.hidden {
+  display: none;
+}
+
+.empty-title {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.empty-body {
+  font-size: 11px;
+  opacity: 0.62;
+}
