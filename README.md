@@ -4,20 +4,29 @@ WinMux is a native Windows workspace shell built with WinUI 3, ConPTY, and WebVi
 
 It combines terminals, browser panes, editor panes, patch review, worktree-aware threads, session restore, and a full native automation surface that can be driven from Bun. The repo is set up so a human can use the shell directly while an LLM can inspect, drive, screenshot, and record the exact same native app.
 
-![WinMux light-mode workspace](docs/media/winmux-overview-light.png)
+![WinMux workspace](docs/media/winmux-screenshot.png)
 
 ## Download
 
-- [Latest Windows x64 build](https://github.com/editnori/WinMux/releases/latest/download/WinMux-win-x64.zip)
+- [Latest Windows installer (.exe)](https://github.com/editnori/WinMux/releases/latest/download/WinMux-win-x64-installer.exe)
+- [Latest portable build (.zip)](https://github.com/editnori/WinMux/releases/latest/download/WinMux-win-x64.zip)
 - [Latest release notes and assets](https://github.com/editnori/WinMux/releases/latest)
 
-The release build is a self-contained Windows package. Download the zip, extract it, and launch `WinMux.exe`.
+The installer extracts WinMux to `%LocalAppData%\Programs\WinMux` and launches it. The zip is the portable self-contained build if you want the raw files instead.
 
-## Demo videos
+## Demo
 
-- [Overview demo](https://github.com/editnori/WinMux/releases/latest/download/winmux-overview.mp4)
-- [Workspace showcase](https://github.com/editnori/WinMux/releases/latest/download/winmux-workspace-showcase.mp4)
-- [Feature tour](https://github.com/editnori/WinMux/releases/latest/download/winmux-feature-tour.mp4)
+[![Watch the WinMux demo](docs/media/winmux-demo-preview.gif)](https://github.com/editnori/WinMux/releases/latest/download/WinMux-demo.mp4)
+
+[Watch the full demo video](https://github.com/editnori/WinMux/releases/latest/download/WinMux-demo.mp4)
+
+The demo shows:
+
+- dense multi-pane terminal, editor, browser, and diff workspaces
+- project and thread organization with worktree-aware flows
+- inline review and file navigation
+- session persistence and fast shell switching
+- Bun-driven native automation so LLMs can inspect and control the real app
 
 ## What WinMux does
 
@@ -128,6 +137,13 @@ For an x64 release publish:
 ```
 
 The publish output lands under the standard `bin/Release/.../publish/` path for the target runtime.
+
+To build the self-extracting installer used on the release page:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-winmux-installer.ps1 `
+  -PublishDirectory .\bin\x64\Release\net8.0-windows10.0.19041.0\win-x64\publish
+```
 
 ## Repo structure
 
