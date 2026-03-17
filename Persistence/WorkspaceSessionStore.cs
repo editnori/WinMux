@@ -4,12 +4,13 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace SelfContainedDeployment.Persistence
 {
     internal sealed class WorkspaceSessionSnapshot
     {
-        public int Version { get; set; } = 1;
+        public int Version { get; set; } = 2;
 
         public string SavedAt { get; set; }
 
@@ -59,6 +60,12 @@ namespace SelfContainedDeployment.Persistence
 
         public string BranchName { get; set; }
 
+        public string Notes { get; set; }
+
+        public string SelectedNoteId { get; set; }
+
+        public List<ThreadNoteSessionSnapshot> NoteEntries { get; set; } = new();
+
         public string SelectedDiffPath { get; set; }
 
         public string DiffReviewSource { get; set; }
@@ -66,6 +73,10 @@ namespace SelfContainedDeployment.Persistence
         public string SelectedCheckpointId { get; set; }
 
         public GitSnapshotSessionSnapshot BaselineSnapshot { get; set; }
+
+        public GitSnapshotSessionSnapshot LiveSnapshot { get; set; }
+
+        public string LiveSnapshotCapturedAt { get; set; }
 
         public string SelectedPaneId { get; set; }
 
@@ -80,6 +91,21 @@ namespace SelfContainedDeployment.Persistence
         public List<GitCheckpointSessionSnapshot> DiffCheckpoints { get; set; } = new();
 
         public List<PaneSessionSnapshot> Panes { get; set; } = new();
+    }
+
+    internal sealed class ThreadNoteSessionSnapshot
+    {
+        public string Id { get; set; }
+
+        public string Title { get; set; }
+
+        public string Text { get; set; }
+
+        public string PaneId { get; set; }
+
+        public string CreatedAt { get; set; }
+
+        public string UpdatedAt { get; set; }
     }
 
     internal sealed class GitCheckpointSessionSnapshot
@@ -128,9 +154,6 @@ namespace SelfContainedDeployment.Persistence
 
         public string DiffText { get; set; }
 
-        public string OriginalText { get; set; }
-
-        public string ModifiedText { get; set; }
     }
 
     internal sealed class PaneSessionSnapshot
@@ -178,8 +201,11 @@ namespace SelfContainedDeployment.Persistence
         private static readonly JsonSerializerOptions JsonOptions = new()
         {
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-            WriteIndented = true,
+            WriteIndented = false,
+            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
         };
+        private static readonly object SaveLock = new();
+        private static string LastSavedJson;
 
         private static readonly string SessionDirectory = ResolveSessionDirectory();
 
@@ -197,6 +223,7 @@ namespace SelfContainedDeployment.Persistence
                 }
 
                 string json = File.ReadAllText(loadPath);
+                LastSavedJson = json;
                 error = null;
                 return JsonSerializer.Deserialize<WorkspaceSessionSnapshot>(json, JsonOptions);
             }
@@ -214,20 +241,30 @@ namespace SelfContainedDeployment.Persistence
                 return;
             }
 
-            Directory.CreateDirectory(SessionDirectory);
-            string tempPath = SessionPath + ".tmp";
-            string backupPath = SessionPath + ".bak";
-            string json = JsonSerializer.Serialize(snapshot, JsonOptions);
-            File.WriteAllText(tempPath, json);
+            lock (SaveLock)
+            {
+                Directory.CreateDirectory(SessionDirectory);
+                string tempPath = SessionPath + ".tmp";
+                string backupPath = SessionPath + ".bak";
+                string json = JsonSerializer.Serialize(snapshot, JsonOptions);
+                if (File.Exists(SessionPath) && string.Equals(LastSavedJson, json, StringComparison.Ordinal))
+                {
+                    return;
+                }
 
-            if (File.Exists(SessionPath))
-            {
-                File.Copy(SessionPath, backupPath, overwrite: true);
-                File.Replace(tempPath, SessionPath, backupPath, ignoreMetadataErrors: true);
-            }
-            else
-            {
-                File.Move(tempPath, SessionPath);
+                File.WriteAllText(tempPath, json);
+
+                if (File.Exists(SessionPath))
+                {
+                    File.Copy(SessionPath, backupPath, overwrite: true);
+                    File.Replace(tempPath, SessionPath, backupPath, ignoreMetadataErrors: true);
+                }
+                else
+                {
+                    File.Move(tempPath, SessionPath);
+                }
+
+                LastSavedJson = json;
             }
         }
 

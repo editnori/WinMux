@@ -1,0 +1,32 @@
+vars:
+  THREAD_A: ""
+  THREAD_B: ""
+
+defaults:
+  capture: true
+  annotated: false
+  events: 40
+  retries: 1
+  retryDelayMs: 250
+
+steps:
+  - name: select-thread-a
+    type: semanticAction
+    action: selectThreadByName
+    value: "${THREAD_A}"
+    wait:
+      threadName: "${THREAD_A}"
+
+  - name: select-thread-b
+    type: semanticAction
+    action: selectThreadByName
+    value: "${THREAD_B}"
+    wait:
+      threadName: "${THREAD_B}"
+
+  - name: select-thread-a-again
+    type: semanticAction
+    action: selectThreadByName
+    value: "${THREAD_A}"
+    wait:
+      threadName: "${THREAD_A}"

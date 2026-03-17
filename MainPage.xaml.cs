@@ -37,6 +37,12 @@ namespace SelfContainedDeployment
 
         public string IconGlyph { get; init; }
 
+        public FontFamily IconFontFamily { get; init; }
+
+        public double IconFontSize { get; init; } = 11;
+
+        public bool UseGlyphBadge { get; init; }
+
         public Brush IconBrush { get; init; }
 
         public string KindText { get; init; }
@@ -52,12 +58,46 @@ namespace SelfContainedDeployment
         public Visibility StatusVisibility => string.IsNullOrWhiteSpace(StatusText) ? Visibility.Collapsed : Visibility.Visible;
     }
 
+    public sealed class DiffFileListItem
+    {
+        public GitChangedFile File { get; init; }
+
+        public string AutomationId { get; init; }
+
+        public string AutomationName { get; init; }
+
+        public string StatusSymbol { get; init; }
+
+        public Brush StatusBrush { get; init; }
+
+        public string FileName { get; init; }
+
+        public string MetaText { get; init; }
+
+        public string AddedText { get; init; }
+
+        public Visibility AddedVisibility { get; init; }
+
+        public string RemovedText { get; init; }
+
+        public Visibility RemovedVisibility { get; init; }
+    }
+
     public partial class MainPage : Page
     {
-        private const double PaneDividerThickness = 4;
+        private const double PaneDividerThickness = 3;
         private const double MinPaneSplitRatio = 0.24;
         private const double MaxPaneSplitRatio = 0.76;
         private const int AutomationUiTreeMaxDepth = 28;
+        private static readonly bool EnableBackgroundPaneWarmup = IsFeatureEnabled("WINMUX_ENABLE_BACKGROUND_PANE_WARMUP");
+        private static readonly bool DisableSettingsPagePreload = IsFeatureEnabled("WINMUX_DISABLE_SETTINGS_PRELOAD");
+        private static readonly bool EnableSettingsPagePreload = IsFeatureEnabled("WINMUX_ENABLE_SETTINGS_PRELOAD") || !DisableSettingsPagePreload;
+        private static readonly bool EnableAutomaticBaselineCapture = IsFeatureEnabled("WINMUX_ENABLE_AUTOMATIC_BASELINE_CAPTURE");
+        private static readonly bool EnableVisibleDeferredPaneMaterialization = IsFeatureEnabled("WINMUX_ENABLE_VISIBLE_DEFERRED_PANES");
+        private const int MaxPersistedSnapshotDiffFiles = 8;
+        private const int MaxPersistedSnapshotDiffChars = 200_000;
+        private static readonly TimeSpan CachedThreadGitSnapshotMaxAge = TimeSpan.FromMinutes(5);
+        private static readonly TimeSpan CachedShellOnlyGitSnapshotMaxAge = TimeSpan.FromMinutes(30);
         private readonly List<WorkspaceProject> _projects = new();
         private readonly Dictionary<string, TabViewItem> _tabItemsById = new(StringComparer.Ordinal);
         private readonly Dictionary<string, Border> _paneContainersById = new(StringComparer.Ordinal);
@@ -71,12 +111,15 @@ namespace SelfContainedDeployment
         private double _splitterStartPrimaryRatio;
         private double _splitterStartSecondaryRatio;
         private bool _showingSettings;
-        private bool _showingOverview;
         private bool _suppressTabSelectionChanged;
         private bool _refreshingTabView;
         private int _tabSelectionChangeGeneration;
+        private string _lastTabStripThreadId;
         private bool _suppressPaneInteractionRequests;
         private bool _suppressThreadNameSync;
+        private DateTimeOffset _suppressSettingsUntil;
+        private bool _settingsPageNeedsRefresh = true;
+        private bool _settingsPagePreloadStarted;
         private string _inlineRenamingPaneId;
         private bool _restoringSession;
         private bool _inspectorOpen = true;
@@ -85,21 +128,51 @@ namespace SelfContainedDeployment
         private readonly DispatcherQueueTimer _projectTreeRefreshTimer;
         private readonly DispatcherQueueTimer _gitRefreshTimer;
         private readonly DispatcherQueueTimer _paneLayoutTimer;
+        private SessionSaveDetail _pendingSessionSaveDetail = SessionSaveDetail.Lightweight;
+        private bool _sessionSaveInFlight;
+        private bool _sessionSavePending;
         private readonly HashSet<string> _baselineCaptureInFlightThreadIds = new(StringComparer.Ordinal);
         private GitThreadSnapshot _activeGitSnapshot;
         private int _latestGitRefreshRequestId;
+        private bool _gitRefreshInFlight;
+        private bool _gitRefreshPending;
         private string _pendingGitSelectedPath;
         private bool _pendingGitPreserveSelection;
+        private bool _pendingGitIncludeSelectedDiff = true;
+        private bool _pendingGitPreferFastRefresh;
+        private string _pendingGitCorrelationId;
         private string _lastProjectTreeRenderKey;
         private string _lastPaneWorkspaceRenderKey;
-        private string _lastThreadOverviewRenderKey;
+        private string _lastDiffFileListRenderKey;
         private bool _projectTreeRefreshEnqueued;
         private bool _suppressDiffReviewSourceSelectionChanged;
         private bool _capturingDiffCheckpoint;
+        private bool _suppressInspectorNotesSync;
+        private bool _suppressInspectorNotesSelectionChanged;
+        private bool _suppressInspectorNoteTitleSync;
+        private bool _suppressInspectorNoteScopeSelectionChanged;
+        private NotesListScope _activeNotesListScope = NotesListScope.Thread;
         private InspectorSection _activeInspectorSection = InspectorSection.Review;
         private string _lastInspectorDirectoryRootPath;
+        private string _pendingInspectorDirectoryRootPath;
+        private string _pendingInspectorDirectoryRenderKey;
+        private int _latestInspectorDirectoryBuildRequestId;
+        private System.Threading.CancellationTokenSource _inspectorDirectoryBuildCancellation;
+        private int _latestPaneWarmupRequestId;
+        private readonly Dictionary<string, Button> _projectButtonsById = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, Border> _projectHeaderBordersById = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, Button> _threadButtonsById = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, Button> _diffFileButtonsByPath = new(StringComparer.Ordinal);
+        private readonly List<DiffFileListItem> _diffFileListItems = new();
+        private readonly Dictionary<string, ThreadActivitySummary> _threadActivitySummariesById = new(StringComparer.Ordinal);
+        private readonly HashSet<string> _hoveredProjectIds = new(StringComparer.Ordinal);
+        private readonly HashSet<string> _hoveredThreadIds = new(StringComparer.Ordinal);
         private readonly Dictionary<string, TreeViewNode> _inspectorDirectoryNodesByPath = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<TreeViewNode, InspectorDirectoryTreeItem> _inspectorDirectoryItemsByNode = new();
+        private readonly Dictionary<string, InspectorDirectoryUiCache> _inspectorDirectoryUiCacheByKey = new(StringComparer.OrdinalIgnoreCase);
+        private int _paneFocusRequestId;
+        private int _visibleDeferredPaneMaterializationRequestId;
+        private bool _lifetimeResourcesReleased;
 
         private sealed class DiffReviewSourceOption
         {
@@ -130,6 +203,32 @@ namespace SelfContainedDeployment
             public Dictionary<string, InspectorDirectoryNodeModel> Children { get; } = new(StringComparer.OrdinalIgnoreCase);
         }
 
+        private sealed class InspectorDirectoryBuildResult
+        {
+            public string RootPath { get; init; }
+
+            public string RenderKey { get; init; }
+
+            public int FileCount { get; init; }
+
+            public List<InspectorDirectoryNodeModel> RootNodes { get; init; } = new();
+        }
+
+        private sealed class InspectorDirectoryUiCache
+        {
+            public string RootPath { get; init; }
+
+            public string RenderKey { get; init; }
+
+            public int FileCount { get; init; }
+
+            public List<TreeViewNode> RootNodes { get; init; } = new();
+
+            public Dictionary<string, TreeViewNode> NodesByPath { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+
+            public Dictionary<TreeViewNode, InspectorDirectoryTreeItem> ItemsByNode { get; init; } = new();
+        }
+
         private sealed class ThreadActivitySummary
         {
             public string Label { get; init; }
@@ -141,10 +240,47 @@ namespace SelfContainedDeployment
             public bool RequiresAttention { get; init; }
         }
 
+        private sealed class ProjectNoteListItem
+        {
+            public string NoteId { get; init; }
+
+            public string ThreadId { get; init; }
+
+            public string Title { get; init; }
+
+            public string Preview { get; init; }
+
+            public string ScopeLabel { get; init; }
+
+            public string Meta { get; init; }
+
+            public Brush AccentBrush { get; init; }
+        }
+
+        private sealed class NoteScopeOption
+        {
+            public string PaneId { get; init; }
+
+            public string Label { get; init; }
+        }
+
         private enum InspectorSection
         {
             Review,
             Files,
+            Notes,
+        }
+
+        private enum NotesListScope
+        {
+            Thread,
+            Project,
+        }
+
+        private enum SessionSaveDetail
+        {
+            Lightweight,
+            Full,
         }
 
         public static MainPage Current;
@@ -157,7 +293,7 @@ namespace SelfContainedDeployment
             ActualThemeChanged += OnActualThemeChanged;
             _sessionSaveTimer = DispatcherQueue.CreateTimer();
             _sessionSaveTimer.IsRepeating = false;
-            _sessionSaveTimer.Interval = TimeSpan.FromMilliseconds(450);
+            _sessionSaveTimer.Interval = TimeSpan.FromMilliseconds(1200);
             _sessionSaveTimer.Tick += OnSessionSaveTimerTick;
             _projectTreeRefreshTimer = DispatcherQueue.CreateTimer();
             _projectTreeRefreshTimer.IsRepeating = false;
@@ -173,6 +309,80 @@ namespace SelfContainedDeployment
             _paneLayoutTimer.Tick += OnPaneLayoutTimerTick;
         }
 
+        internal void ReleaseLifetimeResources()
+        {
+            if (_lifetimeResourcesReleased)
+            {
+                return;
+            }
+
+            _lifetimeResourcesReleased = true;
+            Loaded -= OnLoaded;
+            ActualThemeChanged -= OnActualThemeChanged;
+            _sessionSaveTimer.Stop();
+            _sessionSaveTimer.Tick -= OnSessionSaveTimerTick;
+            _projectTreeRefreshTimer.Stop();
+            _projectTreeRefreshTimer.Tick -= OnProjectTreeRefreshTimerTick;
+            _gitRefreshTimer.Stop();
+            _gitRefreshTimer.Tick -= OnGitRefreshTimerTick;
+            _paneLayoutTimer.Stop();
+            _paneLayoutTimer.Tick -= OnPaneLayoutTimerTick;
+            _latestPaneWarmupRequestId++;
+            _latestInspectorDirectoryBuildRequestId++;
+            _paneFocusRequestId++;
+            _gitRefreshPending = false;
+            _gitRefreshInFlight = false;
+            _pendingGitCorrelationId = null;
+            _inspectorDirectoryBuildCancellation?.Cancel();
+            _inspectorDirectoryBuildCancellation?.Dispose();
+            _inspectorDirectoryBuildCancellation = null;
+            DisposeAllWorkspacePanes();
+            _tabItemsById.Clear();
+            _paneContainersById.Clear();
+            _projectButtonsById.Clear();
+            _projectHeaderBordersById.Clear();
+            _threadButtonsById.Clear();
+            _diffFileButtonsByPath.Clear();
+            _threadActivitySummariesById.Clear();
+            _hoveredProjectIds.Clear();
+            _hoveredThreadIds.Clear();
+            _inspectorDirectoryNodesByPath.Clear();
+            _inspectorDirectoryItemsByNode.Clear();
+            _inspectorDirectoryUiCacheByKey.Clear();
+            _baselineCaptureInFlightThreadIds.Clear();
+            _lastDiffFileListRenderKey = null;
+            CancelPendingInspectorDirectoryBuilds();
+            _projects.Clear();
+            _activeProject = null;
+            _activeThread = null;
+            if (ReferenceEquals(Current, this))
+            {
+                Current = null;
+            }
+        }
+
+        private void DisposeAllWorkspacePanes()
+        {
+            foreach (WorkspacePaneRecord pane in _projects
+                .SelectMany(project => project.Threads)
+                .SelectMany(thread => thread.Panes)
+                .ToList())
+            {
+                try
+                {
+                    pane.DisposePane();
+                }
+                catch
+                {
+                }
+            }
+
+            foreach (Border container in _paneContainersById.Values)
+            {
+                container.Child = null;
+            }
+        }
+
         private static void LogAutomationEvent(string category, string name, string message = null, IReadOnlyDictionary<string, string> data = null)
         {
             NativeAutomationEventLog.Record(category, name, message, data);
@@ -180,10 +390,16 @@ namespace SelfContainedDeployment
 
         public void ApplyTheme(ElementTheme theme)
         {
+            if (SampleConfig.CurrentTheme == theme && ShellRoot.RequestedTheme == theme)
+            {
+                return;
+            }
+
             SampleConfig.CurrentTheme = theme;
             ShellRoot.RequestedTheme = theme;
             SettingsFrame.RequestedTheme = theme;
             ((App)Application.Current).MainWindowInstance?.ApplyChromeTheme(ResolveTheme(theme));
+            _settingsPageNeedsRefresh = !_showingSettings;
 
             RefreshProjectTree();
             UpdateSidebarActions();
@@ -204,7 +420,15 @@ namespace SelfContainedDeployment
 
         public void ApplyShellProfile(string profileId)
         {
-            SampleConfig.DefaultShellProfileId = ShellProfiles.Resolve(profileId).Id;
+            string resolvedProfileId = ShellProfiles.Resolve(profileId).Id;
+            if (string.Equals(SampleConfig.DefaultShellProfileId, resolvedProfileId, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(_activeProject?.ShellProfileId, resolvedProfileId, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            SampleConfig.DefaultShellProfileId = resolvedProfileId;
+            _settingsPageNeedsRefresh = !_showingSettings;
 
             if (_activeProject is not null)
             {
@@ -223,11 +447,17 @@ namespace SelfContainedDeployment
 
         public void ApplyPaneLimit(int paneLimit)
         {
-            SampleConfig.MaxPaneCountPerThread = Math.Clamp(paneLimit, 2, 4);
+            int resolvedPaneLimit = Math.Clamp(paneLimit, 2, 4);
+            if (SampleConfig.MaxPaneCountPerThread == resolvedPaneLimit)
+            {
+                return;
+            }
+
+            SampleConfig.MaxPaneCountPerThread = resolvedPaneLimit;
+            _settingsPageNeedsRefresh = !_showingSettings;
 
             RefreshProjectTree();
             RefreshTabView();
-            RenderPaneWorkspace();
             RequestLayoutForVisiblePanes();
 
             LogAutomationEvent("shell", "pane-limit.changed", $"Thread pane limit set to {SampleConfig.MaxPaneCountPerThread}", new Dictionary<string, string>
@@ -239,6 +469,8 @@ namespace SelfContainedDeployment
 
         public NativeAutomationUiTreeResponse GetAutomationUiTree()
         {
+            using var perfScope = NativeAutomationDiagnostics.TrackOperation("ui-tree.snapshot");
+            NativeAutomationDiagnostics.IncrementCounter("uiTreeSnapshot.count");
             Stopwatch stopwatch = Stopwatch.StartNew();
             int interactiveIndex = 0;
             List<NativeAutomationUiNode> children = new();
@@ -287,108 +519,142 @@ namespace SelfContainedDeployment
         public NativeAutomationUiActionResponse PerformAutomationUiAction(NativeAutomationUiActionRequest request)
         {
             request ??= new NativeAutomationUiActionRequest();
-
-            DependencyObject target = FindUiElement(request);
-            if (target is null)
+            NativeAutomationActionScope scope = NativeAutomationDiagnostics.BeginAction("ui-action", request.Action, new Dictionary<string, string>
             {
-                if (TryPerformKnownUiActionWithoutElement(request))
-                {
-                    return new NativeAutomationUiActionResponse
-                    {
-                        Ok = true,
-                    };
-                }
-
-                return new NativeAutomationUiActionResponse
-                {
-                    Ok = false,
-                    Message = "No matching UI element was found.",
-                };
-            }
-
-            string action = request.Action?.Trim().ToLowerInvariant();
-
-            switch (action)
-            {
-                case "focus":
-                    if (target is FrameworkElement focusable)
-                    {
-                        focusable.Focus(FocusState.Programmatic);
-                    }
-                    break;
-
-                case "click":
-                case "invoke":
-                    InvokeUiElement(target);
-                    break;
-
-                case "doubleclick":
-                    DoubleClickUiElement(target);
-                    break;
-
-                case "rightclick":
-                    ShowContextFlyout(target);
-                    break;
-
-                case "settext":
-                    SetUiElementText(target, request.Value);
-                    break;
-
-                case "select":
-                    SelectUiElement(target);
-                    break;
-
-                case "toggle":
-                    ToggleUiElement(target);
-                    break;
-
-                case "hover":
-                    ApplyUiVisualState(target, "PointerOver");
-                    break;
-
-                case "press":
-                    ApplyUiVisualState(target, "Pressed");
-                    break;
-
-                case "normalstate":
-                    ApplyUiVisualState(target, "Normal");
-                    break;
-
-                case "invokemenuitem":
-                    InvokeContextMenuItem(target, request.MenuItemText ?? request.Value);
-                    break;
-
-                default:
-                    return new NativeAutomationUiActionResponse
-                    {
-                        Ok = false,
-                        Message = $"Unknown ui action '{request.Action}'.",
-                    };
-            }
-
-            NativeAutomationUiNode snapshot = null;
-            try
-            {
-                int interactiveIndex = 0;
-                snapshot = BuildUiNodeTree(target, "target", ref interactiveIndex, depth: 0);
-            }
-            catch
-            {
-            }
-            LogAutomationEvent("automation", "ui-action.executed", $"Executed ui action '{request.Action}'", new Dictionary<string, string>
-            {
-                ["action"] = request.Action ?? string.Empty,
                 ["automationId"] = request.AutomationId ?? string.Empty,
                 ["refLabel"] = request.RefLabel ?? string.Empty,
                 ["elementId"] = request.ElementId ?? string.Empty,
                 ["text"] = request.Text ?? string.Empty,
             });
 
-            return new NativeAutomationUiActionResponse
+            try
             {
-                Ok = true,
-                Target = snapshot,
-            };
+                DependencyObject target = FindUiElement(request);
+                if (target is null)
+                {
+                    if (TryPerformKnownUiActionWithoutElement(request))
+                    {
+                        NativeAutomationDiagnostics.CompleteAction(scope);
+                        return new NativeAutomationUiActionResponse
+                        {
+                            Ok = true,
+                            CorrelationId = scope.CorrelationId,
+                            DurationMs = scope.Stopwatch.Elapsed.TotalMilliseconds,
+                        };
+                    }
+
+                    NativeAutomationDiagnostics.CompleteAction(scope);
+                    return new NativeAutomationUiActionResponse
+                    {
+                        Ok = false,
+                        Message = "No matching UI element was found.",
+                        CorrelationId = scope.CorrelationId,
+                        DurationMs = scope.Stopwatch.Elapsed.TotalMilliseconds,
+                    };
+                }
+
+                string action = request.Action?.Trim().ToLowerInvariant();
+
+                switch (action)
+                {
+                    case "focus":
+                        if (target is FrameworkElement focusable)
+                        {
+                            focusable.Focus(FocusState.Programmatic);
+                        }
+                        break;
+
+                    case "click":
+                    case "invoke":
+                        InvokeUiElement(target);
+                        break;
+
+                    case "doubleclick":
+                        DoubleClickUiElement(target);
+                        break;
+
+                    case "rightclick":
+                        ShowContextFlyout(target);
+                        break;
+
+                    case "settext":
+                        SetUiElementText(target, request.Value);
+                        break;
+
+                    case "select":
+                        SelectUiElement(target);
+                        break;
+
+                    case "toggle":
+                        ToggleUiElement(target);
+                        break;
+
+                    case "hover":
+                        ApplyUiVisualState(target, "PointerOver");
+                        break;
+
+                    case "press":
+                        ApplyUiVisualState(target, "Pressed");
+                        break;
+
+                    case "normalstate":
+                        ApplyUiVisualState(target, "Normal");
+                        break;
+
+                    case "invokemenuitem":
+                        InvokeContextMenuItem(target, request.MenuItemText ?? request.Value);
+                        break;
+
+                    default:
+                        NativeAutomationDiagnostics.CompleteAction(scope);
+                        return new NativeAutomationUiActionResponse
+                        {
+                            Ok = false,
+                            Message = $"Unknown ui action '{request.Action}'.",
+                            CorrelationId = scope.CorrelationId,
+                            DurationMs = scope.Stopwatch.Elapsed.TotalMilliseconds,
+                        };
+                }
+
+                NativeAutomationUiNode snapshot = null;
+                try
+                {
+                    int interactiveIndex = 0;
+                    snapshot = BuildUiNodeTree(target, "target", ref interactiveIndex, depth: 0);
+                }
+                catch
+                {
+                }
+                LogAutomationEvent("automation", "ui-action.executed", $"Executed ui action '{request.Action}'", new Dictionary<string, string>
+                {
+                    ["action"] = request.Action ?? string.Empty,
+                    ["automationId"] = request.AutomationId ?? string.Empty,
+                    ["refLabel"] = request.RefLabel ?? string.Empty,
+                    ["elementId"] = request.ElementId ?? string.Empty,
+                    ["text"] = request.Text ?? string.Empty,
+                    ["correlationId"] = scope.CorrelationId,
+                });
+
+                NativeAutomationDiagnostics.CompleteAction(scope);
+                return new NativeAutomationUiActionResponse
+                {
+                    Ok = true,
+                    Target = snapshot,
+                    CorrelationId = scope.CorrelationId,
+                    DurationMs = scope.Stopwatch.Elapsed.TotalMilliseconds,
+                };
+            }
+            catch (Exception ex)
+            {
+                NativeAutomationDiagnostics.CompleteAction(scope, ex);
+                return new NativeAutomationUiActionResponse
+                {
+                    Ok = false,
+                    Message = ex.Message,
+                    CorrelationId = scope.CorrelationId,
+                    DurationMs = scope.Stopwatch.Elapsed.TotalMilliseconds,
+                };
+            }
         }
 
         private bool TryPerformKnownUiActionWithoutElement(NativeAutomationUiActionRequest request)
@@ -679,16 +945,24 @@ namespace SelfContainedDeployment
         public NativeAutomationState GetAutomationState()
         {
             GitThreadSnapshot displayedSnapshot = ResolveDisplayedGitSnapshot();
-            List<NativeAutomationProjectState> projects = _projects.Select(project => new NativeAutomationProjectState
+            List<NativeAutomationProjectState> projects = new(_projects.Count);
+            List<NativeAutomationThreadState> threads = new();
+            foreach (WorkspaceProject project in _projects)
             {
-                Id = project.Id,
-                Name = project.Name,
-                RootPath = project.RootPath,
-                DisplayPath = FormatProjectPath(project),
-                ShellProfileId = project.ShellProfileId,
-                SelectedThreadId = project.SelectedThreadId,
-                Threads = project.Threads.Select(BuildThreadState).ToList(),
-            }).ToList();
+                List<NativeAutomationThreadState> projectThreads = project.Threads.Select(BuildThreadState).ToList();
+                projects.Add(new NativeAutomationProjectState
+                {
+                    Id = project.Id,
+                    Name = project.Name,
+                    RootPath = project.RootPath,
+                    DisplayPath = FormatProjectPath(project),
+                    ShellProfileId = project.ShellProfileId,
+                    SelectedThreadId = project.SelectedThreadId,
+                    Threads = projectThreads,
+                    Notes = project.Threads.SelectMany(BuildThreadNoteStates).ToList(),
+                });
+                threads.AddRange(projectThreads);
+            }
 
             return new NativeAutomationState
             {
@@ -711,13 +985,23 @@ namespace SelfContainedDeployment
                 SelectedCheckpointId = _activeThread?.SelectedCheckpointId,
                 CheckpointCount = _activeThread?.DiffCheckpoints.Count ?? 0,
                 Projects = projects,
-                Threads = projects.SelectMany(project => project.Threads).ToList(),
+                Threads = threads,
             };
         }
 
         public NativeAutomationActionResponse PerformAutomationAction(NativeAutomationActionRequest request)
         {
             request ??= new NativeAutomationActionRequest();
+            NativeAutomationActionScope scope = NativeAutomationDiagnostics.BeginAction("action", request.Action, new Dictionary<string, string>
+            {
+                ["projectId"] = request.ProjectId ?? string.Empty,
+                ["threadId"] = request.ThreadId ?? string.Empty,
+                ["tabId"] = request.TabId ?? string.Empty,
+                ["targetTabId"] = request.TargetTabId ?? string.Empty,
+                ["noteId"] = request.NoteId ?? string.Empty,
+                ["title"] = request.Title ?? string.Empty,
+                ["value"] = request.Value ?? string.Empty,
+            });
 
             try
             {
@@ -731,9 +1015,6 @@ namespace SelfContainedDeployment
                     case "showterminal":
                         ShowTerminalShell(queueGitRefresh: false);
                         break;
-                    case "showoverview":
-                        ShowThreadOverview();
-                        break;
                     case "showsettings":
                         ShowSettings();
                         break;
@@ -742,11 +1023,11 @@ namespace SelfContainedDeployment
                         break;
                     case "newproject":
                         OpenProject(GetOrCreateProject(ResolveRequestedPath(request.Value), null, SampleConfig.DefaultShellProfileId));
-                        ShowTerminalShell();
+                        ShowTerminalShellIfNeeded();
                         break;
                     case "newthread":
                         ActivateThread(CreateThread(ResolveActionProject(request), ResolveThreadName(request.Value)));
-                        ShowTerminalShell();
+                        ShowTerminalShellIfNeeded();
                         break;
                     case "newtab":
                         ShowTerminalShell(queueGitRefresh: false);
@@ -762,11 +1043,11 @@ namespace SelfContainedDeployment
                         break;
                     case "selectproject":
                         ActivateProject(FindProject(request.ProjectId));
-                        ShowTerminalShell();
+                        ShowTerminalShellIfNeeded();
                         break;
                     case "selectthread":
                         ActivateThread(FindThread(request.ThreadId));
-                        ShowTerminalShell();
+                        ShowTerminalShellIfNeeded();
                         break;
                     case "selecttab":
                         SelectTab(request.TabId);
@@ -821,7 +1102,56 @@ namespace SelfContainedDeployment
                         break;
                     case "setthreadworktree":
                         SetThreadWorktree(request.ThreadId, request.Value);
-                        ShowTerminalShell();
+                        ShowTerminalShellIfNeeded();
+                        break;
+                    case "setthreadnote":
+                        UpsertThreadNote(
+                            ResolveActionThread(request) ?? throw new InvalidOperationException("No thread selected."),
+                            request.NoteId,
+                            request.Title,
+                            request.Value,
+                            selectAfterUpdate: true,
+                            paneId: request.TabId);
+                        break;
+                    case "addthreadnote":
+                    case "createthreadnote":
+                        AddThreadNote(
+                            ResolveActionThread(request) ?? throw new InvalidOperationException("No thread selected."),
+                            request.Title,
+                            request.Value,
+                            selectAfterCreate: true,
+                            paneId: request.TabId);
+                        break;
+                    case "updatethreadnote":
+                        UpsertThreadNote(
+                            ResolveActionThread(request) ?? throw new InvalidOperationException("No thread selected."),
+                            request.NoteId,
+                            request.Title,
+                            request.Value,
+                            selectAfterUpdate: false,
+                            paneId: request.TabId);
+                        break;
+                    case "deletethreadnote":
+                        DeleteThreadNote(
+                            ResolveActionThread(request) ?? throw new InvalidOperationException("No thread selected."),
+                            request.NoteId);
+                        break;
+                    case "selectthreadnote":
+                        SelectThreadNote(
+                            ResolveActionThread(request) ?? throw new InvalidOperationException("No thread selected."),
+                            request.NoteId);
+                        break;
+                    case "editthreadnote":
+                    case "showthreadnotes":
+                        OpenThreadNotes(
+                            ResolveActionThread(request) ?? throw new InvalidOperationException("No thread selected."),
+                            scope: NotesListScope.Thread);
+                        break;
+                    case "showprojectnotes":
+                    case "shownotes":
+                        OpenThreadNotes(
+                            ResolveActionThread(request) ?? throw new InvalidOperationException("No thread selected."),
+                            scope: NotesListScope.Project);
                         break;
                     case "refreshdiff":
                         ShowTerminalShell(queueGitRefresh: false);
@@ -914,10 +1244,13 @@ namespace SelfContainedDeployment
                         SendInputToSelectedTerminal(request.Value);
                         break;
                     default:
+                        NativeAutomationDiagnostics.CompleteAction(scope);
                         return new NativeAutomationActionResponse
                         {
                             Ok = false,
                             Message = $"Unknown action '{request.Action}'.",
+                            CorrelationId = scope.CorrelationId,
+                            DurationMs = scope.Stopwatch.Elapsed.TotalMilliseconds,
                             State = GetAutomationState(),
                         };
                 }
@@ -929,21 +1262,30 @@ namespace SelfContainedDeployment
                     ["threadId"] = request.ThreadId ?? string.Empty,
                     ["tabId"] = request.TabId ?? string.Empty,
                     ["targetTabId"] = request.TargetTabId ?? string.Empty,
+                    ["noteId"] = request.NoteId ?? string.Empty,
+                    ["title"] = request.Title ?? string.Empty,
                     ["value"] = request.Value ?? string.Empty,
+                    ["correlationId"] = scope.CorrelationId,
                 });
 
+                NativeAutomationDiagnostics.CompleteAction(scope);
                 return new NativeAutomationActionResponse
                 {
                     Ok = true,
+                    CorrelationId = scope.CorrelationId,
+                    DurationMs = scope.Stopwatch.Elapsed.TotalMilliseconds,
                     State = GetAutomationState(),
                 };
             }
             catch (Exception ex)
             {
+                NativeAutomationDiagnostics.CompleteAction(scope, ex);
                 return new NativeAutomationActionResponse
                 {
                     Ok = false,
                     Message = ex.Message,
+                    CorrelationId = scope.CorrelationId,
+                    DurationMs = scope.Stopwatch.Elapsed.TotalMilliseconds,
                     State = GetAutomationState(),
                 };
             }
@@ -964,12 +1306,33 @@ namespace SelfContainedDeployment
             {
                 ShowTerminalShell();
             }
+
+            if (EnableBackgroundPaneWarmup)
+            {
+                QueueProjectPaneWarmup(_activeProject, _activeThread);
+            }
+
+            if (_projects.SelectMany(project => project.Threads).SelectMany(thread => thread.Panes).Any(pane => pane.Kind == WorkspacePaneKind.Browser))
+            {
+                BrowserPaneControl.PreloadSharedEnvironmentIfAvailable();
+            }
+
+            if (EnableSettingsPagePreload)
+            {
+                QueueSettingsPagePreload();
+            }
         }
 
         private void OnSessionSaveTimerTick(DispatcherQueueTimer sender, object args)
         {
             _sessionSaveTimer.Stop();
-            PersistSessionState();
+            if (_sessionSaveInFlight)
+            {
+                _sessionSavePending = true;
+                return;
+            }
+
+            PersistSessionState(backgroundWrite: true);
         }
 
         private void OnProjectTreeRefreshTimerTick(DispatcherQueueTimer sender, object args)
@@ -982,7 +1345,27 @@ namespace SelfContainedDeployment
         private async void OnGitRefreshTimerTick(DispatcherQueueTimer sender, object args)
         {
             _gitRefreshTimer.Stop();
-            await RefreshActiveThreadGitStateAsync(_pendingGitSelectedPath, _pendingGitPreserveSelection).ConfigureAwait(true);
+            if (_gitRefreshInFlight)
+            {
+                _gitRefreshPending = true;
+                return;
+            }
+
+            _gitRefreshInFlight = true;
+            try
+            {
+                await RefreshActiveThreadGitStateAsync(_pendingGitSelectedPath, _pendingGitPreserveSelection, _pendingGitIncludeSelectedDiff, _pendingGitPreferFastRefresh).ConfigureAwait(true);
+            }
+            finally
+            {
+                _gitRefreshInFlight = false;
+                if (_gitRefreshPending && !_lifetimeResourcesReleased)
+                {
+                    _gitRefreshPending = false;
+                    _gitRefreshTimer.Stop();
+                    _gitRefreshTimer.Start();
+                }
+            }
         }
 
         private void OnActualThemeChanged(FrameworkElement sender, object args)
@@ -1013,34 +1396,12 @@ namespace SelfContainedDeployment
 
         private void OnSettingsNavClicked(object sender, RoutedEventArgs e)
         {
+            if (ShouldSuppressSettingsNavigation())
+            {
+                return;
+            }
+
             ShowSettings();
-        }
-
-        private void OnShowOverviewClicked(object sender, RoutedEventArgs e)
-        {
-            if (_showingOverview)
-            {
-                ShowTerminalShell(queueGitRefresh: false);
-                return;
-            }
-
-            ShowThreadOverview();
-        }
-
-        private void OnCloseOverviewClicked(object sender, RoutedEventArgs e)
-        {
-            ShowTerminalShell(queueGitRefresh: false);
-        }
-
-        private void OnOverviewNewThreadClicked(object sender, RoutedEventArgs e)
-        {
-            if (_activeProject is null)
-            {
-                return;
-            }
-
-            ActivateThread(CreateThread(_activeProject));
-            ShowThreadOverview();
         }
 
         private async void OnNewProjectClicked(object sender, RoutedEventArgs e)
@@ -1053,7 +1414,7 @@ namespace SelfContainedDeployment
 
             WorkspaceProject project = GetOrCreateProject(draft.ProjectPath, null, draft.ShellProfileId);
             OpenProject(project);
-            ShowTerminalShell();
+            ShowTerminalShellIfNeeded();
         }
 
         private void OnProjectAddThreadClicked(object sender, RoutedEventArgs e)
@@ -1061,7 +1422,7 @@ namespace SelfContainedDeployment
             if (sender is Button button && button.Tag is string projectId)
             {
                 ActivateThread(CreateThread(FindProject(projectId)));
-                ShowTerminalShell();
+                ShowTerminalShellIfNeeded();
             }
         }
 
@@ -1070,7 +1431,7 @@ namespace SelfContainedDeployment
             if (sender is Button button && button.Tag is string projectId)
             {
                 ActivateProject(FindProject(projectId));
-                ShowTerminalShell();
+                ShowTerminalShellIfNeeded();
             }
         }
 
@@ -1079,25 +1440,8 @@ namespace SelfContainedDeployment
             if (sender is MenuFlyoutItem item && item.Tag is string projectId)
             {
                 ActivateThread(CreateThread(FindProject(projectId)));
-                ShowTerminalShell();
+                ShowTerminalShellIfNeeded();
             }
-        }
-
-        private void OnProjectOverviewMenuClicked(object sender, RoutedEventArgs e)
-        {
-            if (sender is not MenuFlyoutItem item || item.Tag is not string projectId)
-            {
-                return;
-            }
-
-            WorkspaceProject project = FindProject(projectId);
-            if (project is null)
-            {
-                return;
-            }
-
-            ActivateProject(project);
-            ShowThreadOverview();
         }
 
         private void OnClearProjectThreadsMenuClicked(object sender, RoutedEventArgs e)
@@ -1121,16 +1465,7 @@ namespace SelfContainedDeployment
             if (sender is Button button && button.Tag is string threadId)
             {
                 ActivateThread(FindThread(threadId));
-                ShowTerminalShell();
-            }
-        }
-
-        private void OnOverviewThreadClicked(object sender, RoutedEventArgs e)
-        {
-            if (sender is Button button && button.Tag is string threadId)
-            {
-                ActivateThread(FindThread(threadId));
-                ShowTerminalShell();
+                ShowTerminalShellIfNeeded();
             }
         }
 
@@ -1160,12 +1495,74 @@ namespace SelfContainedDeployment
             }
         }
 
+        private void OnEditThreadNotesMenuClicked(object sender, RoutedEventArgs e)
+        {
+            if (sender is MenuFlyoutItem item && item.Tag is string threadId)
+            {
+                OpenThreadNotes(FindThread(threadId), scope: NotesListScope.Thread);
+            }
+        }
+
+        private void OnNewThreadNoteMenuClicked(object sender, RoutedEventArgs e)
+        {
+            if (sender is not MenuFlyoutItem item || item.Tag is not string threadId)
+            {
+                return;
+            }
+
+            WorkspaceThread thread = FindThread(threadId);
+            if (thread is null)
+            {
+                return;
+            }
+
+            AddThreadNote(thread, title: null, text: null, selectAfterCreate: true, paneId: null);
+            OpenThreadNotes(thread, scope: NotesListScope.Thread);
+        }
+
         private void OnRenamePaneMenuClicked(object sender, RoutedEventArgs e)
         {
             if (sender is MenuFlyoutItem item && item.Tag is string paneId)
             {
                 BeginInlinePaneRename(paneId);
             }
+        }
+
+        private void OnEditPaneThreadNotesMenuClicked(object sender, RoutedEventArgs e)
+        {
+            if (sender is MenuFlyoutItem item && item.Tag is string paneId)
+            {
+                WorkspaceThread thread = FindThreadForPane(paneId);
+                if (thread is null)
+                {
+                    return;
+                }
+
+                WorkspaceThreadNote note = thread.NoteEntries.FirstOrDefault(candidate => string.Equals(candidate.PaneId, paneId, StringComparison.Ordinal));
+                if (note is not null)
+                {
+                    thread.SelectedNoteId = note.Id;
+                }
+
+                OpenThreadNotes(thread, scope: NotesListScope.Thread);
+            }
+        }
+
+        private void OnNewPaneNoteMenuClicked(object sender, RoutedEventArgs e)
+        {
+            if (sender is not MenuFlyoutItem item || item.Tag is not string paneId)
+            {
+                return;
+            }
+
+            WorkspaceThread thread = FindThreadForPane(paneId);
+            if (thread is null)
+            {
+                return;
+            }
+
+            AddThreadNote(thread, title: null, text: null, selectAfterCreate: true, paneId);
+            OpenThreadNotes(thread, scope: NotesListScope.Thread);
         }
 
         private void OnDuplicateThreadMenuClicked(object sender, RoutedEventArgs e)
@@ -1203,7 +1600,7 @@ namespace SelfContainedDeployment
             }
 
             _activeThread.Name = string.IsNullOrWhiteSpace(ThreadNameBox.Text) ? "Untitled thread" : ThreadNameBox.Text.Trim();
-            RefreshProjectTree();
+            QueueProjectTreeRefresh();
             LogAutomationEvent("shell", "thread.header_edited", $"Header edited for {_activeThread.Name}", new Dictionary<string, string>
             {
                 ["threadId"] = _activeThread.Id,
@@ -1268,7 +1665,7 @@ namespace SelfContainedDeployment
 
         private void OnRefreshDiffClicked(object sender, RoutedEventArgs e)
         {
-            QueueActiveThreadGitRefresh(preserveSelection: true);
+            QueueActiveThreadGitRefresh(preserveSelection: true, includeSelectedDiff: true);
         }
 
         private async void OnOpenFullPatchClicked(object sender, RoutedEventArgs e)
@@ -1307,6 +1704,31 @@ namespace SelfContainedDeployment
             SelectDiffPathInCurrentReview(changedFile.Path);
         }
 
+        private void OnDiffFileItemButtonLoaded(object sender, RoutedEventArgs e)
+        {
+            if (sender is not Button button || ResolveSelectedDiffFile(button) is not GitChangedFile changedFile || string.IsNullOrWhiteSpace(changedFile.Path))
+            {
+                return;
+            }
+
+            _diffFileButtonsByPath[changedFile.Path] = button;
+            string selectedPath = ResolveDisplayedGitSnapshot()?.SelectedPath;
+            ApplyDiffFileButtonState(button, string.Equals(changedFile.Path, selectedPath, StringComparison.Ordinal));
+        }
+
+        private void OnDiffFileItemButtonUnloaded(object sender, RoutedEventArgs e)
+        {
+            if (sender is not Button button || ResolveSelectedDiffFile(button) is not GitChangedFile changedFile || string.IsNullOrWhiteSpace(changedFile.Path))
+            {
+                return;
+            }
+
+            if (_diffFileButtonsByPath.TryGetValue(changedFile.Path, out Button existingButton) && ReferenceEquals(existingButton, button))
+            {
+                _diffFileButtonsByPath.Remove(changedFile.Path);
+            }
+        }
+
         private void TerminalTabs_TabCloseRequested(TabView sender, TabViewTabCloseRequestedEventArgs args)
         {
             if (args.Item is TabViewItem item && item.Tag is WorkspacePaneRecord pane)
@@ -1325,10 +1747,13 @@ namespace SelfContainedDeployment
             if (TerminalTabs.SelectedItem is TabViewItem item && item.Tag is WorkspacePaneRecord pane)
             {
                 _activeThread.SelectedPaneId = pane.Id;
-                LogAutomationEvent("shell", "pane.selected", $"Selected pane {pane.Id}", new Dictionary<string, string>
+                EnsureThreadPanesMaterialized(_activeProject, _activeThread);
+                WorkspacePaneRecord selectedPane = GetSelectedPane(_activeThread) ?? pane;
+                SyncTabViewItemWithPane(selectedPane);
+                LogAutomationEvent("shell", "pane.selected", $"Selected pane {selectedPane.Id}", new Dictionary<string, string>
                 {
-                    ["paneId"] = pane.Id,
-                    ["paneKind"] = pane.Kind.ToString().ToLowerInvariant(),
+                    ["paneId"] = selectedPane.Id,
+                    ["paneKind"] = selectedPane.Kind.ToString().ToLowerInvariant(),
                     ["threadId"] = _activeThread.Id,
                     ["projectId"] = _activeProject?.Id ?? string.Empty,
                 });
@@ -1339,6 +1764,7 @@ namespace SelfContainedDeployment
             RefreshInspectorFileBrowser();
             FocusSelectedPane();
             RequestLayoutForVisiblePanes();
+            QueueVisibleDeferredPaneMaterialization(_activeProject, _activeThread);
             QueueProjectTreeRefresh();
             UpdateHeader();
             QueueSessionSave();
@@ -1372,25 +1798,103 @@ namespace SelfContainedDeployment
 
         internal void PersistSessionState()
         {
+            PersistSessionState(backgroundWrite: false);
+        }
+
+        private void PersistSessionState(bool backgroundWrite)
+        {
             if (_restoringSession)
             {
                 return;
             }
 
-            WorkspaceSessionSnapshot snapshot = BuildSessionSnapshot();
-            WorkspaceSessionStore.Save(snapshot);
-            LogAutomationEvent("shell", "workspace.saved", "Saved WinMux workspace session", new Dictionary<string, string>
+            if (backgroundWrite)
             {
-                ["projectCount"] = snapshot.Projects.Count.ToString(),
-                ["sessionPath"] = WorkspaceSessionStore.GetSessionPath(),
+                if (_sessionSaveInFlight)
+                {
+                    _sessionSavePending = true;
+                    return;
+                }
+
+                _sessionSaveInFlight = true;
+            }
+
+            NativeAutomationDiagnostics.IncrementCounter("autosave.count");
+            SessionSaveDetail saveDetail = backgroundWrite
+                ? _pendingSessionSaveDetail
+                : SessionSaveDetail.Full;
+            _pendingSessionSaveDetail = SessionSaveDetail.Lightweight;
+            WorkspaceSessionSnapshot snapshot;
+            Dictionary<string, string> logData;
+            try
+            {
+                snapshot = BuildSessionSnapshot(saveDetail);
+                logData = new()
+                {
+                    ["projectCount"] = snapshot.Projects.Count.ToString(),
+                    ["sessionPath"] = WorkspaceSessionStore.GetSessionPath(),
+                    ["saveDetail"] = saveDetail.ToString().ToLowerInvariant(),
+                };
+            }
+            catch
+            {
+                if (backgroundWrite)
+                {
+                    _sessionSaveInFlight = false;
+                }
+
+                throw;
+            }
+
+            if (!backgroundWrite)
+            {
+                using var perfScope = NativeAutomationDiagnostics.TrackOperation("workspace.save");
+                WorkspaceSessionStore.Save(snapshot);
+                LogAutomationEvent("shell", "workspace.saved", "Saved WinMux workspace session", logData);
+                return;
+            }
+
+            _ = System.Threading.Tasks.Task.Run(() =>
+            {
+                try
+                {
+                    using var perfScope = NativeAutomationDiagnostics.TrackOperation("workspace.save", background: true);
+                    WorkspaceSessionStore.Save(snapshot);
+                    LogAutomationEvent("shell", "workspace.saved", "Saved WinMux workspace session", logData);
+                }
+                catch (Exception ex)
+                {
+                    LogAutomationEvent("shell", "workspace.save_failed", $"Could not save workspace session: {ex.Message}", new Dictionary<string, string>
+                    {
+                        ["sessionPath"] = WorkspaceSessionStore.GetSessionPath(),
+                    });
+                }
+                finally
+                {
+                    DispatcherQueue?.TryEnqueue(() =>
+                    {
+                        _sessionSaveInFlight = false;
+                        if (_sessionSavePending)
+                        {
+                            _sessionSavePending = false;
+                            _sessionSaveTimer.Stop();
+                            _sessionSaveTimer.Start();
+                        }
+                    });
+                }
             });
         }
 
-        private void QueueSessionSave()
+        private void QueueSessionSave(SessionSaveDetail detail = SessionSaveDetail.Lightweight)
         {
             if (_restoringSession)
             {
                 return;
+            }
+
+            if (detail == SessionSaveDetail.Full)
+            {
+                _pendingSessionSaveDetail = SessionSaveDetail.Full;
             }
 
             _sessionSaveTimer.Stop();
@@ -1419,24 +1923,336 @@ namespace SelfContainedDeployment
             _projectTreeRefreshTimer.Start();
         }
 
-        private void QueueActiveThreadGitRefresh(string selectedPath = null, bool preserveSelection = false)
+        private bool QueueActiveThreadGitRefresh(
+            string selectedPath = null,
+            bool preserveSelection = false,
+            bool includeSelectedDiff = true,
+            bool preferFastRefresh = false)
         {
             if (_activeThread is null)
             {
                 _activeGitSnapshot = null;
                 ApplyGitSnapshotToUi();
-                return;
+                return false;
             }
 
             _pendingGitSelectedPath = ResolveSelectedDiffPathForRefresh(_activeThread, selectedPath, preserveSelection);
             _pendingGitPreserveSelection = preserveSelection;
-            _gitRefreshTimer.Stop();
-            _gitRefreshTimer.Start();
+            _pendingGitIncludeSelectedDiff = includeSelectedDiff;
+            _pendingGitPreferFastRefresh = preferFastRefresh;
+            _pendingGitCorrelationId = NativeAutomationDiagnostics.CaptureCurrentCorrelationId();
 
-            DiffBranchText.Text = string.IsNullOrWhiteSpace(_activeThread.BranchName)
-                ? (_activeGitSnapshot?.BranchName ?? "No git context")
-                : _activeThread.BranchName;
-            DiffWorktreeText.Text = _activeThread.WorktreePath ?? _activeProject?.RootPath ?? string.Empty;
+            if (!RequiresActiveThreadGitRefresh(_activeThread, _pendingGitSelectedPath, _pendingGitIncludeSelectedDiff, _pendingGitPreferFastRefresh))
+            {
+                _pendingGitCorrelationId = null;
+                _pendingGitIncludeSelectedDiff = true;
+                _pendingGitPreferFastRefresh = false;
+                QueueVisibleDiffHydrationIfNeeded(_activeThread, _activeProject, _activeGitSnapshot ?? _activeThread.LiveSnapshot);
+                return false;
+            }
+
+            if (ShouldAttemptPeerThreadGitSnapshot(_activeThread, _pendingGitSelectedPath, _pendingGitIncludeSelectedDiff, _pendingGitPreferFastRefresh) &&
+                TryUsePeerThreadGitSnapshot(_activeThread, _pendingGitSelectedPath, _pendingGitIncludeSelectedDiff, _pendingGitPreferFastRefresh))
+            {
+                _pendingGitCorrelationId = null;
+                _pendingGitIncludeSelectedDiff = true;
+                _pendingGitPreferFastRefresh = false;
+                QueueVisibleDiffHydrationIfNeeded(_activeThread, _activeProject, _activeGitSnapshot ?? _activeThread.LiveSnapshot);
+                return false;
+            }
+
+            _gitRefreshTimer.Stop();
+            if (_gitRefreshInFlight)
+            {
+                _gitRefreshPending = true;
+            }
+            else
+            {
+                _gitRefreshTimer.Start();
+            }
+
+            if (ShouldRefreshReviewInspectorUi())
+            {
+                DiffBranchText.Text = string.IsNullOrWhiteSpace(_activeThread.BranchName)
+                    ? (_activeGitSnapshot?.BranchName ?? "No git context")
+                    : _activeThread.BranchName;
+                DiffWorktreeText.Text = _activeThread.WorktreePath ?? _activeProject?.RootPath ?? string.Empty;
+            }
+
+            return true;
+        }
+
+        private bool ShouldAttemptPeerThreadGitSnapshot(
+            WorkspaceThread thread,
+            string selectedPath,
+            bool includeSelectedDiff,
+            bool preferFastRefresh)
+        {
+            if (thread is null)
+            {
+                return false;
+            }
+
+            if (!preferFastRefresh)
+            {
+                return true;
+            }
+
+            if (VisibleDiffPaneRequiresCompleteSnapshot(thread) || VisibleDiffPaneNeedsSelectedDiff(thread, selectedPath))
+            {
+                return true;
+            }
+
+            return _inspectorOpen && _activeInspectorSection == InspectorSection.Review;
+        }
+
+        private bool RequiresActiveThreadGitRefresh(WorkspaceThread thread, string selectedPath, bool includeSelectedDiff, bool preferFastRefresh)
+        {
+            if (thread is null)
+            {
+                return true;
+            }
+
+            string threadRootPath = ResolveThreadRootPath(thread.Project, thread);
+            bool requiresCompleteSnapshot = !preferFastRefresh && VisibleDiffPaneRequiresCompleteSnapshot(thread);
+            TimeSpan maxAge = ResolveGitSnapshotMaxAge(includeSelectedDiff, preferFastRefresh, requiresCompleteSnapshot);
+            return !SnapshotSatisfiesGitRefreshNeeds(
+                thread.LiveSnapshot,
+                thread.LiveSnapshotCapturedAt,
+                threadRootPath,
+                selectedPath,
+                includeSelectedDiff,
+                requiresCompleteSnapshot,
+                maxAge);
+        }
+
+        private bool VisibleDiffPaneRequiresCompleteSnapshot(WorkspaceThread thread)
+        {
+            if (thread is null)
+            {
+                return false;
+            }
+
+            List<DiffPaneRecord> visibleDiffPanes = GetVisiblePanes(thread)
+                .OfType<DiffPaneRecord>()
+                .ToList();
+            if (visibleDiffPanes.Any(diffPane => diffPane.DiffPane.DisplayMode == DiffPaneDisplayMode.FullPatchReview))
+            {
+                return true;
+            }
+
+            string fallbackPath = ReferenceEquals(thread, _activeThread)
+                ? _activeGitSnapshot?.SelectedPath ?? thread.SelectedDiffPath
+                : thread.SelectedDiffPath;
+            List<string> visibleDiffPaths = GetVisibleFileCompareDiffPaths(thread, fallbackPath);
+            return visibleDiffPaths.Count > 1 ||
+                (visibleDiffPaths.Count == 1 &&
+                    !string.Equals(visibleDiffPaths[0], fallbackPath, StringComparison.Ordinal));
+        }
+
+        private bool VisibleDiffPaneNeedsSelectedDiff(WorkspaceThread thread, string selectedPath)
+        {
+            if (thread is null ||
+                thread.DiffReviewSource != DiffReviewSourceKind.Live ||
+                VisibleDiffPaneRequiresCompleteSnapshot(thread))
+            {
+                return false;
+            }
+
+            string fallbackPath = string.IsNullOrWhiteSpace(selectedPath)
+                ? (ReferenceEquals(thread, _activeThread)
+                    ? _activeGitSnapshot?.SelectedPath ?? thread.SelectedDiffPath
+                    : thread.SelectedDiffPath)
+                : selectedPath;
+            List<string> visibleDiffPaths = GetVisibleFileCompareDiffPaths(thread, fallbackPath);
+            return visibleDiffPaths.Count == 1 &&
+                string.Equals(visibleDiffPaths[0], fallbackPath, StringComparison.Ordinal);
+        }
+
+        private static string ResolveVisibleDiffPanePath(DiffPaneRecord diffPane, string fallbackPath)
+        {
+            return string.IsNullOrWhiteSpace(diffPane?.DiffPath)
+                ? fallbackPath
+                : diffPane.DiffPath;
+        }
+
+        private List<string> GetVisibleFileCompareDiffPaths(WorkspaceThread thread, string fallbackPath)
+        {
+            if (thread is null)
+            {
+                return new List<string>();
+            }
+
+            return GetVisiblePanes(thread)
+                .OfType<DiffPaneRecord>()
+                .Where(diffPane => diffPane.DiffPane.DisplayMode == DiffPaneDisplayMode.FileCompare)
+                .Select(diffPane => ResolveVisibleDiffPanePath(diffPane, fallbackPath))
+                .Where(path => !string.IsNullOrWhiteSpace(path))
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+        }
+
+        private bool SnapshotSatisfiesGitRefreshNeeds(
+            GitThreadSnapshot snapshot,
+            DateTimeOffset capturedAt,
+            string threadRootPath,
+            string selectedPath,
+            bool includeSelectedDiff,
+            bool requiresCompleteSnapshot,
+            TimeSpan maxAge)
+        {
+            if (snapshot is null)
+            {
+                return false;
+            }
+
+            if (!string.Equals(snapshot.WorktreePath, threadRootPath, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            if (capturedAt == default || DateTimeOffset.UtcNow - capturedAt > maxAge)
+            {
+                return false;
+            }
+
+            if (requiresCompleteSnapshot && !HasCompleteDiffSet(snapshot))
+            {
+                return false;
+            }
+
+            if (!string.IsNullOrWhiteSpace(selectedPath) &&
+                snapshot.ChangedFiles.Count > 0 &&
+                !snapshot.ChangedFiles.Any(file => string.Equals(file.Path, selectedPath, StringComparison.Ordinal)))
+            {
+                return false;
+            }
+
+            if (includeSelectedDiff && !HasSelectedDiffAvailable(snapshot, selectedPath))
+            {
+                return false;
+            }
+
+            return true;
+        }
+
+        private static TimeSpan ResolveGitSnapshotMaxAge(bool includeSelectedDiff, bool preferFastRefresh, bool requiresCompleteSnapshot)
+        {
+            if (preferFastRefresh && !includeSelectedDiff && !requiresCompleteSnapshot)
+            {
+                return CachedShellOnlyGitSnapshotMaxAge;
+            }
+
+            return CachedThreadGitSnapshotMaxAge;
+        }
+
+        private bool TryUsePeerThreadGitSnapshot(WorkspaceThread thread, string selectedPath, bool includeSelectedDiff, bool preferFastRefresh)
+        {
+            if (thread is null)
+            {
+                return false;
+            }
+
+            string threadRootPath = ResolveThreadRootPath(thread.Project, thread);
+            if (string.IsNullOrWhiteSpace(threadRootPath))
+            {
+                return false;
+            }
+
+            bool requiresCompleteSnapshot = !preferFastRefresh && VisibleDiffPaneRequiresCompleteSnapshot(thread);
+            TimeSpan maxAge = ResolveGitSnapshotMaxAge(includeSelectedDiff, preferFastRefresh, requiresCompleteSnapshot);
+            WorkspaceThread newestThread = null;
+            DateTimeOffset newestCapturedAt = default;
+
+            foreach (WorkspaceThread candidate in _projects.SelectMany(project => project.Threads))
+            {
+                if (ReferenceEquals(candidate, thread) ||
+                    !SnapshotSatisfiesGitRefreshNeeds(
+                        candidate.LiveSnapshot,
+                        candidate.LiveSnapshotCapturedAt,
+                        threadRootPath,
+                        selectedPath,
+                        includeSelectedDiff,
+                        requiresCompleteSnapshot,
+                        maxAge))
+                {
+                    continue;
+                }
+
+                if (newestThread is null || candidate.LiveSnapshotCapturedAt > newestCapturedAt)
+                {
+                    newestThread = candidate;
+                    newestCapturedAt = candidate.LiveSnapshotCapturedAt;
+                }
+            }
+
+            if (newestThread?.LiveSnapshot is null)
+            {
+                return false;
+            }
+
+            GitThreadSnapshot adoptedSnapshot = GitStatusService.CloneSnapshot(newestThread.LiveSnapshot);
+            MergeCachedDiffTexts(thread.LiveSnapshot, adoptedSnapshot);
+            GitStatusService.SelectDiffPath(adoptedSnapshot, selectedPath);
+            ApplyReusedActiveGitSnapshot(adoptedSnapshot, newestCapturedAt);
+            return true;
+        }
+
+        private void ApplyReusedActiveGitSnapshot(GitThreadSnapshot snapshot, DateTimeOffset capturedAt)
+        {
+            if (_activeThread is null || snapshot is null)
+            {
+                return;
+            }
+
+            MergeCachedDiffTexts(_activeGitSnapshot, snapshot);
+            _activeGitSnapshot = snapshot;
+            _activeThread.BranchName = snapshot.BranchName;
+            _activeThread.WorktreePath = string.IsNullOrWhiteSpace(_activeThread.WorktreePath)
+                ? snapshot.WorktreePath
+                : _activeThread.WorktreePath;
+            _activeThread.ChangedFileCount = snapshot.ChangedFiles.Count;
+            _activeThread.SelectedDiffPath = snapshot.SelectedPath;
+            _activeThread.LiveSnapshot = GitStatusService.CloneSnapshot(snapshot);
+            _activeThread.LiveSnapshotCapturedAt = capturedAt;
+            ApplyGitSnapshotToUi();
+            QueueProjectTreeRefresh();
+            UpdateHeader();
+        }
+
+        private void QueueVisibleDiffHydrationIfNeeded(
+            WorkspaceThread thread,
+            WorkspaceProject project,
+            GitThreadSnapshot snapshot = null)
+        {
+            if (thread is null ||
+                project is null ||
+                !ReferenceEquals(thread, _activeThread) ||
+                !ReferenceEquals(project, _activeProject) ||
+                _showingSettings ||
+                thread.DiffReviewSource != DiffReviewSourceKind.Live)
+            {
+                return;
+            }
+
+            GitThreadSnapshot candidateSnapshot = snapshot ?? _activeGitSnapshot ?? thread.LiveSnapshot;
+            bool requiresCompleteSnapshot = VisibleDiffPaneRequiresCompleteSnapshot(thread);
+            string fallbackPath = candidateSnapshot?.SelectedPath ?? thread.SelectedDiffPath;
+            List<string> visibleDiffPaths = GetVisibleFileCompareDiffPaths(thread, fallbackPath);
+            string hydrationPath = !string.IsNullOrWhiteSpace(fallbackPath)
+                ? fallbackPath
+                : visibleDiffPaths.FirstOrDefault();
+            if (!requiresCompleteSnapshot &&
+                (visibleDiffPaths.Count == 0 || HasSelectedDiffAvailable(candidateSnapshot, hydrationPath)))
+            {
+                return;
+            }
+
+            DispatcherQueue.TryEnqueue(() => _ = RefreshActiveThreadGitStateAsync(
+                hydrationPath,
+                preserveSelection: true,
+                includeSelectedDiff: !requiresCompleteSnapshot,
+                preferFastRefresh: false));
         }
 
         private GitThreadSnapshot ResolveDisplayedGitSnapshot()
@@ -1453,7 +2269,7 @@ namespace SelfContainedDeployment
                 DiffReviewSourceKind.Checkpoint when !string.IsNullOrWhiteSpace(_activeThread.SelectedCheckpointId) =>
                     _activeThread.DiffCheckpoints.FirstOrDefault(checkpoint => string.Equals(checkpoint.Id, _activeThread.SelectedCheckpointId, StringComparison.Ordinal))?.Snapshot
                     ?? _activeGitSnapshot,
-                _ => _activeGitSnapshot,
+                _ => _activeGitSnapshot ?? _activeThread.LiveSnapshot,
             };
         }
 
@@ -1501,6 +2317,12 @@ namespace SelfContainedDeployment
         {
             if (DiffReviewSourceComboBox is null || DiffReviewSourceMetaText is null || CaptureCheckpointButton is null || DiffReviewSourceSection is null)
             {
+                return;
+            }
+
+            if (_showingSettings || !_inspectorOpen)
+            {
+                DiffReviewSourceSection.Visibility = Visibility.Collapsed;
                 return;
             }
 
@@ -1605,7 +2427,61 @@ namespace SelfContainedDeployment
 
         private void OnInspectorFilesTabClicked(object sender, RoutedEventArgs e)
         {
-            SetInspectorSection(InspectorSection.Files);
+            SetInspectorSection(InspectorSection.Files, refreshFiles: false);
+            RefreshInspectorFileBrowser();
+        }
+
+        private void OnInspectorNotesTabClicked(object sender, RoutedEventArgs e)
+        {
+            SetInspectorSection(InspectorSection.Notes, refreshFiles: false);
+        }
+
+        private void OnInspectorNotesThreadScopeClicked(object sender, RoutedEventArgs e)
+        {
+            SetNotesListScope(NotesListScope.Thread);
+        }
+
+        private void OnInspectorNotesProjectScopeClicked(object sender, RoutedEventArgs e)
+        {
+            SetNotesListScope(NotesListScope.Project);
+        }
+
+        private void OnInspectorAddNoteClicked(object sender, RoutedEventArgs e)
+        {
+            if (_activeThread is null)
+            {
+                return;
+            }
+
+            AddThreadNote(_activeThread, title: null, text: null, selectAfterCreate: true);
+            RefreshInspectorNotes();
+        }
+
+        private void OnInspectorDeleteNoteClicked(object sender, RoutedEventArgs e)
+        {
+            if (_activeThread is null)
+            {
+                return;
+            }
+
+            DeleteThreadNote(_activeThread, _activeThread.SelectedNoteId);
+            RefreshInspectorNotes();
+        }
+
+        private void OnInspectorCollapseAllClicked(object sender, RoutedEventArgs e)
+        {
+            if (InspectorDirectoryTree is null)
+            {
+                return;
+            }
+
+            InspectorDirectoryTree.SelectedNode = null;
+            foreach (TreeViewNode rootNode in InspectorDirectoryTree.RootNodes)
+            {
+                CollapseInspectorDirectoryNode(rootNode);
+            }
+
+            UpdateInspectorFileActionState();
         }
 
         private async void OnInspectorSaveFileClicked(object sender, RoutedEventArgs e)
@@ -1646,40 +2522,124 @@ namespace SelfContainedDeployment
             await OpenEditorFileFromInspectorAsync(item.RelativePath).ConfigureAwait(true);
         }
 
-        private void SetInspectorSection(InspectorSection section)
+        private void OnInspectorNotesTextChanged(object sender, TextChangedEventArgs e)
         {
+            if (_suppressInspectorNotesSync || sender is not TextBox noteBox || _activeThread is null)
+            {
+                return;
+            }
+
+            UpdateThreadNotes(_activeThread, noteBox.Text, refreshInspector: false);
+            RefreshInspectorNotes();
+        }
+
+        private void OnInspectorNotesListSelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (_suppressInspectorNotesSelectionChanged || sender is not ListView listView || listView.SelectedItem is not ProjectNoteListItem item)
+            {
+                return;
+            }
+
+            WorkspaceThread thread = FindThread(item.ThreadId);
+            SelectThreadNote(thread, item.NoteId, navigateToAttachment: true);
+            OpenThreadNotes(thread, focusEditor: false);
+        }
+
+        private void OnInspectorNoteTitleTextChanged(object sender, TextChangedEventArgs e)
+        {
+            if (_suppressInspectorNoteTitleSync || sender is not TextBox titleBox || _activeThread is null)
+            {
+                return;
+            }
+
+            WorkspaceThreadNote note = ResolveSelectedThreadNote(_activeThread);
+            if (note is null)
+            {
+                note = AddThreadNote(_activeThread, titleBox.Text, text: null, selectAfterCreate: true);
+            }
+            else
+            {
+                UpsertThreadNote(_activeThread, note.Id, titleBox.Text, note.Text, selectAfterUpdate: true, paneId: note.PaneId);
+            }
+
+            if (note is not null)
+            {
+                RefreshInspectorNotes();
+            }
+        }
+
+        private void OnInspectorNoteScopeSelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (_suppressInspectorNoteScopeSelectionChanged || sender is not ComboBox scopeBox || _activeThread is null)
+            {
+                return;
+            }
+
+            WorkspaceThreadNote note = ResolveSelectedThreadNote(_activeThread);
+            if (note is null)
+            {
+                return;
+            }
+
+            if (scopeBox.SelectedItem is not NoteScopeOption option)
+            {
+                return;
+            }
+
+            UpdateThreadNotePaneAttachment(_activeThread, note, option.PaneId);
+            RefreshInspectorNotes();
+        }
+
+        private void SetInspectorSection(InspectorSection section, bool refreshFiles = true)
+        {
+            bool sectionChanged = _activeInspectorSection != section;
             _activeInspectorSection = section;
             UpdateInspectorSectionChrome();
-            if (section == InspectorSection.Files)
+            if (section == InspectorSection.Files && refreshFiles && sectionChanged)
             {
-                RefreshInspectorFileBrowser();
+                RefreshInspectorFileBrowser(forceRebuild: sectionChanged);
+            }
+            else if (section == InspectorSection.Review && sectionChanged)
+            {
+                ApplyGitSnapshotToUi();
+            }
+            else if (section == InspectorSection.Notes)
+            {
+                RefreshInspectorNotes();
             }
         }
 
         private void SyncInspectorSectionWithSelectedPane()
         {
+            if (_activeInspectorSection == InspectorSection.Notes)
+            {
+                return;
+            }
+
             WorkspacePaneRecord selectedPane = GetSelectedPane(_activeThread);
             if (selectedPane?.Kind == WorkspacePaneKind.Editor)
             {
-                SetInspectorSection(InspectorSection.Files);
+                SetInspectorSection(InspectorSection.Files, refreshFiles: false);
                 return;
             }
 
             if (selectedPane?.Kind == WorkspacePaneKind.Diff)
             {
-                SetInspectorSection(InspectorSection.Review);
+                SetInspectorSection(InspectorSection.Review, refreshFiles: false);
             }
         }
 
         private void UpdateInspectorSectionChrome()
         {
-            if (InspectorReviewTabButton is null || InspectorFilesTabButton is null)
+            if (InspectorReviewTabButton is null || InspectorFilesTabButton is null || InspectorNotesTabButton is null)
             {
                 return;
             }
 
-            ApplyThreadButtonState(InspectorReviewTabButton, _activeInspectorSection == InspectorSection.Review);
-            ApplyThreadButtonState(InspectorFilesTabButton, _activeInspectorSection == InspectorSection.Files);
+            ApplyInspectorTabButtonState(InspectorReviewTabButton, _activeInspectorSection == InspectorSection.Review);
+            ApplyInspectorTabButtonState(InspectorFilesTabButton, _activeInspectorSection == InspectorSection.Files);
+            ApplyInspectorTabButtonState(InspectorNotesTabButton, _activeInspectorSection == InspectorSection.Notes);
+            ApplyInspectorNotesTabButtonAffordance();
 
             if (InspectorReviewContent is not null)
             {
@@ -1689,6 +2649,11 @@ namespace SelfContainedDeployment
             if (InspectorFilesContent is not null)
             {
                 InspectorFilesContent.Visibility = _activeInspectorSection == InspectorSection.Files ? Visibility.Visible : Visibility.Collapsed;
+            }
+
+            if (InspectorNotesContent is not null)
+            {
+                InspectorNotesContent.Visibility = _activeInspectorSection == InspectorSection.Notes ? Visibility.Visible : Visibility.Collapsed;
             }
 
             if (InspectorReviewActionsPanel is not null)
@@ -1701,13 +2666,80 @@ namespace SelfContainedDeployment
                 InspectorFileActionsPanel.Visibility = _activeInspectorSection == InspectorSection.Files ? Visibility.Visible : Visibility.Collapsed;
             }
 
+            if (InspectorNotesActionsPanel is not null)
+            {
+                InspectorNotesActionsPanel.Visibility = _activeInspectorSection == InspectorSection.Notes ? Visibility.Visible : Visibility.Collapsed;
+            }
+
+            RefreshInspectorNotes();
             UpdateInspectorFileActionState();
+        }
+
+        private void ApplyInspectorNotesTabButtonAffordance()
+        {
+            if (InspectorNotesTabButton is null)
+            {
+                return;
+            }
+
+            int noteCount = _activeThread?.NoteEntries.Count ?? 0;
+
+            ToolTipService.SetToolTip(
+                InspectorNotesTabButton,
+                _activeThread is null
+                    ? "No thread selected"
+                    : noteCount == 0
+                        ? "Open project notes"
+                        : $"{noteCount} note{(noteCount == 1 ? string.Empty : "s")} in this thread");
+
+            if (_activeInspectorSection == InspectorSection.Notes)
+            {
+                return;
+            }
+
+            if (noteCount > 0)
+            {
+                InspectorNotesTabButton.Foreground = AppBrush(InspectorNotesTabButton, "ShellWarningBrush");
+                InspectorNotesTabButton.Background = CreateSidebarTintedBrush(AppBrush(InspectorNotesTabButton, "ShellWarningBrush"), 0x0D, Windows.UI.Color.FromArgb(0xFF, 0x14, 0x16, 0x1B));
+            }
+        }
+
+        private void SetNotesListScope(NotesListScope scope)
+        {
+            if (_activeNotesListScope == scope)
+            {
+                return;
+            }
+
+            _activeNotesListScope = scope;
+            RefreshInspectorNotes();
+        }
+
+        private void ApplyNotesListScopeButtonState(Button button, bool active)
+        {
+            if (button is null)
+            {
+                return;
+            }
+
+            button.Background = active
+                ? CreateSidebarTintedBrush(AppBrush(button, "ShellPaneActiveBorderBrush"), 0x12, Windows.UI.Color.FromArgb(0xFF, 0x2C, 0x2D, 0x31))
+                : null;
+            button.BorderBrush = null;
+            button.Foreground = active ? AppBrush(button, "ShellTextPrimaryBrush") : AppBrush(button, "ShellTextSecondaryBrush");
         }
 
         private void RefreshInspectorFileBrowser(bool forceRebuild = false)
         {
             if (InspectorDirectoryTree is null || InspectorDirectoryRootText is null || InspectorDirectoryMetaText is null || InspectorDirectoryEmptyText is null)
             {
+                return;
+            }
+
+            if (_showingSettings || !_inspectorOpen || _activeThread is null)
+            {
+                CancelPendingInspectorDirectoryBuilds();
+                UpdateInspectorFileActionState();
                 return;
             }
 
@@ -1739,23 +2771,46 @@ namespace SelfContainedDeployment
 
             InspectorDirectoryRootText.Text = directoryTitle;
             ToolTipService.SetToolTip(InspectorDirectoryRootText, ShellProfiles.ResolveDisplayPath(rootPath, _activeProject?.ShellProfileId ?? SampleConfig.DefaultShellProfileId));
-            bool bypassFileCache = false;
             bool shouldRebuild = forceRebuild ||
                 !string.Equals(_lastInspectorDirectoryRootPath, rootPath, StringComparison.OrdinalIgnoreCase);
-            if (ResolveDisplayedGitSnapshot()?.ChangedFiles is IReadOnlyList<GitChangedFile> liveFiles)
+            bool rootChanged = !string.Equals(_lastInspectorDirectoryRootPath, rootPath, StringComparison.OrdinalIgnoreCase);
+            IReadOnlyList<GitChangedFile> liveFiles = ResolveDisplayedGitSnapshot()?.ChangedFiles?.ToList() ?? new List<GitChangedFile>();
+            string renderKey = BuildInspectorDirectoryRenderKey(liveFiles);
+            if (liveFiles.Count > 0)
             {
-                string renderKey = string.Join("|", liveFiles.Select(file => $"{file.Path}:{file.Status}:{file.AddedLines}:{file.RemovedLines}"));
                 if (!string.Equals(InspectorDirectoryTree.Tag as string, renderKey, StringComparison.Ordinal))
                 {
                     shouldRebuild = true;
-                    bypassFileCache = true;
                 }
             }
 
             if (shouldRebuild)
             {
-                BuildInspectorDirectoryTree(rootPath, bypassCache: bypassFileCache);
-                _lastInspectorDirectoryRootPath = rootPath;
+                string cacheKey = BuildInspectorDirectoryCacheKey(rootPath, renderKey);
+                if (!forceRebuild &&
+                    _inspectorDirectoryUiCacheByKey.TryGetValue(cacheKey, out InspectorDirectoryUiCache cachedUi))
+                {
+                    ApplyInspectorDirectoryUiCache(cachedUi);
+                    shouldRebuild = false;
+                }
+                else if (!forceRebuild &&
+                    rootChanged &&
+                    (_activeGitSnapshot is null || liveFiles.Count == 0) &&
+                    TryGetInspectorDirectoryUiForRoot(rootPath, out InspectorDirectoryUiCache cachedRootUi))
+                {
+                    ApplyInspectorDirectoryUiCache(cachedRootUi);
+                    shouldRebuild = false;
+                }
+            }
+
+            if (shouldRebuild)
+            {
+                QueueInspectorDirectoryBuild(
+                    rootPath,
+                    liveFiles,
+                    renderKey,
+                    bypassCache: forceRebuild,
+                    correlationId: NativeAutomationDiagnostics.CaptureCurrentCorrelationId());
             }
 
             EditorPaneRecord editorPane = ResolveInspectorEditorPane(createIfNeeded: false);
@@ -1767,26 +2822,109 @@ namespace SelfContainedDeployment
             UpdateInspectorFileActionState();
         }
 
-        private void BuildInspectorDirectoryTree(string rootPath, bool bypassCache = false)
+        private void CancelPendingInspectorDirectoryBuilds()
         {
-            _inspectorDirectoryNodesByPath.Clear();
-            _inspectorDirectoryItemsByNode.Clear();
-            InspectorDirectoryTree.SelectedNode = null;
-            InspectorDirectoryTree.RootNodes.Clear();
+            _pendingInspectorDirectoryRootPath = null;
+            _pendingInspectorDirectoryRenderKey = null;
+            _latestInspectorDirectoryBuildRequestId++;
+            _inspectorDirectoryBuildCancellation?.Cancel();
+            _inspectorDirectoryBuildCancellation?.Dispose();
+            _inspectorDirectoryBuildCancellation = null;
+        }
 
-            List<EditorPaneFileEntry> files = EditorPaneControl.EnumerateProjectFilesForRoot(rootPath, bypassCache);
-            IReadOnlyList<GitChangedFile> changedFiles = ResolveDisplayedGitSnapshot()?.ChangedFiles?.ToList() ?? new List<GitChangedFile>();
-            Dictionary<string, InspectorDirectoryDecoration> decorationsByPath = BuildInspectorDirectoryDecorations(changedFiles);
-            InspectorDirectoryTree.Tag = string.Join("|", changedFiles.Select(file => $"{file.Path}:{file.Status}:{file.AddedLines}:{file.RemovedLines}"));
-            InspectorDirectoryEmptyText.Visibility = files.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-            if (files.Count == 0)
+        private void QueueInspectorDirectoryBuild(
+            string rootPath,
+            IReadOnlyList<GitChangedFile> changedFiles,
+            string renderKey,
+            bool bypassCache = false,
+            string correlationId = null)
+        {
+            if (_showingSettings || !_inspectorOpen || _activeThread is null)
             {
                 return;
             }
 
+            if (string.Equals(_pendingInspectorDirectoryRootPath, rootPath, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(_pendingInspectorDirectoryRenderKey, renderKey, StringComparison.Ordinal) &&
+                !bypassCache)
+            {
+                return;
+            }
+
+            _pendingInspectorDirectoryRootPath = rootPath;
+            _pendingInspectorDirectoryRenderKey = renderKey;
+            int requestId = ++_latestInspectorDirectoryBuildRequestId;
+            _inspectorDirectoryBuildCancellation?.Cancel();
+            _inspectorDirectoryBuildCancellation?.Dispose();
+            _inspectorDirectoryBuildCancellation = new System.Threading.CancellationTokenSource();
+            System.Threading.CancellationToken cancellationToken = _inspectorDirectoryBuildCancellation.Token;
+
+            bool rootChanged = !string.Equals(_lastInspectorDirectoryRootPath, rootPath, StringComparison.OrdinalIgnoreCase);
+            if (rootChanged)
+            {
+                _inspectorDirectoryNodesByPath.Clear();
+                _inspectorDirectoryItemsByNode.Clear();
+                InspectorDirectoryTree.SelectedNode = null;
+                InspectorDirectoryTree.RootNodes.Clear();
+                InspectorDirectoryEmptyText.Visibility = Visibility.Collapsed;
+            }
+
+            _ = System.Threading.Tasks.Task.Run(
+                () => BuildInspectorDirectoryTree(rootPath, changedFiles, renderKey, bypassCache, correlationId, cancellationToken),
+                cancellationToken)
+                .ContinueWith(task =>
+                {
+                    DispatcherQueue.TryEnqueue(() =>
+                    {
+                        if (requestId != _latestInspectorDirectoryBuildRequestId)
+                        {
+                            return;
+                        }
+
+                        if (task.IsCanceled)
+                        {
+                            return;
+                        }
+
+                        if (task.IsFaulted)
+                        {
+                            _pendingInspectorDirectoryRootPath = null;
+                            _pendingInspectorDirectoryRenderKey = null;
+                            InspectorDirectoryEmptyText.Visibility = Visibility.Visible;
+                            UpdateInspectorFileActionState();
+                            return;
+                        }
+
+                        string activeRootPath = ResolveThreadRootPath(_activeProject, _activeThread);
+                        if (!string.Equals(activeRootPath, task.Result.RootPath, StringComparison.OrdinalIgnoreCase))
+                        {
+                            return;
+                        }
+
+                        ApplyInspectorDirectoryBuildResult(task.Result, correlationId);
+                    });
+                }, System.Threading.Tasks.TaskScheduler.Default);
+        }
+
+        private static InspectorDirectoryBuildResult BuildInspectorDirectoryTree(
+            string rootPath,
+            IReadOnlyList<GitChangedFile> changedFiles,
+            string renderKey,
+            bool bypassCache = false,
+            string correlationId = null,
+            System.Threading.CancellationToken cancellationToken = default)
+        {
+            using var perfScope = NativeAutomationDiagnostics.TrackOperation("inspector.build.background", correlationId, background: true, data: new Dictionary<string, string>
+            {
+                ["rootPath"] = rootPath ?? string.Empty,
+            });
+            NativeAutomationDiagnostics.IncrementCounter("inspectorFileScan.count");
+            List<EditorPaneFileEntry> files = EditorPaneControl.EnumerateProjectFilesForRoot(rootPath);
+            Dictionary<string, InspectorDirectoryDecoration> decorationsByPath = BuildInspectorDirectoryDecorations(changedFiles);
             Dictionary<string, InspectorDirectoryNodeModel> rootNodes = new(StringComparer.OrdinalIgnoreCase);
             foreach (EditorPaneFileEntry file in files)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 string[] segments = file.RelativePath.Split(new[] { '/' }, StringSplitOptions.RemoveEmptyEntries);
                 Dictionary<string, InspectorDirectoryNodeModel> siblings = rootNodes;
                 string cumulativePath = string.Empty;
@@ -1816,24 +2954,142 @@ namespace SelfContainedDeployment
                 }
             }
 
-            foreach (InspectorDirectoryNodeModel node in OrderInspectorDirectoryNodes(rootNodes.Values))
+            return new InspectorDirectoryBuildResult
             {
-                InspectorDirectoryTree.RootNodes.Add(BuildInspectorDirectoryTreeNode(node, 0));
+                RootPath = rootPath,
+                RenderKey = renderKey,
+                FileCount = files.Count,
+                RootNodes = OrderInspectorDirectoryNodes(rootNodes.Values).ToList(),
+            };
+        }
+
+        private static string BuildInspectorDirectoryCacheKey(string rootPath, string renderKey)
+        {
+            return $"{rootPath ?? string.Empty}|{renderKey ?? string.Empty}";
+        }
+
+        private bool TryGetInspectorDirectoryUiForRoot(string rootPath, out InspectorDirectoryUiCache uiCache)
+        {
+            uiCache = _inspectorDirectoryUiCacheByKey.Values
+                .LastOrDefault(candidate => string.Equals(candidate.RootPath, rootPath, StringComparison.OrdinalIgnoreCase));
+            return uiCache is not null;
+        }
+
+        private void ApplyInspectorDirectoryBuildResult(InspectorDirectoryBuildResult result, string correlationId = null)
+        {
+            if (_showingSettings || !_inspectorOpen || _activeThread is null || _activeInspectorSection != InspectorSection.Files)
+            {
+                return;
+            }
+
+            using var perfScope = NativeAutomationDiagnostics.TrackOperation("inspector.build.apply", correlationId, background: true, data: new Dictionary<string, string>
+            {
+                ["rootPath"] = result?.RootPath ?? string.Empty,
+            });
+            InspectorDirectoryUiCache uiCache = BuildInspectorDirectoryUiCache(result);
+            CacheInspectorDirectoryUi(uiCache);
+            ApplyInspectorDirectoryUiCache(uiCache);
+        }
+
+        private InspectorDirectoryUiCache BuildInspectorDirectoryUiCache(InspectorDirectoryBuildResult result)
+        {
+            InspectorDirectoryUiCache uiCache = new()
+            {
+                RootPath = result.RootPath,
+                RenderKey = result.RenderKey,
+                FileCount = result.FileCount,
+            };
+
+            foreach (InspectorDirectoryNodeModel node in result.RootNodes)
+            {
+                uiCache.RootNodes.Add(BuildInspectorDirectoryTreeNode(node, 0, uiCache.NodesByPath, uiCache.ItemsByNode));
+            }
+
+            return uiCache;
+        }
+
+        private void CacheInspectorDirectoryUi(InspectorDirectoryUiCache uiCache)
+        {
+            if (uiCache is null)
+            {
+                return;
+            }
+
+            _inspectorDirectoryUiCacheByKey[BuildInspectorDirectoryCacheKey(uiCache.RootPath, uiCache.RenderKey)] = uiCache;
+            while (_inspectorDirectoryUiCacheByKey.Count > 6)
+            {
+                string oldestKey = _inspectorDirectoryUiCacheByKey.Keys.FirstOrDefault();
+                if (string.IsNullOrWhiteSpace(oldestKey))
+                {
+                    break;
+                }
+
+                _inspectorDirectoryUiCacheByKey.Remove(oldestKey);
             }
         }
 
-        private TreeViewNode BuildInspectorDirectoryTreeNode(InspectorDirectoryNodeModel node, int depth)
+        private void ApplyInspectorDirectoryUiCache(InspectorDirectoryUiCache uiCache)
+        {
+            _pendingInspectorDirectoryRootPath = null;
+            _pendingInspectorDirectoryRenderKey = null;
+            _inspectorDirectoryNodesByPath.Clear();
+            _inspectorDirectoryItemsByNode.Clear();
+            InspectorDirectoryTree.SelectedNode = null;
+            InspectorDirectoryTree.RootNodes.Clear();
+            InspectorDirectoryTree.Tag = uiCache?.RenderKey;
+            InspectorDirectoryEmptyText.Visibility = uiCache is null || uiCache.FileCount == 0 ? Visibility.Visible : Visibility.Collapsed;
+            _lastInspectorDirectoryRootPath = uiCache?.RootPath;
+
+            if (uiCache is null || uiCache.FileCount == 0)
+            {
+                UpdateInspectorFileActionState();
+                return;
+            }
+
+            foreach ((string relativePath, TreeViewNode node) in uiCache.NodesByPath)
+            {
+                _inspectorDirectoryNodesByPath[relativePath] = node;
+            }
+
+            foreach ((TreeViewNode node, InspectorDirectoryTreeItem item) in uiCache.ItemsByNode)
+            {
+                _inspectorDirectoryItemsByNode[node] = item;
+            }
+
+            foreach (TreeViewNode rootNode in uiCache.RootNodes)
+            {
+                InspectorDirectoryTree.RootNodes.Add(rootNode);
+            }
+
+            EditorPaneRecord editorPane = ResolveInspectorEditorPane(createIfNeeded: false);
+            UpdateInspectorDirectorySelection(editorPane?.Editor.SelectedFilePath);
+            UpdateInspectorFileActionState();
+        }
+
+        private TreeViewNode BuildInspectorDirectoryTreeNode(
+            InspectorDirectoryNodeModel node,
+            int depth,
+            Dictionary<string, TreeViewNode> nodesByPath,
+            Dictionary<TreeViewNode, InspectorDirectoryTreeItem> itemsByNode)
         {
             InspectorDirectoryDecoration decoration = node.Decoration;
+            FileIconInfo themeIcon = FileIconTheme.Resolve(node.RelativePath, node.IsDirectory);
+            Brush defaultIconBrush = AppBrush(InspectorDirectoryTree, ResolveInspectorIconBrushKey(node.RelativePath, node.IsDirectory, decoration));
+            Brush resolvedIconBrush = node.IsDirectory && decoration?.HasChangedDescendant == true
+                ? defaultIconBrush
+                : themeIcon?.Brush ?? defaultIconBrush;
             InspectorDirectoryTreeItem item = new()
             {
                 Name = node.Name,
                 RelativePath = node.RelativePath,
                 IsDirectory = node.IsDirectory,
-                IconGlyph = ResolveInspectorItemGlyph(node.RelativePath, node.IsDirectory),
-                IconBrush = AppBrush(InspectorDirectoryTree, ResolveInspectorIconBrushKey(node.RelativePath, node.IsDirectory, decoration)),
-                KindText = ResolveInspectorKindText(node.RelativePath, node.IsDirectory),
-                KindBrush = AppBrush(InspectorDirectoryTree, ResolveInspectorIconBrushKey(node.RelativePath, node.IsDirectory, decoration)),
+                IconGlyph = themeIcon?.Glyph ?? ResolveInspectorItemGlyph(node.RelativePath, node.IsDirectory),
+                IconFontFamily = themeIcon?.FontFamily,
+                IconFontSize = themeIcon?.FontSize ?? 11,
+                UseGlyphBadge = node.IsDirectory || themeIcon is not null,
+                IconBrush = resolvedIconBrush,
+                KindText = themeIcon is null ? ResolveInspectorKindText(node.RelativePath, node.IsDirectory) : string.Empty,
+                KindBrush = resolvedIconBrush,
                 StatusText = ResolveInspectorChangeMarker(decoration?.File, hasChangedDescendant: decoration?.HasChangedDescendant == true),
                 StatusBrush = AppBrush(InspectorDirectoryTree, ResolveInspectorChangeBrushKey(decoration?.File, hasChangedDescendant: decoration?.HasChangedDescendant == true)),
             };
@@ -1843,18 +3099,18 @@ namespace SelfContainedDeployment
                 Content = BuildInspectorDirectoryNodeContent(item),
                 IsExpanded = node.IsDirectory && ShouldExpandInspectorDirectoryNode(node, depth),
             };
-            _inspectorDirectoryItemsByNode[treeNode] = item;
+            itemsByNode[treeNode] = item;
 
             if (node.IsDirectory)
             {
                 foreach (InspectorDirectoryNodeModel child in OrderInspectorDirectoryNodes(node.Children.Values))
                 {
-                    treeNode.Children.Add(BuildInspectorDirectoryTreeNode(child, depth + 1));
+                    treeNode.Children.Add(BuildInspectorDirectoryTreeNode(child, depth + 1, nodesByPath, itemsByNode));
                 }
             }
             else
             {
-                _inspectorDirectoryNodesByPath[item.RelativePath] = treeNode;
+                nodesByPath[item.RelativePath] = treeNode;
             }
 
             return treeNode;
@@ -1865,6 +3121,12 @@ namespace SelfContainedDeployment
             return nodes
                 .OrderByDescending(node => node.IsDirectory)
                 .ThenBy(node => node.Name, StringComparer.OrdinalIgnoreCase);
+        }
+
+        private static string BuildInspectorDirectoryRenderKey(IReadOnlyList<GitChangedFile> changedFiles)
+        {
+            return string.Join("|", (changedFiles ?? Array.Empty<GitChangedFile>())
+                .Select(file => $"{file.Path}:{file.Status}:{file.AddedLines}:{file.RemovedLines}"));
         }
 
         private static bool ShouldExpandInspectorDirectoryNode(InspectorDirectoryNodeModel node, int depth)
@@ -1883,9 +3145,9 @@ namespace SelfContainedDeployment
         {
             Grid row = new()
             {
-                MinHeight = 26,
-                ColumnSpacing = 9,
-                Margin = new Thickness(0, 2, 0, 2),
+                MinHeight = 22,
+                ColumnSpacing = 5,
+                Margin = new Thickness(-6, 1, 0, 1),
             };
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -1897,12 +3159,13 @@ namespace SelfContainedDeployment
             TextBlock name = new()
             {
                 VerticalAlignment = VerticalAlignment.Center,
-                FontSize = 11.5,
-                FontWeight = item.IsDirectory || item.StatusVisibility == Visibility.Visible
+                FontSize = 11.1,
+                FontWeight = item.IsDirectory
                     ? Microsoft.UI.Text.FontWeights.SemiBold
                     : Microsoft.UI.Text.FontWeights.Normal,
                 Foreground = AppBrush(InspectorDirectoryTree, "ShellTextPrimaryBrush"),
                 Text = item.Name,
+                TextWrapping = TextWrapping.NoWrap,
                 TextTrimming = TextTrimming.CharacterEllipsis,
             };
             Grid.SetColumn(name, 1);
@@ -1911,7 +3174,7 @@ namespace SelfContainedDeployment
             StackPanel adornments = new()
             {
                 Orientation = Orientation.Horizontal,
-                Spacing = 6,
+                Spacing = 4,
                 VerticalAlignment = VerticalAlignment.Center,
             };
             Grid.SetColumn(adornments, 2);
@@ -1936,24 +3199,27 @@ namespace SelfContainedDeployment
 
         private FrameworkElement BuildInspectorChangeBadge(InspectorDirectoryTreeItem item)
         {
-            return new Border
+            if (item.IsDirectory)
             {
-                Padding = item.IsDirectory ? new Thickness(4, 0, 4, 0) : new Thickness(5, 0, 5, 0),
-                MinWidth = item.IsDirectory ? 16 : 18,
-                Height = item.IsDirectory ? 14 : 18,
-                CornerRadius = new CornerRadius(4),
-                Background = CreateInspectorStatusBackground(item.StatusBrush, item.IsDirectory),
-                VerticalAlignment = VerticalAlignment.Center,
-                Child = new TextBlock
+                return new Border
                 {
-                    Text = item.StatusText,
-                    FontSize = item.IsDirectory ? 9 : 9.5,
-                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                    Foreground = item.StatusBrush,
-                    HorizontalAlignment = HorizontalAlignment.Center,
+                    Width = 4,
+                    Height = 4,
+                    CornerRadius = new CornerRadius(2),
+                    Background = item.StatusBrush,
                     VerticalAlignment = VerticalAlignment.Center,
-                    TextAlignment = TextAlignment.Center,
-                },
+                };
+            }
+
+            return new TextBlock
+            {
+                Text = item.StatusText,
+                FontFamily = new FontFamily("Consolas"),
+                FontSize = 10,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = item.StatusBrush,
+                VerticalAlignment = VerticalAlignment.Center,
+                Opacity = 0.9,
             };
         }
 
@@ -2089,42 +3355,32 @@ namespace SelfContainedDeployment
 
         private static FrameworkElement BuildInspectorPathBadge(InspectorDirectoryTreeItem item)
         {
-            Border iconBadge = new()
+            if (item.UseGlyphBadge)
             {
-                Width = item.IsDirectory ? 22 : 28,
-                Height = 18,
-                CornerRadius = new CornerRadius(3),
-                VerticalAlignment = VerticalAlignment.Center,
-                Background = CreateInspectorBadgeBackground(item.IconBrush, item.IsDirectory),
-            };
-
-            iconBadge.Child = item.IsDirectory
-                ? new FontIcon
+                return new FontIcon
                 {
                     Glyph = item.IconGlyph,
-                    FontSize = 11,
+                    FontFamily = item.IconFontFamily,
+                    FontSize = item.IconFontSize,
                     Foreground = item.IconBrush,
-                    HorizontalAlignment = HorizontalAlignment.Center,
                     VerticalAlignment = VerticalAlignment.Center,
-                }
-                : new TextBlock
-                {
-                    Text = item.KindText,
-                    FontFamily = new FontFamily("Consolas"),
-                    FontSize = item.KindText?.Length > 3 ? 8.3 : 9.3,
-                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                    Foreground = item.KindBrush,
-                    HorizontalAlignment = HorizontalAlignment.Center,
-                    VerticalAlignment = VerticalAlignment.Center,
-                    TextAlignment = TextAlignment.Center,
-                    TextTrimming = TextTrimming.CharacterEllipsis,
                 };
-            return iconBadge;
+            }
+
+            return new TextBlock
+            {
+                Text = item.KindText,
+                FontFamily = new FontFamily("Consolas"),
+                FontSize = item.KindText?.Length > 3 ? 8.8 : 9.4,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = item.KindBrush,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
         }
 
         private static FrameworkElement BuildInspectorPathBadge(string relativePath, bool isDirectory, Brush accentBrush)
         {
-            return BuildInspectorPathBadge(new InspectorDirectoryTreeItem
+            InspectorDirectoryTreeItem item = new()
             {
                 RelativePath = relativePath,
                 IsDirectory = isDirectory,
@@ -2132,7 +3388,29 @@ namespace SelfContainedDeployment
                 IconBrush = accentBrush,
                 KindText = ResolveInspectorKindText(relativePath, isDirectory),
                 KindBrush = accentBrush,
-            });
+                UseGlyphBadge = isDirectory,
+            };
+
+            if (item.UseGlyphBadge)
+            {
+                return new FontIcon
+                {
+                    Glyph = item.IconGlyph,
+                    FontSize = 11,
+                    Foreground = item.IconBrush,
+                    VerticalAlignment = VerticalAlignment.Center,
+                };
+            }
+
+            return new TextBlock
+            {
+                Text = item.KindText,
+                FontFamily = new FontFamily("Consolas"),
+                FontSize = item.KindText?.Length > 3 ? 8.8 : 9.4,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = item.KindBrush,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
         }
 
         private static string ResolveInspectorChangeMarker(GitChangedFile file, bool hasChangedDescendant)
@@ -2195,8 +3473,7 @@ namespace SelfContainedDeployment
             }
 
             if (string.IsNullOrWhiteSpace(selectedPath) ||
-                !_inspectorDirectoryNodesByPath.TryGetValue(selectedPath, out TreeViewNode node) ||
-                !TreeContainsNode(InspectorDirectoryTree.RootNodes, node))
+                !_inspectorDirectoryNodesByPath.TryGetValue(selectedPath, out TreeViewNode node))
             {
                 if (InspectorDirectoryTree.SelectedNode is not null)
                 {
@@ -2221,35 +3498,41 @@ namespace SelfContainedDeployment
             InspectorDirectoryTree.SelectedNode = node;
         }
 
-        private static bool TreeContainsNode(IList<TreeViewNode> nodes, TreeViewNode target)
-        {
-            if (nodes is null || target is null)
-            {
-                return false;
-            }
-
-            foreach (TreeViewNode node in nodes)
-            {
-                if (ReferenceEquals(node, target))
-                {
-                    return true;
-                }
-
-                if (TreeContainsNode(node.Children, target))
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
         private void UpdateInspectorFileActionState()
         {
             EditorPaneRecord editorPane = ResolveInspectorEditorPane(createIfNeeded: false);
+            if (InspectorCollapseAllButton is not null)
+            {
+                InspectorCollapseAllButton.IsEnabled = InspectorDirectoryTree?.RootNodes.Count > 0;
+            }
+
             if (InspectorSaveFileButton is not null)
             {
                 InspectorSaveFileButton.IsEnabled = editorPane?.Editor.CanSave == true;
+            }
+
+            if (InspectorAddNoteButton is not null)
+            {
+                InspectorAddNoteButton.IsEnabled = _activeThread is not null;
+            }
+
+            if (InspectorDeleteNoteButton is not null)
+            {
+                InspectorDeleteNoteButton.IsEnabled = ResolveSelectedThreadNote(_activeThread) is not null;
+            }
+        }
+
+        private static void CollapseInspectorDirectoryNode(TreeViewNode node)
+        {
+            if (node is null)
+            {
+                return;
+            }
+
+            node.IsExpanded = false;
+            foreach (TreeViewNode childNode in node.Children)
+            {
+                CollapseInspectorDirectoryNode(childNode);
             }
         }
 
@@ -2265,6 +3548,445 @@ namespace SelfContainedDeployment
                 ? "Select a file to open it in a new editor pane."
                 : editorPane.Editor.StatusText;
             UpdateInspectorFileActionState();
+        }
+
+        private void RefreshInspectorNotes()
+        {
+            if (InspectorNotesTextBox is null ||
+                InspectorNotesMetaText is null ||
+                InspectorNotesListView is null ||
+                InspectorNotesEmptyText is null ||
+                InspectorNoteTitleTextBox is null ||
+                InspectorNoteScopeComboBox is null ||
+                InspectorNotesThreadScopeButton is null ||
+                InspectorNotesProjectScopeButton is null)
+            {
+                return;
+            }
+
+            WorkspaceThreadNote selectedNote = ResolveSelectedThreadNote(_activeThread);
+            List<ProjectNoteListItem> noteItems = BuildInspectorNoteListItems(_activeProject, _activeThread, _activeNotesListScope).ToList();
+
+            _suppressInspectorNotesSelectionChanged = true;
+            try
+            {
+                InspectorNotesListView.ItemsSource = noteItems;
+                InspectorNotesListView.SelectedItem = noteItems.FirstOrDefault(candidate =>
+                    string.Equals(candidate.ThreadId, _activeThread?.Id, StringComparison.Ordinal) &&
+                    string.Equals(candidate.NoteId, selectedNote?.Id, StringComparison.Ordinal));
+            }
+            finally
+            {
+                _suppressInspectorNotesSelectionChanged = false;
+            }
+
+            InspectorNotesEmptyText.Text = _activeNotesListScope == NotesListScope.Thread
+                ? "No notes in this thread."
+                : "No notes in this project.";
+            InspectorNotesEmptyText.Visibility = noteItems.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+
+            string noteText = selectedNote?.Text ?? string.Empty;
+            _suppressInspectorNotesSync = true;
+            try
+            {
+                if (!string.Equals(InspectorNotesTextBox.Text, noteText, StringComparison.Ordinal))
+                {
+                    InspectorNotesTextBox.Text = noteText;
+                }
+            }
+            finally
+            {
+                _suppressInspectorNotesSync = false;
+            }
+
+            _suppressInspectorNoteTitleSync = true;
+            try
+            {
+                string noteTitle = selectedNote?.Title ?? string.Empty;
+                if (!string.Equals(InspectorNoteTitleTextBox.Text, noteTitle, StringComparison.Ordinal))
+                {
+                    InspectorNoteTitleTextBox.Text = noteTitle;
+                }
+            }
+            finally
+            {
+                _suppressInspectorNoteTitleSync = false;
+            }
+
+            _suppressInspectorNoteScopeSelectionChanged = true;
+            try
+            {
+                List<NoteScopeOption> scopeOptions = BuildNoteScopeOptions(_activeThread).ToList();
+                InspectorNoteScopeComboBox.ItemsSource = scopeOptions;
+                InspectorNoteScopeComboBox.DisplayMemberPath = nameof(NoteScopeOption.Label);
+                InspectorNoteScopeComboBox.SelectedItem = scopeOptions.FirstOrDefault(candidate =>
+                    string.Equals(candidate.PaneId, selectedNote?.PaneId, StringComparison.Ordinal))
+                    ?? scopeOptions.FirstOrDefault();
+            }
+            finally
+            {
+                _suppressInspectorNoteScopeSelectionChanged = false;
+            }
+
+            InspectorNotesTextBox.IsEnabled = _activeThread is not null;
+            InspectorNoteTitleTextBox.IsEnabled = _activeThread is not null;
+            InspectorNoteScopeComboBox.IsEnabled = selectedNote is not null;
+            InspectorNotesThreadScopeButton.IsEnabled = _activeThread is not null;
+            InspectorNotesProjectScopeButton.IsEnabled = _activeProject is not null;
+            ApplyNotesListScopeButtonState(InspectorNotesThreadScopeButton, _activeNotesListScope == NotesListScope.Thread);
+            ApplyNotesListScopeButtonState(InspectorNotesProjectScopeButton, _activeNotesListScope == NotesListScope.Project);
+            if (InspectorDeleteNoteButton is not null)
+            {
+                InspectorDeleteNoteButton.IsEnabled = selectedNote is not null;
+            }
+
+            string stateBrushKey = ResolveThreadNotesStateBrushKey(_activeThread);
+
+            InspectorNotesTextBox.Background = selectedNote is null
+                ? AppBrush(InspectorNotesTextBox, "ShellMutedSurfaceBrush")
+                : CreateSidebarTintedBrush(AppBrush(InspectorNotesTextBox, stateBrushKey), 0x0D, Windows.UI.Color.FromArgb(0xFF, 0x14, 0x16, 0x1B));
+            InspectorNotesTextBox.BorderBrush = selectedNote is null
+                ? AppBrush(InspectorNotesTextBox, "ShellBorderBrush")
+                : CreateSidebarTintedBrush(AppBrush(InspectorNotesTextBox, stateBrushKey), 0x32, Windows.UI.Color.FromArgb(0xFF, 0xFB, 0xBF, 0x24));
+
+            InspectorNotesMetaText.Text = BuildNotesMeta(_activeProject, _activeThread, _activeNotesListScope);
+            InspectorNotesMetaText.Foreground = AppBrush(InspectorNotesMetaText, "ShellTextSecondaryBrush");
+        }
+
+        private void OpenThreadNotes(WorkspaceThread thread, bool focusEditor = true, NotesListScope? scope = null)
+        {
+            if (thread is null)
+            {
+                return;
+            }
+
+            if (!ReferenceEquals(_activeThread, thread) || !ReferenceEquals(_activeProject, FindProjectForThread(thread)))
+            {
+                ActivateThread(thread);
+            }
+
+            ShowTerminalShellIfNeeded(queueGitRefresh: false);
+            if (scope.HasValue)
+            {
+                _activeNotesListScope = scope.Value;
+            }
+
+            if (!_inspectorOpen)
+            {
+                _inspectorOpen = true;
+                UpdateInspectorVisibility();
+                QueueSessionSave();
+            }
+
+            SetInspectorSection(InspectorSection.Notes, refreshFiles: false);
+            RefreshInspectorNotes();
+
+            if (focusEditor)
+            {
+                DispatcherQueue.TryEnqueue(() =>
+                {
+                    if (InspectorNotesTextBox is null)
+                    {
+                        return;
+                    }
+
+                    InspectorNotesTextBox.Focus(FocusState.Programmatic);
+                    InspectorNotesTextBox.Select(InspectorNotesTextBox.Text?.Length ?? 0, 0);
+                });
+            }
+        }
+
+        private bool UpdateThreadNotes(WorkspaceThread thread, string nextNotes, bool refreshInspector = true)
+        {
+            if (thread is null)
+            {
+                return false;
+            }
+
+            WorkspaceThreadNote note = ResolveSelectedThreadNote(thread);
+            if (note is null && string.IsNullOrWhiteSpace(nextNotes))
+            {
+                if (refreshInspector && ReferenceEquals(thread, _activeThread))
+                {
+                    RefreshInspectorNotes();
+                }
+
+                return false;
+            }
+
+            if (note is null)
+            {
+                AddThreadNote(thread, title: null, text: nextNotes, selectAfterCreate: true);
+                return true;
+            }
+
+            return UpdateThreadNoteText(thread, note, nextNotes, refreshInspector);
+        }
+
+        private WorkspaceThreadNote ResolveSelectedThreadNote(WorkspaceThread thread)
+        {
+            if (thread is null)
+            {
+                return null;
+            }
+
+            if (thread.NoteEntries.Count == 0)
+            {
+                thread.SelectedNoteId = null;
+                return null;
+            }
+
+            WorkspaceThreadNote note = thread.NoteEntries.FirstOrDefault(candidate => string.Equals(candidate.Id, thread.SelectedNoteId, StringComparison.Ordinal))
+                ?? thread.NoteEntries[0];
+            thread.SelectedNoteId = note.Id;
+            return note;
+        }
+
+        private static string BuildDefaultThreadNoteTitle(WorkspaceThread thread)
+        {
+            int nextIndex = Math.Max(1, (thread?.NoteEntries.Count ?? 0) + 1);
+            return nextIndex == 1 ? "Handoff" : $"Note {nextIndex}";
+        }
+
+        private string ResolveNotePaneId(WorkspaceThread thread, string requestedPaneId = null, bool preferSelectedPane = true)
+        {
+            if (thread is null)
+            {
+                return null;
+            }
+
+            if (!string.IsNullOrWhiteSpace(requestedPaneId) &&
+                thread.Panes.Any(candidate => string.Equals(candidate.Id, requestedPaneId, StringComparison.Ordinal)))
+            {
+                return requestedPaneId;
+            }
+
+            return preferSelectedPane
+                ? GetSelectedPane(thread)?.Id
+                : null;
+        }
+
+        private WorkspaceThreadNote AddThreadNote(WorkspaceThread thread, string title, string text, bool selectAfterCreate, string paneId = null)
+        {
+            if (thread is null)
+            {
+                return null;
+            }
+
+            WorkspaceThreadNote note = new(
+                string.IsNullOrWhiteSpace(title) ? BuildDefaultThreadNoteTitle(thread) : title,
+                text)
+            {
+                PaneId = ResolveNotePaneId(thread, paneId, preferSelectedPane: false),
+                CreatedAt = DateTimeOffset.UtcNow,
+                UpdatedAt = DateTimeOffset.UtcNow,
+            };
+
+            thread.NoteEntries.Insert(0, note);
+            if (selectAfterCreate)
+            {
+                thread.SelectedNoteId = note.Id;
+            }
+
+            AfterThreadNotesChanged(thread);
+            return note;
+        }
+
+        private WorkspaceThreadNote UpsertThreadNote(WorkspaceThread thread, string noteId, string title, string text, bool selectAfterUpdate, string paneId = null)
+        {
+            if (thread is null)
+            {
+                return null;
+            }
+
+            WorkspaceThreadNote note = string.IsNullOrWhiteSpace(noteId)
+                ? ResolveSelectedThreadNote(thread)
+                : thread.NoteEntries.FirstOrDefault(candidate => string.Equals(candidate.Id, noteId, StringComparison.Ordinal));
+
+            if (note is null)
+            {
+                return AddThreadNote(thread, title, text, selectAfterCreate: true, paneId);
+            }
+
+            bool changed = false;
+            string resolvedTitle = string.IsNullOrWhiteSpace(title) ? note.Title : title.Trim();
+            if (!string.Equals(note.Title, resolvedTitle, StringComparison.Ordinal))
+            {
+                note.Title = resolvedTitle;
+                changed = true;
+            }
+
+            string normalizedText = string.IsNullOrWhiteSpace(text) ? null : text;
+            if (!string.Equals(note.Text, normalizedText, StringComparison.Ordinal))
+            {
+                note.Text = normalizedText;
+                changed = true;
+            }
+
+            string resolvedPaneId = paneId is null
+                ? note.PaneId
+                : ResolveNotePaneId(thread, paneId, preferSelectedPane: false);
+            if (!string.Equals(note.PaneId, resolvedPaneId, StringComparison.Ordinal))
+            {
+                note.PaneId = resolvedPaneId;
+                changed = true;
+            }
+
+            if (!changed)
+            {
+                if (selectAfterUpdate)
+                {
+                    thread.SelectedNoteId = note.Id;
+                }
+
+                return note;
+            }
+
+            note.UpdatedAt = DateTimeOffset.UtcNow;
+            thread.NoteEntries.Remove(note);
+            thread.NoteEntries.Insert(0, note);
+            if (selectAfterUpdate)
+            {
+                thread.SelectedNoteId = note.Id;
+            }
+
+            AfterThreadNotesChanged(thread);
+            return note;
+        }
+
+        private bool UpdateThreadNoteText(WorkspaceThread thread, WorkspaceThreadNote note, string text, bool refreshInspector)
+        {
+            if (thread is null || note is null)
+            {
+                return false;
+            }
+
+            string normalizedText = string.IsNullOrWhiteSpace(text) ? null : text;
+            if (string.Equals(note.Text, normalizedText, StringComparison.Ordinal))
+            {
+                if (refreshInspector && ReferenceEquals(thread, _activeThread))
+                {
+                    RefreshInspectorNotes();
+                }
+
+                return false;
+            }
+
+            note.Text = normalizedText;
+            note.UpdatedAt = DateTimeOffset.UtcNow;
+            thread.NoteEntries.Remove(note);
+            thread.NoteEntries.Insert(0, note);
+            thread.SelectedNoteId = note.Id;
+            AfterThreadNotesChanged(thread, refreshInspector);
+            return true;
+        }
+
+        private bool DeleteThreadNote(WorkspaceThread thread, string noteId)
+        {
+            if (thread is null)
+            {
+                return false;
+            }
+
+            WorkspaceThreadNote note = string.IsNullOrWhiteSpace(noteId)
+                ? ResolveSelectedThreadNote(thread)
+                : thread.NoteEntries.FirstOrDefault(candidate => string.Equals(candidate.Id, noteId, StringComparison.Ordinal));
+            if (note is null)
+            {
+                return false;
+            }
+
+            thread.NoteEntries.Remove(note);
+            thread.SelectedNoteId = thread.NoteEntries.FirstOrDefault()?.Id;
+            AfterThreadNotesChanged(thread);
+            return true;
+        }
+
+        private bool SelectThreadNote(WorkspaceThread thread, string noteId, bool navigateToAttachment = true)
+        {
+            if (thread is null || string.IsNullOrWhiteSpace(noteId))
+            {
+                return false;
+            }
+
+            WorkspaceThreadNote note = thread.NoteEntries.FirstOrDefault(candidate => string.Equals(candidate.Id, noteId, StringComparison.Ordinal));
+            if (note is null)
+            {
+                return false;
+            }
+
+            if (!ReferenceEquals(thread, _activeThread))
+            {
+                ActivateThread(thread);
+            }
+
+            thread.SelectedNoteId = note.Id;
+            if (navigateToAttachment && !string.IsNullOrWhiteSpace(note.PaneId))
+            {
+                SelectTab(note.PaneId);
+            }
+
+            RefreshInspectorNotes();
+            QueueProjectTreeRefresh();
+            QueueSessionSave();
+            return true;
+        }
+
+        private bool UpdateThreadNotePaneAttachment(WorkspaceThread thread, WorkspaceThreadNote note, string paneId)
+        {
+            if (thread is null || note is null)
+            {
+                return false;
+            }
+
+            string resolvedPaneId = !string.IsNullOrWhiteSpace(paneId) &&
+                thread.Panes.Any(candidate => string.Equals(candidate.Id, paneId, StringComparison.Ordinal))
+                ? paneId
+                : null;
+            if (string.Equals(note.PaneId, resolvedPaneId, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            note.PaneId = resolvedPaneId;
+            note.UpdatedAt = DateTimeOffset.UtcNow;
+            thread.NoteEntries.Remove(note);
+            thread.NoteEntries.Insert(0, note);
+            thread.SelectedNoteId = note.Id;
+            AfterThreadNotesChanged(thread);
+            return true;
+        }
+
+        private void ClearPaneNoteAttachments(WorkspaceThread thread, string paneId)
+        {
+            if (thread is null || string.IsNullOrWhiteSpace(paneId))
+            {
+                return;
+            }
+
+            bool changed = false;
+            foreach (WorkspaceThreadNote note in thread.NoteEntries.Where(candidate => string.Equals(candidate.PaneId, paneId, StringComparison.Ordinal)))
+            {
+                note.PaneId = null;
+                note.UpdatedAt = DateTimeOffset.UtcNow;
+                changed = true;
+            }
+
+            if (changed)
+            {
+                AfterThreadNotesChanged(thread);
+            }
+        }
+
+        private void AfterThreadNotesChanged(WorkspaceThread thread, bool refreshInspector = true)
+        {
+            QueueProjectTreeRefresh();
+            QueueSessionSave();
+
+            if (ReferenceEquals(thread, _activeThread) && refreshInspector)
+            {
+                RefreshInspectorNotes();
+            }
         }
 
         private EditorPaneRecord ResolveInspectorEditorPane(bool createIfNeeded)
@@ -2306,8 +4028,9 @@ namespace SelfContainedDeployment
             RefreshInspectorFileBrowser();
         }
 
-        private WorkspaceSessionSnapshot BuildSessionSnapshot()
+        private WorkspaceSessionSnapshot BuildSessionSnapshot(SessionSaveDetail detail)
         {
+            bool includeGitSnapshots = detail == SessionSaveDetail.Full;
             return new WorkspaceSessionSnapshot
             {
                 SavedAt = DateTimeOffset.UtcNow.ToString("O"),
@@ -2335,48 +4058,41 @@ namespace SelfContainedDeployment
                         Name = thread.Name,
                         WorktreePath = thread.WorktreePath,
                         BranchName = thread.BranchName,
+                        Notes = thread.Notes,
+                        SelectedNoteId = thread.SelectedNoteId,
+                        NoteEntries = thread.NoteEntries.Select(note => new ThreadNoteSessionSnapshot
+                        {
+                            Id = note.Id,
+                            Title = note.Title,
+                            Text = note.Text,
+                            PaneId = note.PaneId,
+                            CreatedAt = note.CreatedAt.ToString("O"),
+                            UpdatedAt = note.UpdatedAt.ToString("O"),
+                        }).ToList(),
                         SelectedDiffPath = thread.SelectedDiffPath,
                         DiffReviewSource = FormatDiffReviewSource(thread.DiffReviewSource),
                         SelectedCheckpointId = thread.SelectedCheckpointId,
-                        BaselineSnapshot = CreateGitSnapshotSessionSnapshot(thread.BaselineSnapshot),
+                        BaselineSnapshot = includeGitSnapshots ? CreateGitSnapshotSessionSnapshot(thread.BaselineSnapshot) : null,
+                        LiveSnapshot = CreateGitSnapshotSessionSnapshot(thread.LiveSnapshot),
+                        LiveSnapshotCapturedAt = thread.LiveSnapshotCapturedAt == default ? null : thread.LiveSnapshotCapturedAt.ToString("O"),
                         SelectedPaneId = thread.SelectedPaneId,
                         Layout = WorkspaceSessionStore.FormatLayout(thread.LayoutPreset),
                         PrimarySplitRatio = thread.PrimarySplitRatio,
                         SecondarySplitRatio = thread.SecondarySplitRatio,
                         AutoFitPaneContentLocked = thread.AutoFitPaneContentLocked,
-                        DiffCheckpoints = thread.DiffCheckpoints.Select(checkpoint => new GitCheckpointSessionSnapshot
-                        {
-                            Id = checkpoint.Id,
-                            Name = checkpoint.Name,
-                            CapturedAt = checkpoint.CapturedAt.ToString("O"),
-                            Snapshot = CreateGitSnapshotSessionSnapshot(checkpoint.Snapshot),
-                        }).ToList(),
+                        DiffCheckpoints = includeGitSnapshots
+                            ? thread.DiffCheckpoints.Select(checkpoint => new GitCheckpointSessionSnapshot
+                            {
+                                Id = checkpoint.Id,
+                                Name = checkpoint.Name,
+                                CapturedAt = checkpoint.CapturedAt.ToString("O"),
+                                Snapshot = CreateGitSnapshotSessionSnapshot(checkpoint.Snapshot),
+                            }).ToList()
+                            : new List<GitCheckpointSessionSnapshot>(),
                         Panes = thread.Panes
                             .Where(ShouldPersistPane)
-                            .Select(pane => new PaneSessionSnapshot
-                            {
-                                Id = pane.Id,
-                                Kind = pane.Kind.ToString().ToLowerInvariant(),
-                                Title = pane.Title,
-                                HasCustomTitle = pane.HasCustomTitle,
-                                IsExited = pane.IsExited,
-                                ReplayRestoreFailed = pane.ReplayRestoreFailed,
-                                BrowserUri = pane is BrowserPaneRecord browserPane ? browserPane.Browser.CurrentUri : null,
-                                SelectedBrowserTabId = pane is BrowserPaneRecord browserPaneState ? browserPaneState.Browser.SelectedTabId : null,
-                                BrowserTabs = pane is BrowserPaneRecord browserPaneTabs
-                                    ? browserPaneTabs.Browser.Tabs.Select(tab => new BrowserTabSessionSnapshot
-                                    {
-                                        Id = tab.Id,
-                                        Title = tab.Title,
-                                        Uri = tab.Uri,
-                                    }).ToList()
-                                    : new List<BrowserTabSessionSnapshot>(),
-                                DiffPath = pane is DiffPaneRecord diffPane ? diffPane.DiffPath : null,
-                                EditorFilePath = pane is EditorPaneRecord editorPane ? editorPane.Editor.SelectedFilePath : null,
-                                ReplayTool = pane.ReplayTool,
-                                ReplaySessionId = pane.ReplaySessionId,
-                                ReplayCommand = pane.ReplayCommand,
-                            })
+                            .Select(CreatePaneSessionSnapshot)
+                            .Where(paneSnapshot => paneSnapshot is not null)
                             .ToList(),
                     }).ToList(),
                 }).ToList(),
@@ -2388,12 +4104,98 @@ namespace SelfContainedDeployment
             return pane is not null && (!pane.IsExited || pane.PersistExitedState);
         }
 
+        private static PaneSessionSnapshot CreatePaneSessionSnapshot(WorkspacePaneRecord pane)
+        {
+            if (pane is null)
+            {
+                return null;
+            }
+
+            if (pane is DeferredPaneRecord deferredPane)
+            {
+                PaneSessionSnapshot snapshot = deferredPane.Snapshot;
+                return new PaneSessionSnapshot
+                {
+                    Id = pane.Id,
+                    Kind = pane.Kind.ToString().ToLowerInvariant(),
+                    Title = pane.Title,
+                    HasCustomTitle = pane.HasCustomTitle,
+                    IsExited = pane.IsExited,
+                    ReplayRestoreFailed = pane.ReplayRestoreFailed,
+                    BrowserUri = deferredPane.BrowserUri,
+                    SelectedBrowserTabId = deferredPane.SelectedBrowserTabId,
+                    BrowserTabs = deferredPane.BrowserTabs.Select(tab => new BrowserTabSessionSnapshot
+                    {
+                        Id = tab.Id,
+                        Title = tab.Title,
+                        Uri = tab.Uri,
+                    }).ToList(),
+                    DiffPath = deferredPane.DiffPath,
+                    EditorFilePath = deferredPane.EditorFilePath,
+                    ReplayTool = pane.ReplayTool,
+                    ReplaySessionId = pane.ReplaySessionId,
+                    ReplayCommand = pane.ReplayCommand,
+                };
+            }
+
+            return new PaneSessionSnapshot
+            {
+                Id = pane.Id,
+                Kind = pane.Kind.ToString().ToLowerInvariant(),
+                Title = pane.Title,
+                HasCustomTitle = pane.HasCustomTitle,
+                IsExited = pane.IsExited,
+                ReplayRestoreFailed = pane.ReplayRestoreFailed,
+                BrowserUri = pane is BrowserPaneRecord browserPane ? browserPane.Browser.CurrentUri : null,
+                SelectedBrowserTabId = pane is BrowserPaneRecord browserPaneState ? browserPaneState.Browser.SelectedTabId : null,
+                BrowserTabs = pane is BrowserPaneRecord browserPaneTabs
+                    ? browserPaneTabs.Browser.Tabs.Select(tab => new BrowserTabSessionSnapshot
+                    {
+                        Id = tab.Id,
+                        Title = tab.Title,
+                        Uri = tab.Uri,
+                    }).ToList()
+                    : new List<BrowserTabSessionSnapshot>(),
+                DiffPath = pane is DiffPaneRecord diffPane ? diffPane.DiffPath : null,
+                EditorFilePath = pane is EditorPaneRecord editorPane ? editorPane.Editor.SelectedFilePath : null,
+                ReplayTool = pane.ReplayTool,
+                ReplaySessionId = pane.ReplaySessionId,
+                ReplayCommand = pane.ReplayCommand,
+            };
+        }
+
+        private static string BuildBrowserPersistenceKey(BrowserPaneControl browser)
+        {
+            if (browser is null)
+            {
+                return string.Empty;
+            }
+
+            StringBuilder builder = new();
+            builder.Append(browser.SelectedTabId ?? string.Empty)
+                .Append('|')
+                .Append(browser.CurrentUri ?? string.Empty)
+                .Append('|');
+
+            foreach (BrowserPaneControl.BrowserPaneTabSnapshot tab in browser.Tabs)
+            {
+                builder.Append(tab.Id ?? string.Empty)
+                    .Append(':')
+                    .Append(tab.Uri ?? string.Empty)
+                    .Append('|');
+            }
+
+            return builder.ToString();
+        }
+
         private static GitSnapshotSessionSnapshot CreateGitSnapshotSessionSnapshot(GitThreadSnapshot snapshot)
         {
             if (snapshot is null)
             {
                 return null;
             }
+
+            bool persistFullDiffText = ShouldPersistFullDiffText(snapshot);
 
             return new GitSnapshotSessionSnapshot
             {
@@ -2412,11 +4214,47 @@ namespace SelfContainedDeployment
                     OriginalPath = file.OriginalPath,
                     AddedLines = file.AddedLines,
                     RemovedLines = file.RemovedLines,
-                    DiffText = file.DiffText,
-                    OriginalText = file.OriginalText,
-                    ModifiedText = file.ModifiedText,
+                    DiffText = ShouldPersistDiffText(snapshot, file, persistFullDiffText) ? file.DiffText : null,
                 }).ToList(),
             };
+        }
+
+        private static bool ShouldPersistFullDiffText(GitThreadSnapshot snapshot)
+        {
+            if (snapshot is null)
+            {
+                return false;
+            }
+
+            int diffFileCount = 0;
+            int totalDiffChars = 0;
+            foreach (GitChangedFile file in snapshot.ChangedFiles)
+            {
+                if (string.IsNullOrWhiteSpace(file?.DiffText))
+                {
+                    continue;
+                }
+
+                diffFileCount++;
+                totalDiffChars += file.DiffText.Length;
+                if (diffFileCount > MaxPersistedSnapshotDiffFiles || totalDiffChars > MaxPersistedSnapshotDiffChars)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private static bool ShouldPersistDiffText(GitThreadSnapshot snapshot, GitChangedFile file, bool persistFullDiffText)
+        {
+            if (persistFullDiffText)
+            {
+                return true;
+            }
+
+            return !string.IsNullOrWhiteSpace(snapshot?.SelectedPath) &&
+                string.Equals(file?.Path, snapshot.SelectedPath, StringComparison.Ordinal);
         }
 
         private static GitThreadSnapshot RestoreGitThreadSnapshot(GitSnapshotSessionSnapshot snapshot)
@@ -2444,8 +4282,6 @@ namespace SelfContainedDeployment
                     AddedLines = file.AddedLines,
                     RemovedLines = file.RemovedLines,
                     DiffText = file.DiffText,
-                    OriginalText = file.OriginalText,
-                    ModifiedText = file.ModifiedText,
                 }).ToList(),
             };
             GitStatusService.SelectDiffPath(restored, restored.SelectedPath);
@@ -2469,7 +4305,7 @@ namespace SelfContainedDeployment
                 return "settings";
             }
 
-            return _showingOverview ? "overview" : "terminal";
+            return "terminal";
         }
 
         private static DiffReviewSourceKind ParseDiffReviewSource(string value)
@@ -2524,12 +4360,9 @@ namespace SelfContainedDeployment
             _restoringSession = true;
             try
             {
+                DisposeAllWorkspacePanes();
                 _projects.Clear();
                 _tabItemsById.Clear();
-                foreach (Border container in _paneContainersById.Values)
-                {
-                    container.Child = null;
-                }
                 _paneContainersById.Clear();
 
                 SampleConfig.CurrentTheme = WorkspaceSessionStore.ParseTheme(snapshot.Theme);
@@ -2554,15 +4387,57 @@ namespace SelfContainedDeployment
                         {
                             WorktreePath = string.IsNullOrWhiteSpace(threadSnapshot.WorktreePath) ? project.RootPath : threadSnapshot.WorktreePath,
                             BranchName = threadSnapshot.BranchName,
+                            ChangedFileCount = 0,
+                            SelectedNoteId = threadSnapshot.SelectedNoteId,
                             SelectedDiffPath = threadSnapshot.SelectedDiffPath,
                             DiffReviewSource = ParseDiffReviewSource(threadSnapshot.DiffReviewSource),
                             SelectedCheckpointId = threadSnapshot.SelectedCheckpointId,
                             BaselineSnapshot = RestoreGitThreadSnapshot(threadSnapshot.BaselineSnapshot),
+                            LiveSnapshot = RestoreGitThreadSnapshot(threadSnapshot.LiveSnapshot),
+                            LiveSnapshotCapturedAt = DateTimeOffset.TryParse(threadSnapshot.LiveSnapshotCapturedAt, out DateTimeOffset liveSnapshotCapturedAt)
+                                ? liveSnapshotCapturedAt
+                                : default,
                             LayoutPreset = WorkspaceSessionStore.ParseLayout(threadSnapshot.Layout),
                             PrimarySplitRatio = ClampPaneSplitRatio(threadSnapshot.PrimarySplitRatio <= 0 ? 0.58 : threadSnapshot.PrimarySplitRatio),
                             SecondarySplitRatio = ClampPaneSplitRatio(threadSnapshot.SecondarySplitRatio <= 0 ? 0.5 : threadSnapshot.SecondarySplitRatio),
                             AutoFitPaneContentLocked = threadSnapshot.AutoFitPaneContentLocked,
                         };
+                        if (thread.LiveSnapshot is not null)
+                        {
+                            thread.BranchName = string.IsNullOrWhiteSpace(thread.LiveSnapshot.BranchName)
+                                ? thread.BranchName
+                                : thread.LiveSnapshot.BranchName;
+                            thread.ChangedFileCount = thread.LiveSnapshot.ChangedFiles.Count;
+                            thread.SelectedDiffPath = string.IsNullOrWhiteSpace(thread.LiveSnapshot.SelectedPath)
+                                ? thread.SelectedDiffPath
+                                : thread.LiveSnapshot.SelectedPath;
+                        }
+                        foreach (ThreadNoteSessionSnapshot noteSnapshot in threadSnapshot.NoteEntries ?? new List<ThreadNoteSessionSnapshot>())
+                        {
+                            WorkspaceThreadNote note = new(noteSnapshot.Title, noteSnapshot.Text, noteSnapshot.Id)
+                            {
+                                PaneId = noteSnapshot.PaneId,
+                                CreatedAt = DateTimeOffset.TryParse(noteSnapshot.CreatedAt, out DateTimeOffset createdAt)
+                                    ? createdAt
+                                    : DateTimeOffset.UtcNow,
+                                UpdatedAt = DateTimeOffset.TryParse(noteSnapshot.UpdatedAt, out DateTimeOffset updatedAt)
+                                    ? updatedAt
+                                    : DateTimeOffset.UtcNow,
+                            };
+                            thread.NoteEntries.Add(note);
+                        }
+
+                        if (thread.NoteEntries.Count == 0 && !string.IsNullOrWhiteSpace(threadSnapshot.Notes))
+                        {
+                            thread.Notes = threadSnapshot.Notes;
+                        }
+
+                        if (thread.NoteEntries.Count > 0 &&
+                            !thread.NoteEntries.Any(candidate => string.Equals(candidate.Id, thread.SelectedNoteId, StringComparison.Ordinal)))
+                        {
+                            thread.SelectedNoteId = thread.NoteEntries[0].Id;
+                        }
+
                         foreach (GitCheckpointSessionSnapshot checkpointSnapshot in threadSnapshot.DiffCheckpoints ?? new List<GitCheckpointSessionSnapshot>())
                         {
                             thread.DiffCheckpoints.Add(new WorkspaceDiffCheckpoint(checkpointSnapshot.Name, checkpointSnapshot.Id)
@@ -2581,7 +4456,7 @@ namespace SelfContainedDeployment
                         {
                             try
                             {
-                                WorkspacePaneRecord pane = RestorePaneFromSnapshot(project, thread, paneSnapshot);
+                                WorkspacePaneRecord pane = RestorePaneFromSnapshot(project, thread, paneSnapshot, materialize: false);
                                 if (pane is not null)
                                 {
                                     thread.Panes.Add(pane);
@@ -2603,8 +4478,6 @@ namespace SelfContainedDeployment
                         {
                             EnsureThreadHasTab(project, thread);
                         }
-
-                        EnsureThreadHasSelectedDiffPane(project, thread);
 
                         thread.SelectedPaneId = thread.Panes.Any(candidate => string.Equals(candidate.Id, threadSnapshot.SelectedPaneId, StringComparison.Ordinal))
                             ? threadSnapshot.SelectedPaneId
@@ -2631,13 +4504,16 @@ namespace SelfContainedDeployment
 
                 if (_activeProject is not null && _activeThread is not null)
                 {
+                    EnsureThreadPanesMaterialized(_activeProject, _activeThread);
                     _activeProject.SelectedThreadId = _activeThread.Id;
+                    _activeGitSnapshot = _activeThread.LiveSnapshot is null
+                        ? null
+                        : GitStatusService.CloneSnapshot(_activeThread.LiveSnapshot);
                 }
 
                 ShellSplitView.IsPaneOpen = snapshot.PaneOpen;
                 _inspectorOpen = snapshot.InspectorOpen;
                 _showingSettings = string.Equals(snapshot.ActiveView, "settings", StringComparison.OrdinalIgnoreCase);
-                _showingOverview = string.Equals(snapshot.ActiveView, "overview", StringComparison.OrdinalIgnoreCase);
                 RefreshProjectTree();
                 RefreshTabView();
                 UpdateInspectorVisibility();
@@ -2649,6 +4525,7 @@ namespace SelfContainedDeployment
                 {
                     ["sessionPath"] = WorkspaceSessionStore.GetSessionPath(),
                 });
+                DisposeAllWorkspacePanes();
                 _projects.Clear();
                 _tabItemsById.Clear();
                 _paneContainersById.Clear();
@@ -2679,7 +4556,7 @@ namespace SelfContainedDeployment
 
             WorkspaceProject project = new(normalizedPath, ShellProfiles.Resolve(shellProfileId ?? SampleConfig.DefaultShellProfileId).Id, name);
             _projects.Add(project);
-            RefreshProjectTree();
+            QueueProjectTreeRefresh(immediate: true);
             LogAutomationEvent("shell", "project.created", $"Created project {project.Name}", new Dictionary<string, string>
             {
                 ["projectId"] = project.Id,
@@ -2695,9 +4572,21 @@ namespace SelfContainedDeployment
             project ??= _activeProject ?? GetOrCreateProject(Environment.CurrentDirectory);
 
             WorkspaceThread thread = new(project, string.IsNullOrWhiteSpace(threadName) ? $"Thread {_threadSequence++}" : threadName.Trim());
-            if (TryResolveInheritedWorktreePath(project, inheritFromThread, out string inheritedWorktreePath))
+            WorkspaceThread inheritedSourceThread = ResolveInheritedSourceThread(project, inheritFromThread);
+            if (TryResolveInheritedWorktreePath(project, inheritedSourceThread, out string inheritedWorktreePath))
             {
                 thread.WorktreePath = inheritedWorktreePath;
+            }
+
+            if (inheritedSourceThread is not null)
+            {
+                thread.BranchName = inheritedSourceThread.BranchName;
+                thread.ChangedFileCount = inheritedSourceThread.ChangedFileCount;
+                thread.SelectedDiffPath = inheritedSourceThread.SelectedDiffPath;
+                thread.LiveSnapshot = ReferenceEquals(inheritedSourceThread, _activeThread) && _activeGitSnapshot is not null
+                    ? GitStatusService.CloneSnapshot(_activeGitSnapshot)
+                    : GitStatusService.CloneSnapshot(inheritedSourceThread.LiveSnapshot);
+                thread.LiveSnapshotCapturedAt = inheritedSourceThread.LiveSnapshotCapturedAt;
             }
 
             project.Threads.Add(thread);
@@ -2706,7 +4595,7 @@ namespace SelfContainedDeployment
             {
                 EnsureThreadHasTab(project, thread);
             }
-            RefreshProjectTree();
+            QueueProjectTreeRefresh(immediate: true);
             LogAutomationEvent("shell", "thread.created", $"Created thread {thread.Name}", new Dictionary<string, string>
             {
                 ["threadId"] = thread.Id,
@@ -2717,22 +4606,37 @@ namespace SelfContainedDeployment
             return thread;
         }
 
-        private bool TryResolveInheritedWorktreePath(WorkspaceProject project, WorkspaceThread explicitSourceThread, out string worktreePath)
+        private WorkspaceThread ResolveInheritedSourceThread(WorkspaceProject project, WorkspaceThread explicitSourceThread)
+        {
+            if (project is null)
+            {
+                return null;
+            }
+
+            if (explicitSourceThread is not null)
+            {
+                return explicitSourceThread;
+            }
+
+            if (ReferenceEquals(project, _activeProject) && _activeThread is not null)
+            {
+                return _activeThread;
+            }
+
+            if (!string.IsNullOrWhiteSpace(project.SelectedThreadId))
+            {
+                return project.Threads.FirstOrDefault(thread => string.Equals(thread.Id, project.SelectedThreadId, StringComparison.Ordinal));
+            }
+
+            return null;
+        }
+
+        private bool TryResolveInheritedWorktreePath(WorkspaceProject project, WorkspaceThread sourceThread, out string worktreePath)
         {
             worktreePath = null;
             if (project is null)
             {
                 return false;
-            }
-
-            WorkspaceThread sourceThread = explicitSourceThread;
-            if (sourceThread is null && ReferenceEquals(project, _activeProject) && _activeThread is not null)
-            {
-                sourceThread = _activeThread;
-            }
-            else if (sourceThread is null && !string.IsNullOrWhiteSpace(project.SelectedThreadId))
-            {
-                sourceThread = project.Threads.FirstOrDefault(thread => string.Equals(thread.Id, project.SelectedThreadId, StringComparison.Ordinal));
             }
 
             string candidatePath = sourceThread?.WorktreePath;
@@ -2757,6 +4661,7 @@ namespace SelfContainedDeployment
         {
             project ??= _activeProject ?? GetOrCreateProject(Environment.CurrentDirectory);
             thread ??= _activeThread ?? CreateThread(project);
+            EnsureThreadPanesMaterialized(project, thread);
 
             if (paneKind == WorkspacePaneKind.Diff)
             {
@@ -2795,7 +4700,6 @@ namespace SelfContainedDeployment
             {
                 RefreshTabView();
                 SetInspectorSection(InspectorSection.Files);
-                RefreshInspectorFileBrowser(forceRebuild: true);
                 RequestLayoutForVisiblePanes();
             }
             else if (thread.Panes.Count == 1)
@@ -2803,7 +4707,7 @@ namespace SelfContainedDeployment
                 ActivateThread(thread);
             }
 
-            RefreshProjectTree();
+            QueueProjectTreeRefresh();
             LogAutomationEvent("shell", "pane.created", $"Created terminal pane {pane.Id}", new Dictionary<string, string>
             {
                 ["paneId"] = pane.Id,
@@ -2829,14 +4733,17 @@ namespace SelfContainedDeployment
 
             if (thread == _activeThread)
             {
-                RefreshTabView();
+                if (!TryAppendSelectedPaneToActiveTabStrip(pane))
+                {
+                    RefreshTabView();
+                }
             }
             else if (thread.Panes.Count == 1)
             {
                 ActivateThread(thread);
             }
 
-            RefreshProjectTree();
+            QueueProjectTreeRefresh();
             LogAutomationEvent("shell", "pane.created", $"Created browser pane {pane.Id}", new Dictionary<string, string>
             {
                 ["paneId"] = pane.Id,
@@ -2847,6 +4754,43 @@ namespace SelfContainedDeployment
             });
             QueueSessionSave();
             return pane;
+        }
+
+        private bool TryAppendSelectedPaneToActiveTabStrip(WorkspacePaneRecord pane)
+        {
+            if (pane is null ||
+                _activeThread is null ||
+                !string.Equals(_activeThread.Id, _lastTabStripThreadId, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            TabViewItem item = GetOrCreateTabViewItem(pane);
+            if (FindTabViewIndex(item) < 0)
+            {
+                TerminalTabs.TabItems.Add(item);
+            }
+
+            int selectionGeneration = ++_tabSelectionChangeGeneration;
+            bool previousSuppression = _suppressTabSelectionChanged;
+            bool previousRefreshingTabView = _refreshingTabView;
+            _refreshingTabView = true;
+            _suppressTabSelectionChanged = true;
+            try
+            {
+                if (!ReferenceEquals(TerminalTabs.SelectedItem, item))
+                {
+                    TerminalTabs.SelectedItem = item;
+                }
+            }
+            finally
+            {
+                RestoreTabSelectionFlagsAsync(selectionGeneration, previousSuppression, previousRefreshingTabView);
+            }
+
+            RenderPaneWorkspace();
+            UpdateWorkspaceVisibility();
+            return true;
         }
 
         private DiffPaneRecord AddOrSelectDiffPane(
@@ -2863,6 +4807,8 @@ namespace SelfContainedDeployment
 
             DiffPaneRecord pane = thread.Panes.OfType<DiffPaneRecord>().FirstOrDefault();
             bool created = false;
+            bool wasActiveThread = ReferenceEquals(thread, _activeThread);
+            bool wasSelected = pane is not null && string.Equals(thread.SelectedPaneId, pane.Id, StringComparison.Ordinal);
             if (pane is null)
             {
                 pane = CreateDiffPane(project, thread, diffPath, diffText, BuildDiffPaneTitle(diffPath), sourceSnapshot, displayMode);
@@ -2875,22 +4821,41 @@ namespace SelfContainedDeployment
                 UpdateDiffPane(pane, diffPath, diffText, sourceSnapshot, displayMode);
             }
 
-            thread.SelectedPaneId = pane.Id;
             project.SelectedThreadId = thread.Id;
 
-            if (thread == _activeThread)
+            if (wasActiveThread)
             {
-                RefreshTabView();
-                SyncInspectorSectionWithSelectedPane();
-                RefreshInspectorFileBrowser();
-                RequestLayoutForVisiblePanes();
+                if (created)
+                {
+                    thread.SelectedPaneId = pane.Id;
+                    RefreshTabView();
+                    SyncInspectorSectionWithSelectedPane();
+                    RefreshInspectorFileBrowser();
+                    RequestLayoutForVisiblePanes();
+                }
+                else
+                {
+                    UpdateTabViewItem(pane);
+                    if (!wasSelected)
+                    {
+                        SelectPane(pane, focusPane: false);
+                    }
+                    else
+                    {
+                        thread.SelectedPaneId = pane.Id;
+                    }
+                }
             }
             else
             {
+                thread.SelectedPaneId = pane.Id;
                 ActivateThread(thread);
             }
 
-            RefreshProjectTree();
+            if (created || !wasActiveThread)
+            {
+                QueueProjectTreeRefresh();
+            }
             if (created)
             {
                 LogAutomationEvent("shell", "pane.created", $"Created diff pane {pane.Id}", new Dictionary<string, string>
@@ -2939,7 +4904,7 @@ namespace SelfContainedDeployment
                 ActivateThread(thread);
             }
 
-            RefreshProjectTree();
+            QueueProjectTreeRefresh();
             LogAutomationEvent("shell", "pane.created", $"Created editor pane {pane.Id}", new Dictionary<string, string>
             {
                 ["paneId"] = pane.Id,
@@ -2964,8 +4929,10 @@ namespace SelfContainedDeployment
                 InitialUri = initialUri,
             };
             browser.ApplyTheme(ResolveTheme(SampleConfig.CurrentTheme));
+            browser.PreloadEnvironment();
 
             BrowserPaneRecord pane = new(initialTitle, browser, paneId);
+            string lastPersistedBrowserState = BuildBrowserPersistenceKey(browser);
             AttachPaneInteraction(project, thread, pane);
             browser.OpenPaneRequested += (_, uri) =>
             {
@@ -3000,10 +4967,18 @@ namespace SelfContainedDeployment
                 {
                     UpdateTabViewItem(pane);
                 }
+            };
+            browser.StateChanged += (_, _) =>
+            {
+                string currentState = BuildBrowserPersistenceKey(browser);
+                if (string.Equals(lastPersistedBrowserState, currentState, StringComparison.Ordinal))
+                {
+                    return;
+                }
 
+                lastPersistedBrowserState = currentState;
                 QueueSessionSave();
             };
-            browser.StateChanged += (_, _) => QueueSessionSave();
             return pane;
         }
 
@@ -3044,8 +5019,6 @@ namespace SelfContainedDeployment
                 {
                     UpdateTabViewItem(pane);
                 }
-
-                QueueSessionSave();
             };
             editor.StateChanged += (_, _) =>
             {
@@ -3116,12 +5089,15 @@ namespace SelfContainedDeployment
             }
 
             pane.DiffPath = diffPath;
-            string selectedDiffText = !string.IsNullOrWhiteSpace(sourceSnapshot?.SelectedDiff)
-                ? sourceSnapshot.SelectedDiff
-                : diffText;
             DiffPaneDisplayMode resolvedMode = displayMode ?? pane.DiffPane.DisplayMode;
             GitChangedFile selectedFile = sourceSnapshot?.ChangedFiles
                 .FirstOrDefault(file => string.Equals(file.Path, diffPath, StringComparison.Ordinal));
+            string selectedDiffText = !string.IsNullOrWhiteSpace(selectedFile?.DiffText)
+                ? selectedFile.DiffText
+                : string.Equals(sourceSnapshot?.SelectedPath, diffPath, StringComparison.Ordinal) &&
+                    !string.IsNullOrWhiteSpace(sourceSnapshot?.SelectedDiff)
+                    ? sourceSnapshot.SelectedDiff
+                    : diffText;
 
             if (!pane.HasCustomTitle)
             {
@@ -3134,9 +5110,25 @@ namespace SelfContainedDeployment
             {
                 pane.DiffPane.ShowFullPatch(sourceSnapshot.ChangedFiles, diffPath);
             }
+            else if (resolvedMode == DiffPaneDisplayMode.FullPatchReview &&
+                sourceSnapshot?.ChangedFiles.Any(file => file?.DiffText is null) == true)
+            {
+                pane.DiffPane.ShowLoading(null, "Loading full patch review…");
+            }
+            else if (selectedFile is not null && selectedFile.DiffText is null)
+            {
+                pane.DiffPane.ShowLoading(diffPath, "Loading patch…");
+            }
             else if (!string.IsNullOrWhiteSpace(selectedDiffText))
             {
-                pane.DiffPane.ShowFileCompare(selectedFile, string.IsNullOrWhiteSpace(diffPath) ? "Patch review" : "Patch view");
+                if (selectedFile is not null)
+                {
+                    pane.DiffPane.ShowFileCompare(selectedFile, string.IsNullOrWhiteSpace(diffPath) ? "Patch review" : "Patch view");
+                }
+                else
+                {
+                    pane.DiffPane.ShowUnifiedDiff(diffPath, selectedDiffText);
+                }
             }
             else
             {
@@ -3197,18 +5189,16 @@ namespace SelfContainedDeployment
                 {
                     UpdateTabViewItem(pane);
                 }
-
-                QueueSessionSave();
             };
             terminal.ReplayStateChanged += (_, _) =>
             {
                 pane.ReplayTool = terminal.ReplayTool;
                 pane.ReplaySessionId = terminal.ReplaySessionId;
                 pane.ReplayCommand = terminal.ReplayCommand;
-                QueueProjectTreeRefresh(immediate: true);
+                QueueProjectTreeRefresh();
                 QueueSessionSave();
             };
-            terminal.ToolSessionStateChanged += (_, _) => QueueProjectTreeRefresh(immediate: true);
+            terminal.ToolSessionStateChanged += (_, _) => QueueProjectTreeRefresh();
             terminal.ReplayRestoreStateChanged += (_, _) =>
             {
                 pane.ReplayRestorePending = terminal.ReplayRestorePending;
@@ -3220,7 +5210,7 @@ namespace SelfContainedDeployment
                 }
 
                 UpdateTabViewItem(pane);
-                QueueProjectTreeRefresh(immediate: true);
+                QueueProjectTreeRefresh();
                 QueueSessionSave();
             };
             terminal.ToolInteractionCompleted += (_, _) =>
@@ -3261,7 +5251,7 @@ namespace SelfContainedDeployment
                     MarkPaneRequiresAttention(pane);
                 }
 
-                QueueProjectTreeRefresh(immediate: true);
+                QueueProjectTreeRefresh();
                 QueueSessionSave();
             };
 
@@ -3270,13 +5260,15 @@ namespace SelfContainedDeployment
 
         private static IReadOnlyDictionary<string, string> BuildTerminalLaunchEnvironment(WorkspaceProject project, WorkspaceThread thread, string threadRootPath)
         {
+            string repoRoot = Environment.CurrentDirectory;
             Dictionary<string, string> values = new(StringComparer.OrdinalIgnoreCase)
             {
-                ["WINMUX_REPO_ROOT"] = Environment.CurrentDirectory,
+                ["WINMUX_REPO_ROOT"] = repoRoot,
                 ["WINMUX_PROJECT_ROOT"] = project?.RootPath ?? string.Empty,
                 ["WINMUX_THREAD_ROOT"] = threadRootPath ?? string.Empty,
                 ["WINMUX_PROJECT_ID"] = project?.Id ?? string.Empty,
                 ["WINMUX_THREAD_ID"] = thread?.Id ?? string.Empty,
+                ["WINMUX_BROWSER_BRIDGE"] = Path.Combine(repoRoot, "tools", "winmux_browser_bridge.py"),
             };
 
             return values;
@@ -3294,11 +5286,213 @@ namespace SelfContainedDeployment
                 .FirstOrDefault(thread => thread.Panes.Any(candidate => string.Equals(candidate.Id, paneId, StringComparison.Ordinal)));
         }
 
-        private WorkspacePaneRecord RestorePaneFromSnapshot(WorkspaceProject project, WorkspaceThread thread, PaneSessionSnapshot snapshot)
+        private void EnsureThreadPanesMaterialized(WorkspaceProject project, WorkspaceThread thread)
+        {
+            if (project is null || thread is null || thread.Panes.Count == 0 || thread.Panes.All(pane => !pane.IsDeferred))
+            {
+                return;
+            }
+
+            string selectedPaneId = thread.SelectedPaneId;
+            if (string.IsNullOrWhiteSpace(selectedPaneId))
+            {
+                selectedPaneId = thread.Panes.FirstOrDefault()?.Id;
+            }
+
+            HashSet<string> paneIdsToMaterialize = new(StringComparer.Ordinal);
+            if (!string.IsNullOrWhiteSpace(selectedPaneId))
+            {
+                paneIdsToMaterialize.Add(selectedPaneId);
+            }
+            if (!string.IsNullOrWhiteSpace(thread.ZoomedPaneId))
+            {
+                paneIdsToMaterialize.Add(thread.ZoomedPaneId);
+            }
+
+            for (int index = 0; index < thread.Panes.Count; index++)
+            {
+                if (thread.Panes[index] is not DeferredPaneRecord deferredPane ||
+                    !paneIdsToMaterialize.Contains(deferredPane.Id))
+                {
+                    continue;
+                }
+
+                WorkspacePaneRecord materializedPane = RestorePaneFromSnapshot(project, thread, deferredPane.Snapshot, materialize: true);
+                if (materializedPane is null)
+                {
+                    continue;
+                }
+
+                thread.Panes[index] = materializedPane;
+            }
+
+            if (thread.Panes.Count == 0)
+            {
+                EnsureThreadHasTab(project, thread);
+            }
+
+            if (thread.Panes.Any(candidate => string.Equals(candidate.Id, selectedPaneId, StringComparison.Ordinal)))
+            {
+                thread.SelectedPaneId = selectedPaneId;
+            }
+            else
+            {
+                thread.SelectedPaneId = thread.Panes.FirstOrDefault()?.Id;
+            }
+        }
+
+        private void QueueVisibleDeferredPaneMaterialization(WorkspaceProject project, WorkspaceThread thread)
+        {
+            if (!EnableVisibleDeferredPaneMaterialization)
+            {
+                return;
+            }
+
+            int requestId = ++_visibleDeferredPaneMaterializationRequestId;
+            if (project is null ||
+                thread is null ||
+                _showingSettings ||
+                !ReferenceEquals(project, _activeProject) ||
+                !ReferenceEquals(thread, _activeThread))
+            {
+                return;
+            }
+
+            List<string> deferredPaneIds = GetVisiblePanes(thread)
+                .Where(candidate => candidate.IsDeferred &&
+                    !string.Equals(candidate.Id, thread.SelectedPaneId, StringComparison.Ordinal))
+                .Select(candidate => candidate.Id)
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .ToList();
+            if (deferredPaneIds.Count == 0)
+            {
+                return;
+            }
+
+            _ = System.Threading.Tasks.Task.Run(async () =>
+            {
+                try
+                {
+                    await System.Threading.Tasks.Task.Delay(60).ConfigureAwait(false);
+                    foreach (string paneId in deferredPaneIds)
+                    {
+                        await EnqueueOnUiThreadAsync(() =>
+                        {
+                            if (requestId != _visibleDeferredPaneMaterializationRequestId ||
+                                _showingSettings ||
+                                !ReferenceEquals(project, _activeProject) ||
+                                !ReferenceEquals(thread, _activeThread))
+                            {
+                                return;
+                            }
+
+                            if (!MaterializeDeferredPane(project, thread, paneId))
+                            {
+                                return;
+                            }
+                        }).ConfigureAwait(false);
+
+                        if (requestId != _visibleDeferredPaneMaterializationRequestId)
+                        {
+                            return;
+                        }
+
+                        await System.Threading.Tasks.Task.Delay(35).ConfigureAwait(false);
+                    }
+                }
+                catch
+                {
+                }
+            });
+        }
+
+        private bool MaterializeDeferredPane(WorkspaceProject project, WorkspaceThread thread, string paneId)
+        {
+            if (project is null || thread is null || string.IsNullOrWhiteSpace(paneId))
+            {
+                return false;
+            }
+
+            int paneIndex = thread.Panes.FindIndex(candidate => string.Equals(candidate.Id, paneId, StringComparison.Ordinal));
+            if (paneIndex < 0 || thread.Panes[paneIndex] is not DeferredPaneRecord deferredPane)
+            {
+                return false;
+            }
+
+            WorkspacePaneRecord materializedPane = RestorePaneFromSnapshot(project, thread, deferredPane.Snapshot, materialize: true);
+            if (materializedPane is null)
+            {
+                return false;
+            }
+
+            thread.Panes[paneIndex] = materializedPane;
+            SyncTabViewItemWithPane(materializedPane);
+            if (!ReferenceEquals(thread, _activeThread))
+            {
+                return true;
+            }
+
+            if (materializedPane.Kind == WorkspacePaneKind.Diff)
+            {
+                ApplyGitSnapshotToUi();
+                QueueVisibleDiffHydrationIfNeeded(thread, project, _activeGitSnapshot ?? thread.LiveSnapshot);
+            }
+
+            _lastPaneWorkspaceRenderKey = null;
+            RenderPaneWorkspace();
+            RequestLayoutForVisiblePanes();
+            return true;
+        }
+
+        private void EnsureThreadAllPanesMaterialized(WorkspaceProject project, WorkspaceThread thread)
+        {
+            if (project is null || thread is null || thread.Panes.Count == 0 || thread.Panes.All(pane => !pane.IsDeferred))
+            {
+                return;
+            }
+
+            string selectedPaneId = thread.SelectedPaneId;
+            for (int index = 0; index < thread.Panes.Count; index++)
+            {
+                if (thread.Panes[index] is not DeferredPaneRecord deferredPane)
+                {
+                    continue;
+                }
+
+                WorkspacePaneRecord materializedPane = RestorePaneFromSnapshot(project, thread, deferredPane.Snapshot, materialize: true);
+                if (materializedPane is null)
+                {
+                    continue;
+                }
+
+                thread.Panes[index] = materializedPane;
+            }
+
+            if (thread.Panes.Count == 0)
+            {
+                EnsureThreadHasTab(project, thread);
+            }
+
+            if (thread.Panes.Any(candidate => string.Equals(candidate.Id, selectedPaneId, StringComparison.Ordinal)))
+            {
+                thread.SelectedPaneId = selectedPaneId;
+            }
+            else
+            {
+                thread.SelectedPaneId = thread.Panes.FirstOrDefault()?.Id;
+            }
+        }
+
+        private WorkspacePaneRecord RestorePaneFromSnapshot(WorkspaceProject project, WorkspaceThread thread, PaneSessionSnapshot snapshot, bool materialize = true)
         {
             if (snapshot is null)
             {
                 return null;
+            }
+
+            if (!materialize)
+            {
+                return new DeferredPaneRecord(snapshot);
             }
 
             WorkspacePaneRecord pane = snapshot.Kind?.Trim().ToLowerInvariant() switch
@@ -3370,7 +5564,7 @@ namespace SelfContainedDeployment
                 return;
             }
 
-            if (thread.Panes.OfType<DiffPaneRecord>().Any())
+            if (thread.Panes.Any(candidate => candidate.Kind == WorkspacePaneKind.Diff))
             {
                 return;
             }
@@ -3441,7 +5635,7 @@ namespace SelfContainedDeployment
             }
 
             pane.RequiresAttention = true;
-            QueueProjectTreeRefresh(immediate: true);
+            QueueProjectTreeRefresh();
         }
 
         private void ClearPaneAttention(WorkspacePaneRecord pane)
@@ -3452,7 +5646,7 @@ namespace SelfContainedDeployment
             }
 
             pane.RequiresAttention = false;
-            QueueProjectTreeRefresh(immediate: true);
+            QueueProjectTreeRefresh();
         }
 
         private void CloseTab(string tabId)
@@ -3475,6 +5669,7 @@ namespace SelfContainedDeployment
                     RemoveTabViewItem(pane.Id);
                     pane.DisposePane();
                     thread.Panes.Remove(pane);
+                    ClearPaneNoteAttachments(thread, pane.Id);
 
                     if (pane is DiffPaneRecord)
                     {
@@ -3732,6 +5927,15 @@ namespace SelfContainedDeployment
                     pane.Browser.Navigate(pane.Browser.CurrentUri);
                 }
             }
+
+            if (SettingsFrame?.Content is SettingsPage settingsPage && _showingSettings)
+            {
+                settingsPage.RefreshFromCurrentState(refreshCredentialVault: true);
+            }
+            else
+            {
+                _settingsPageNeedsRefresh = true;
+            }
         }
 
         internal IReadOnlyList<BrowserCredentialSummary> GetBrowserCredentialSummaries()
@@ -3795,7 +5999,22 @@ namespace SelfContainedDeployment
 
         private void ActivateProject(WorkspaceProject project)
         {
-            _activeProject = project ?? throw new ArgumentNullException(nameof(project));
+            if (project is null)
+            {
+                throw new ArgumentNullException(nameof(project));
+            }
+
+            string previousProjectId = _activeProject?.Id;
+            string previousThreadId = _activeThread?.Id;
+
+            if (ReferenceEquals(_activeProject, project) &&
+                (_activeThread is null || string.Equals(project.SelectedThreadId, _activeThread.Id, StringComparison.Ordinal)))
+            {
+                UpdateProjectTreeSelectionVisuals();
+                return;
+            }
+
+            _activeProject = project;
 
             WorkspaceThread thread = project.Threads.FirstOrDefault(candidate => candidate.Id == project.SelectedThreadId)
                 ?? project.Threads.FirstOrDefault();
@@ -3803,6 +6022,7 @@ namespace SelfContainedDeployment
             if (thread is null)
             {
                 _activeThread = null;
+                UpdateProjectTreeSelectionVisuals(previousProjectId, previousThreadId);
                 _lastProjectTreeRenderKey = null;
                 QueueProjectTreeRefresh(immediate: true);
                 RefreshTabView();
@@ -3831,37 +6051,92 @@ namespace SelfContainedDeployment
             ActivateProject(project);
         }
 
+        private void ShowTerminalShellIfNeeded(bool queueGitRefresh = true)
+        {
+            if (_showingSettings)
+            {
+                ShowTerminalShell(queueGitRefresh);
+            }
+        }
+
         private void ActivateThread(WorkspaceThread thread)
         {
+            if (thread is null)
+            {
+                throw new ArgumentNullException(nameof(thread));
+            }
+
+            string previousProjectId = _activeProject?.Id;
+            string previousThreadId = _activeThread?.Id;
+
+            if (ReferenceEquals(_activeThread, thread) && ReferenceEquals(_activeProject, FindProjectForThread(thread)))
+            {
+                UpdateProjectTreeSelectionVisuals();
+                return;
+            }
+
             WorkspaceThread previousThread = _activeThread;
-            _activeThread = thread ?? throw new ArgumentNullException(nameof(thread));
+            WorkspaceProject previousProject = previousThread?.Project;
+            bool projectChanged = !ReferenceEquals(previousProject, thread.Project);
+            bool deferWorkspaceRefresh = _showingSettings;
+            InspectorSection previousInspectorSection = _activeInspectorSection;
+            _activeThread = thread;
             NormalizeDiffReviewSource(_activeThread);
             _activeProject = FindProjectForThread(thread);
             _activeProject.SelectedThreadId = thread.Id;
+            EnsureThreadPanesMaterialized(_activeProject, thread);
             EnsureThreadHasTab(_activeProject, thread);
-            EnsureThreadHasSelectedDiffPane(_activeProject, thread);
+            UpdateProjectTreeSelectionVisuals(previousProjectId, previousThreadId);
+            string previousRootPath = ResolveThreadRootPath(previousProject, previousThread);
+            string nextRootPath = ResolveThreadRootPath(_activeProject, _activeThread);
+            bool rootChanged = !string.Equals(previousRootPath, nextRootPath, StringComparison.OrdinalIgnoreCase);
             if (!ReferenceEquals(previousThread, thread))
             {
-                _activeGitSnapshot = null;
-                ApplyGitSnapshotToUi();
+                _activeGitSnapshot = thread.LiveSnapshot is null
+                    ? null
+                    : GitStatusService.CloneSnapshot(thread.LiveSnapshot);
+                if (!deferWorkspaceRefresh)
+                {
+                    ApplyGitSnapshotToUi();
+                }
             }
-            QueueProjectTreeRefresh();
-            RefreshTabView();
-            UpdateWorkspaceVisibility();
-            UpdateHeader();
-            RefreshDiffReviewSourceControls();
-            SyncInspectorSectionWithSelectedPane();
-            RefreshInspectorFileBrowser(forceRebuild: true);
-            SyncAutoFitStateForVisiblePanes(_activeThread);
-            if (_activeThread.AutoFitPaneContentLocked)
+            if (projectChanged)
             {
-                ApplyFitToVisiblePanes(_activeThread, persistLockState: false, autoLock: true, reason: "thread-activated");
+                QueueProjectTreeRefresh();
             }
-
+            if (!deferWorkspaceRefresh)
+            {
+                RefreshTabView();
+                UpdateHeader();
+                if (_inspectorOpen)
+                {
+                    RefreshDiffReviewSourceControls();
+                    RefreshInspectorNotes();
+                    SyncInspectorSectionWithSelectedPane();
+                    bool inspectorChangedToFiles = _activeInspectorSection == InspectorSection.Files &&
+                        previousInspectorSection != _activeInspectorSection;
+                    if (!inspectorChangedToFiles)
+                    {
+                        RefreshInspectorFileBrowser(forceRebuild: rootChanged && _activeInspectorSection == InspectorSection.Files);
+                    }
+                }
+            }
             ClearPaneAttention(GetSelectedPane(_activeThread));
-            RequestLayoutForVisiblePanes();
-            FocusSelectedPane();
-            QueueActiveThreadGitRefresh(thread.SelectedDiffPath, preserveSelection: true);
+            if (!deferWorkspaceRefresh)
+            {
+                RequestLayoutForVisiblePanes();
+                QueueSelectedPaneFocus();
+                QueueVisibleDeferredPaneMaterialization(_activeProject, _activeThread);
+            }
+            QueueActiveThreadGitRefresh(
+                thread.SelectedDiffPath,
+                preserveSelection: true,
+                includeSelectedDiff: false,
+                preferFastRefresh: true);
+            if (EnableBackgroundPaneWarmup)
+            {
+                QueueProjectPaneWarmup(_activeProject, _activeThread);
+            }
             QueueSessionSave();
             LogAutomationEvent("shell", "thread.selected", $"Selected thread {thread.Name}", new Dictionary<string, string>
             {
@@ -3869,6 +6144,150 @@ namespace SelfContainedDeployment
                 ["projectId"] = _activeProject.Id,
                 ["threadName"] = thread.Name,
             });
+        }
+
+        private void QueueProjectPaneWarmup(WorkspaceProject project, WorkspaceThread activeThread)
+        {
+            if (!EnableBackgroundPaneWarmup || project is null)
+            {
+                return;
+            }
+
+            int requestId = ++_latestPaneWarmupRequestId;
+            _ = WarmInactiveProjectPanesAsync(project, activeThread, requestId);
+        }
+
+        private async System.Threading.Tasks.Task WarmInactiveProjectPanesAsync(
+            WorkspaceProject project,
+            WorkspaceThread activeThread,
+            int requestId)
+        {
+            await System.Threading.Tasks.Task.Delay(180).ConfigureAwait(true);
+            int warmedThreadIndex = 0;
+            foreach (WorkspaceThread thread in EnumerateWarmupThreads(project, activeThread))
+            {
+                if (requestId != _latestPaneWarmupRequestId || !ReferenceEquals(project, _activeProject))
+                {
+                    return;
+                }
+
+                bool warmAllVisiblePanes = warmedThreadIndex == 0;
+                foreach (WorkspacePaneRecord pane in EnumerateWarmupPanes(thread, warmAllVisiblePanes))
+                {
+                    try
+                    {
+                        switch (pane)
+                        {
+                            case TerminalPaneRecord terminalPane:
+                                await terminalPane.Terminal.WarmupAsync().ConfigureAwait(true);
+                                break;
+                            case BrowserPaneRecord browserPane:
+                                await browserPane.Browser.EnsureInitializedAsync().ConfigureAwait(true);
+                                break;
+                            case EditorPaneRecord editorPane:
+                                await editorPane.Editor.WarmupAsync().ConfigureAwait(true);
+                                break;
+                        }
+                    }
+                    catch
+                    {
+                    }
+                }
+
+                await WarmThreadGitSnapshotAsync(project, thread, requestId).ConfigureAwait(true);
+                warmedThreadIndex++;
+                await System.Threading.Tasks.Task.Delay(60).ConfigureAwait(true);
+            }
+
+            WorkspaceProject adjacentProject = _projects.FirstOrDefault(candidate => !ReferenceEquals(candidate, project));
+            WorkspaceThread adjacentThread = adjacentProject?.Threads.FirstOrDefault(candidate => string.Equals(candidate.Id, adjacentProject.SelectedThreadId, StringComparison.Ordinal))
+                ?? adjacentProject?.Threads.FirstOrDefault();
+            if (adjacentProject is not null && adjacentThread is not null)
+            {
+                foreach (WorkspacePaneRecord pane in EnumerateWarmupPanes(adjacentThread, warmAllVisiblePanes: true))
+                {
+                    try
+                    {
+                        switch (pane)
+                        {
+                            case TerminalPaneRecord terminalPane:
+                                await terminalPane.Terminal.WarmupAsync().ConfigureAwait(true);
+                                break;
+                            case BrowserPaneRecord browserPane:
+                                await browserPane.Browser.EnsureInitializedAsync().ConfigureAwait(true);
+                                break;
+                            case EditorPaneRecord editorPane:
+                                await editorPane.Editor.WarmupAsync().ConfigureAwait(true);
+                                break;
+                        }
+                    }
+                    catch
+                    {
+                    }
+                }
+
+                await WarmThreadGitSnapshotAsync(adjacentProject, adjacentThread, requestId).ConfigureAwait(true);
+            }
+        }
+
+        private async System.Threading.Tasks.Task WarmThreadGitSnapshotAsync(WorkspaceProject project, WorkspaceThread thread, int requestId)
+        {
+            if (thread is null || project is null || !RequiresThreadLiveSnapshotWarmup(thread))
+            {
+                return;
+            }
+
+            GitThreadSnapshot snapshot;
+            try
+            {
+                string worktreePath = thread.WorktreePath ?? project.RootPath;
+                string selectedPath = thread.SelectedDiffPath;
+                snapshot = await System.Threading.Tasks.Task
+                    .Run(() => GitStatusService.Capture(worktreePath, selectedPath))
+                    .ConfigureAwait(true);
+            }
+            catch
+            {
+                return;
+            }
+
+            if (requestId != _latestPaneWarmupRequestId)
+            {
+                return;
+            }
+
+            thread.LiveSnapshot = snapshot;
+            thread.LiveSnapshotCapturedAt = DateTimeOffset.UtcNow;
+        }
+
+        private bool RequiresThreadLiveSnapshotWarmup(WorkspaceThread thread)
+        {
+            return thread?.LiveSnapshot is null ||
+                DateTimeOffset.UtcNow - thread.LiveSnapshotCapturedAt > CachedThreadGitSnapshotMaxAge;
+        }
+
+        private IEnumerable<WorkspacePaneRecord> EnumerateWarmupPanes(WorkspaceThread thread, bool warmAllVisiblePanes)
+        {
+            if (thread is null)
+            {
+                yield break;
+            }
+
+            if (warmAllVisiblePanes)
+            {
+                foreach (WorkspacePaneRecord pane in GetVisiblePanes(thread))
+                {
+                    yield return pane;
+                }
+
+                yield break;
+            }
+
+            WorkspacePaneRecord selectedPane = GetSelectedPane(thread);
+            if (selectedPane is not null)
+            {
+                yield return selectedPane;
+            }
         }
 
         private async System.Threading.Tasks.Task BeginRenameThreadAsync(string threadId)
@@ -3884,6 +6303,25 @@ namespace SelfContainedDeployment
             if (!string.IsNullOrWhiteSpace(nextName))
             {
                 RenameThread(threadId, nextName);
+            }
+        }
+
+        private IEnumerable<WorkspaceThread> EnumerateWarmupThreads(WorkspaceProject project, WorkspaceThread activeThread)
+        {
+            if (project is null || activeThread is null || project.Threads.Count <= 1)
+            {
+                yield break;
+            }
+
+            foreach (WorkspaceThread thread in project.Threads
+                         .Where(candidate => !ReferenceEquals(candidate, activeThread))
+                         .OrderByDescending(candidate => string.Equals(candidate.Id, project.SelectedThreadId, StringComparison.Ordinal))
+                         .ThenByDescending(candidate => candidate.Panes.Count)
+                         .ThenByDescending(candidate => candidate.VisiblePaneCapacity)
+                         .ThenBy(candidate => candidate.Name, StringComparer.OrdinalIgnoreCase)
+                         .Take(3))
+            {
+                yield return thread;
             }
         }
 
@@ -4017,9 +6455,22 @@ namespace SelfContainedDeployment
         {
             WorkspaceThread source = FindThread(threadId);
             WorkspaceProject project = FindProjectForThread(source);
+            EnsureThreadAllPanesMaterialized(project, source);
             WorkspaceThread duplicate = CreateThread(project, $"Copy of {source.Name}", inheritFromThread: source);
 
             duplicate.LayoutPreset = source.LayoutPreset;
+            duplicate.NoteEntries.Clear();
+            foreach (WorkspaceThreadNote note in source.NoteEntries)
+            {
+                WorkspaceThreadNote clonedNote = new(note.Title, note.Text)
+                {
+                    PaneId = null,
+                    CreatedAt = note.CreatedAt,
+                    UpdatedAt = note.UpdatedAt,
+                };
+                duplicate.NoteEntries.Add(clonedNote);
+            }
+            duplicate.SelectedNoteId = duplicate.NoteEntries.FirstOrDefault()?.Id;
             ClearThreadPanes(project, duplicate);
 
             foreach (WorkspacePaneRecord pane in source.Panes)
@@ -4271,6 +6722,10 @@ namespace SelfContainedDeployment
             thread.Panes.Clear();
             thread.SelectedPaneId = null;
             thread.SelectedDiffPath = null;
+            foreach (WorkspaceThreadNote note in thread.NoteEntries)
+            {
+                note.PaneId = null;
+            }
 
             if (ReferenceEquals(thread, _activeThread))
             {
@@ -4286,6 +6741,8 @@ namespace SelfContainedDeployment
 
         private void RefreshProjectTree()
         {
+            using var perfScope = NativeAutomationDiagnostics.TrackOperation("render.project-tree");
+            NativeAutomationDiagnostics.IncrementCounter("projectTree.refreshCount");
             string renderKey = BuildProjectTreeRenderKey();
             if (string.Equals(renderKey, _lastProjectTreeRenderKey, StringComparison.Ordinal))
             {
@@ -4294,6 +6751,12 @@ namespace SelfContainedDeployment
 
             _lastProjectTreeRenderKey = renderKey;
             ProjectListPanel.Children.Clear();
+            _projectButtonsById.Clear();
+            _projectHeaderBordersById.Clear();
+            _threadButtonsById.Clear();
+            _threadActivitySummariesById.Clear();
+            _hoveredProjectIds.Clear();
+            _hoveredThreadIds.Clear();
             bool isOpen = ShellSplitView.IsPaneOpen;
 
             foreach (WorkspaceProject project in _projects)
@@ -4301,14 +6764,14 @@ namespace SelfContainedDeployment
                 bool showProjectThreads = isOpen && ReferenceEquals(project, _activeProject);
                 StackPanel group = new()
                 {
-                    Spacing = 3,
+                    Spacing = 2,
                     HorizontalAlignment = HorizontalAlignment.Stretch,
                 };
                 AutomationProperties.SetAutomationId(group, $"shell-project-group-{project.Id}");
 
                 Button projectButton = new()
                 {
-                    Style = (Style)Application.Current.Resources["ShellNavButtonStyle"],
+                    Style = (Style)Application.Current.Resources["ShellSidebarProjectButtonStyle"],
                     Tag = project.Id,
                     HorizontalContentAlignment = HorizontalAlignment.Stretch,
                 };
@@ -4316,10 +6779,11 @@ namespace SelfContainedDeployment
                 AutomationProperties.SetName(projectButton, project.Name);
                 projectButton.Click += OnProjectButtonClicked;
                 ToolTipService.SetToolTip(projectButton, FormatProjectPath(project));
+                _projectButtonsById[project.Id] = projectButton;
 
                 Grid projectLayout = new()
                 {
-                    ColumnSpacing = 6,
+                    ColumnSpacing = 3,
                 };
                 AutomationProperties.SetAutomationId(projectLayout, $"shell-project-layout-{project.Id}");
                 projectLayout.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -4327,9 +6791,10 @@ namespace SelfContainedDeployment
 
                 FontIcon projectIcon = new()
                 {
-                    FontSize = 12,
+                    FontSize = 11.5,
                     Glyph = "\uE8B7",
                     VerticalAlignment = VerticalAlignment.Center,
+                    Foreground = AppBrush(projectLayout, ResolveProjectRailIconBrushKey(project)),
                 };
                 AutomationProperties.SetAutomationId(projectIcon, $"shell-project-icon-{project.Id}");
                 projectLayout.Children.Add(projectIcon);
@@ -4337,8 +6802,11 @@ namespace SelfContainedDeployment
                 if (isOpen)
                 {
                     projectButton.Height = double.NaN;
-                    projectButton.MinHeight = 36;
-                    projectButton.Padding = new Thickness(8, 4, 30, 4);
+                    projectButton.MinHeight = 28;
+                    projectButton.Width = double.NaN;
+                    projectButton.Padding = new Thickness(4, 3, 4, 3);
+                    projectButton.HorizontalAlignment = HorizontalAlignment.Stretch;
+                    projectButton.HorizontalContentAlignment = HorizontalAlignment.Stretch;
                     StackPanel textStack = new()
                     {
                         Spacing = 0,
@@ -4348,7 +6816,7 @@ namespace SelfContainedDeployment
                     TextBlock projectTitle = new()
                     {
                         Text = project.Name,
-                        FontSize = 11.5,
+                        Style = (Style)Application.Current.Resources["ShellSidebarTitleTextStyle"],
                         TextWrapping = TextWrapping.NoWrap,
                         TextTrimming = TextTrimming.CharacterEllipsis,
                     };
@@ -4357,8 +6825,7 @@ namespace SelfContainedDeployment
                     TextBlock projectMeta = new()
                     {
                         Text = BuildProjectRailMeta(project),
-                        Style = (Style)Application.Current.Resources["ShellInteractiveHintTextStyle"],
-                        FontSize = 9.8,
+                        Style = (Style)Application.Current.Resources["ShellSidebarMetaTextStyle"],
                         TextWrapping = TextWrapping.NoWrap,
                         TextTrimming = TextTrimming.CharacterEllipsis,
                     };
@@ -4366,10 +6833,36 @@ namespace SelfContainedDeployment
                     ToolTipService.SetToolTip(projectMeta, FormatProjectPath(project));
                     textStack.Children.Add(projectMeta);
                     projectLayout.Children.Add(textStack);
+                    projectButton.Content = projectLayout;
                 }
-
-                projectButton.Content = projectLayout;
-                ApplyProjectButtonState(projectButton, project == _activeProject && !_showingSettings);
+                else
+                {
+                    projectButton.MinHeight = 32;
+                    projectButton.Height = 32;
+                    projectButton.Width = 32;
+                    projectButton.Padding = new Thickness(0);
+                    projectButton.HorizontalAlignment = HorizontalAlignment.Center;
+                    projectButton.HorizontalContentAlignment = HorizontalAlignment.Center;
+                    projectButton.PointerEntered += OnProjectHeaderPointerEntered;
+                    projectButton.PointerExited += OnProjectHeaderPointerExited;
+                    projectButton.Content = new Border
+                    {
+                        Width = 20,
+                        Height = 20,
+                        CornerRadius = new CornerRadius(4),
+                        Background = AppBrush(projectButton, "ShellBrandMarkBackgroundBrush"),
+                        BorderBrush = AppBrush(projectButton, "ShellBrandMarkBorderBrush"),
+                        BorderThickness = new Thickness(1),
+                        Child = new FontIcon
+                        {
+                            FontSize = 11.5,
+                            Glyph = "\uE8B7",
+                            HorizontalAlignment = HorizontalAlignment.Center,
+                            VerticalAlignment = VerticalAlignment.Center,
+                            Foreground = AppBrush(projectButton, ResolveProjectRailIconBrushKey(project)),
+                        },
+                    };
+                }
                 MenuFlyout projectMenu = new();
                 MenuFlyoutItem projectNewThreadItem = new()
                 {
@@ -4378,15 +6871,6 @@ namespace SelfContainedDeployment
                 };
                 projectNewThreadItem.Click += OnProjectNewThreadMenuClicked;
                 projectMenu.Items.Add(projectNewThreadItem);
-                MenuFlyoutItem projectOverviewItem = new()
-                {
-                    Text = "Thread overview",
-                    Tag = project.Id,
-                    IsEnabled = project.Threads.Count > 0,
-                };
-                AutomationProperties.SetAutomationId(projectOverviewItem, $"shell-project-overview-{project.Id}");
-                projectOverviewItem.Click += OnProjectOverviewMenuClicked;
-                projectMenu.Items.Add(projectOverviewItem);
                 MenuFlyoutItem clearThreadsItem = new()
                 {
                     Text = "Clear all threads",
@@ -4405,6 +6889,7 @@ namespace SelfContainedDeployment
                 projectButton.ContextFlyout = projectMenu;
                 if (!isOpen)
                 {
+                    ApplyProjectRowState(project.Id, project == _activeProject && !_showingSettings);
                     group.Children.Add(projectButton);
                     ProjectListPanel.Children.Add(group);
                     continue;
@@ -4412,40 +6897,61 @@ namespace SelfContainedDeployment
 
                 Button addThreadButton = new()
                 {
-                    Style = (Style)Application.Current.Resources["ShellChromeButtonStyle"],
+                    Style = (Style)Application.Current.Resources["ShellGhostToolbarButtonStyle"],
                     Tag = project.Id,
                     HorizontalAlignment = HorizontalAlignment.Right,
                     VerticalAlignment = VerticalAlignment.Center,
                     Width = 18,
                     Height = 18,
-                    Opacity = 0.74,
-                    Margin = new Thickness(0, 0, 6, 0),
+                    Opacity = 0.62,
                 };
                 AutomationProperties.SetAutomationId(addThreadButton, $"shell-project-add-thread-{project.Id}");
                 AutomationProperties.SetName(addThreadButton, $"Add thread to {project.Name}");
                 addThreadButton.Click += OnProjectAddThreadClicked;
+                addThreadButton.Foreground = AppBrush(addThreadButton, "ShellTextSecondaryBrush");
                 ToolTipService.SetToolTip(addThreadButton, "Add thread");
                 addThreadButton.Content = new FontIcon
                 {
-                    FontSize = 9.5,
+                    FontSize = 10.5,
                     Glyph = "\uE710",
                 };
 
                 Grid projectHeader = new()
                 {
                     HorizontalAlignment = HorizontalAlignment.Stretch,
+                    ColumnDefinitions =
+                    {
+                        new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) },
+                        new ColumnDefinition { Width = GridLength.Auto },
+                    },
+                    ColumnSpacing = 2,
                 };
                 AutomationProperties.SetAutomationId(projectHeader, $"shell-project-header-{project.Id}");
                 projectHeader.Children.Add(projectButton);
+                Grid.SetColumn(projectButton, 0);
+                Grid.SetColumn(addThreadButton, 1);
                 projectHeader.Children.Add(addThreadButton);
-                group.Children.Add(projectHeader);
+
+                Border projectHeaderChrome = new()
+                {
+                    Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x00, 0x00, 0x00, 0x00)),
+                    CornerRadius = new CornerRadius(4),
+                    Child = projectHeader,
+                    Tag = project.Id,
+                };
+                AutomationProperties.SetAutomationId(projectHeaderChrome, $"shell-project-header-chrome-{project.Id}");
+                projectHeaderChrome.PointerEntered += OnProjectHeaderPointerEntered;
+                projectHeaderChrome.PointerExited += OnProjectHeaderPointerExited;
+                _projectHeaderBordersById[project.Id] = projectHeaderChrome;
+                ApplyProjectRowState(project.Id, project == _activeProject && !_showingSettings);
+                group.Children.Add(projectHeaderChrome);
 
                 if (showProjectThreads)
                 {
                     StackPanel threadStack = new()
                     {
-                        Spacing = 1,
-                        Margin = new Thickness(14, 0, 0, 0),
+                        Spacing = 0,
+                        Margin = new Thickness(4, 0, 0, 0),
                         HorizontalAlignment = HorizontalAlignment.Stretch,
                     };
                     AutomationProperties.SetAutomationId(threadStack, $"shell-thread-list-{project.Id}");
@@ -4460,14 +6966,18 @@ namespace SelfContainedDeployment
                             HorizontalContentAlignment = HorizontalAlignment.Stretch,
                             HorizontalAlignment = HorizontalAlignment.Stretch,
                             Height = double.NaN,
-                            MinHeight = 36,
-                            Padding = new Thickness(8, 4, 8, 4),
+                            MinHeight = 28,
+                            Padding = new Thickness(4, 3, 4, 3),
                         };
                         AutomationProperties.SetAutomationId(threadButton, $"shell-thread-{thread.Id}");
                         AutomationProperties.SetName(threadButton, BuildThreadAutomationLabel(project, thread, activitySummary));
                         threadButton.Click += OnThreadButtonClicked;
                         threadButton.DoubleTapped += OnThreadButtonDoubleTapped;
-                        ToolTipService.SetToolTip(threadButton, $"{FormatThreadPath(project, thread)} · {BuildOverviewPaneSummary(thread)}");
+                        threadButton.PointerEntered += OnThreadButtonPointerEntered;
+                        threadButton.PointerExited += OnThreadButtonPointerExited;
+                        ToolTipService.SetToolTip(threadButton, BuildThreadButtonToolTip(project, thread, BuildOverviewPaneSummary(thread)));
+                        _threadButtonsById[thread.Id] = threadButton;
+                        _threadActivitySummariesById[thread.Id] = activitySummary;
 
                         MenuFlyout threadMenu = new();
                         MenuFlyoutItem renameItem = new()
@@ -4477,6 +6987,20 @@ namespace SelfContainedDeployment
                         };
                         AutomationProperties.SetAutomationId(renameItem, $"shell-thread-rename-{thread.Id}");
                         renameItem.Click += OnRenameThreadMenuClicked;
+                        MenuFlyoutItem editNoteItem = new()
+                        {
+                            Text = "Notes",
+                            Tag = thread.Id,
+                        };
+                        AutomationProperties.SetAutomationId(editNoteItem, $"shell-thread-note-{thread.Id}");
+                        editNoteItem.Click += OnEditThreadNotesMenuClicked;
+                        MenuFlyoutItem newNoteItem = new()
+                        {
+                            Text = "New note",
+                            Tag = thread.Id,
+                        };
+                        AutomationProperties.SetAutomationId(newNoteItem, $"shell-thread-note-new-{thread.Id}");
+                        newNoteItem.Click += OnNewThreadNoteMenuClicked;
                         MenuFlyoutItem duplicateItem = new()
                         {
                             Text = "Duplicate",
@@ -4492,13 +7016,15 @@ namespace SelfContainedDeployment
                         AutomationProperties.SetAutomationId(deleteItem, $"shell-thread-delete-{thread.Id}");
                         deleteItem.Click += OnDeleteThreadMenuClicked;
                         threadMenu.Items.Add(renameItem);
+                        threadMenu.Items.Add(editNoteItem);
+                        threadMenu.Items.Add(newNoteItem);
                         threadMenu.Items.Add(duplicateItem);
                         threadMenu.Items.Add(deleteItem);
                         threadButton.ContextFlyout = threadMenu;
 
                         Grid threadLayout = new()
                         {
-                            ColumnSpacing = 6,
+                            ColumnSpacing = 3,
                         };
                         AutomationProperties.SetAutomationId(threadLayout, $"shell-thread-layout-{thread.Id}");
                         threadLayout.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -4506,23 +7032,24 @@ namespace SelfContainedDeployment
 
                         FontIcon threadIcon = new()
                         {
-                            FontSize = 10,
+                            FontSize = 10.8,
                             Glyph = "\uE8BD",
                             VerticalAlignment = VerticalAlignment.Center,
+                            Foreground = AppBrush(threadLayout, ResolveThreadRailIconBrushKey(thread, activitySummary)),
                         };
                         AutomationProperties.SetAutomationId(threadIcon, $"shell-thread-icon-{thread.Id}");
                         threadLayout.Children.Add(threadIcon);
 
                         StackPanel threadText = new()
                         {
-                            Spacing = 2,
+                            Spacing = 0,
                         };
                         AutomationProperties.SetAutomationId(threadText, $"shell-thread-text-{thread.Id}");
                         Grid.SetColumn(threadText, 1);
                         TextBlock threadTitle = new()
                         {
                             Text = thread.Name,
-                            FontSize = 11.25,
+                            Style = (Style)Application.Current.Resources["ShellSidebarTitleTextStyle"],
                             TextWrapping = TextWrapping.NoWrap,
                             TextTrimming = TextTrimming.CharacterEllipsis,
                         };
@@ -4537,13 +7064,12 @@ namespace SelfContainedDeployment
                                 new ColumnDefinition { Width = GridLength.Auto },
                                 new ColumnDefinition { Width = GridLength.Auto },
                             },
-                            ColumnSpacing = 6,
+                            ColumnSpacing = 2,
                         };
                         TextBlock threadMeta = new()
                         {
                             Text = BuildThreadRailMeta(project, thread),
-                            Style = (Style)Application.Current.Resources["ShellInteractiveHintTextStyle"],
-                            FontSize = 9.6,
+                            Style = (Style)Application.Current.Resources["ShellSidebarMetaTextStyle"],
                             TextWrapping = TextWrapping.NoWrap,
                             TextTrimming = TextTrimming.CharacterEllipsis,
                             VerticalAlignment = VerticalAlignment.Center,
@@ -4551,10 +7077,24 @@ namespace SelfContainedDeployment
                         AutomationProperties.SetAutomationId(threadMeta, $"shell-thread-meta-{thread.Id}");
                         threadFooter.Children.Add(threadMeta);
 
-                        FrameworkElement paneStrip = BuildThreadPaneStrip(thread);
-                        AutomationProperties.SetAutomationId(paneStrip, $"shell-thread-panes-{thread.Id}");
-                        Grid.SetColumn(paneStrip, 1);
-                        threadFooter.Children.Add(paneStrip);
+                        bool showPaneStrip = ReferenceEquals(thread, _activeThread);
+                        if (showPaneStrip)
+                        {
+                            StackPanel threadAdornments = new()
+                            {
+                                Orientation = Orientation.Horizontal,
+                                Spacing = 6,
+                                VerticalAlignment = VerticalAlignment.Center,
+                            };
+                            AutomationProperties.SetAutomationId(threadAdornments, $"shell-thread-adornments-{thread.Id}");
+
+                            FrameworkElement paneStrip = BuildThreadPaneStrip(thread);
+                            AutomationProperties.SetAutomationId(paneStrip, $"shell-thread-panes-{thread.Id}");
+                            threadAdornments.Children.Add(paneStrip);
+
+                            Grid.SetColumn(threadAdornments, 1);
+                            threadFooter.Children.Add(threadAdornments);
+                        }
 
                         FrameworkElement threadStatus = BuildThreadActivityIndicator(activitySummary);
                         if (threadStatus is not null)
@@ -4568,7 +7108,11 @@ namespace SelfContainedDeployment
 
                         threadLayout.Children.Add(threadText);
                         threadButton.Content = threadLayout;
-                        ApplySidebarThreadButtonState(threadButton, thread == _activeThread && !_showingSettings, activitySummary);
+                        ApplySidebarThreadButtonState(
+                            threadButton,
+                            thread == _activeThread && !_showingSettings,
+                            activitySummary,
+                            _hoveredThreadIds.Contains(thread.Id));
                         threadStack.Children.Add(threadButton);
                     }
 
@@ -4587,8 +7131,148 @@ namespace SelfContainedDeployment
             }
         }
 
+        private void UpdateProjectTreeSelectionVisuals()
+        {
+            UpdateProjectTreeSelectionVisuals(previousProjectId: null, previousThreadId: null, forceAll: true);
+        }
+
+        private void UpdateProjectTreeSelectionVisuals(string previousProjectId, string previousThreadId, bool forceAll = false)
+        {
+            bool activeShellView = !_showingSettings;
+            if (forceAll || (string.IsNullOrWhiteSpace(previousProjectId) && string.IsNullOrWhiteSpace(previousThreadId)))
+            {
+                foreach (string projectId in _projectButtonsById.Keys)
+                {
+                    ApplyProjectRowState(projectId, activeShellView && string.Equals(projectId, _activeProject?.Id, StringComparison.Ordinal));
+                }
+
+                foreach ((string threadId, Button threadButton) in _threadButtonsById)
+                {
+                    _threadActivitySummariesById.TryGetValue(threadId, out ThreadActivitySummary summary);
+                    ApplySidebarThreadButtonState(
+                        threadButton,
+                        activeShellView && string.Equals(threadId, _activeThread?.Id, StringComparison.Ordinal),
+                        summary,
+                        _hoveredThreadIds.Contains(threadId));
+                }
+
+                return;
+            }
+
+            UpdateProjectTreeSelectionVisual(previousProjectId, activeShellView);
+            if (!string.Equals(previousProjectId, _activeProject?.Id, StringComparison.Ordinal))
+            {
+                UpdateProjectTreeSelectionVisual(_activeProject?.Id, activeShellView);
+            }
+
+            UpdateThreadTreeSelectionVisual(previousThreadId, activeShellView);
+            if (!string.Equals(previousThreadId, _activeThread?.Id, StringComparison.Ordinal))
+            {
+                UpdateThreadTreeSelectionVisual(_activeThread?.Id, activeShellView);
+            }
+        }
+
+        private void UpdateProjectTreeSelectionVisual(string projectId, bool activeShellView)
+        {
+            if (string.IsNullOrWhiteSpace(projectId) ||
+                !_projectButtonsById.ContainsKey(projectId))
+            {
+                return;
+            }
+
+            ApplyProjectRowState(projectId, activeShellView && string.Equals(projectId, _activeProject?.Id, StringComparison.Ordinal));
+        }
+
+        private void UpdateThreadTreeSelectionVisual(string threadId, bool activeShellView)
+        {
+            if (string.IsNullOrWhiteSpace(threadId) ||
+                !_threadButtonsById.TryGetValue(threadId, out Button threadButton))
+            {
+                return;
+            }
+
+            _threadActivitySummariesById.TryGetValue(threadId, out ThreadActivitySummary summary);
+            ApplySidebarThreadButtonState(
+                threadButton,
+                activeShellView && string.Equals(threadId, _activeThread?.Id, StringComparison.Ordinal),
+                summary,
+                _hoveredThreadIds.Contains(threadId));
+        }
+
+        private void OnProjectHeaderPointerEntered(object sender, PointerRoutedEventArgs e)
+        {
+            if (sender is not FrameworkElement element || element.Tag is not string projectId)
+            {
+                return;
+            }
+
+            _hoveredProjectIds.Add(projectId);
+            ApplyProjectRowState(projectId, !_showingSettings && string.Equals(projectId, _activeProject?.Id, StringComparison.Ordinal));
+        }
+
+        private void OnProjectHeaderPointerExited(object sender, PointerRoutedEventArgs e)
+        {
+            if (sender is not FrameworkElement element || element.Tag is not string projectId)
+            {
+                return;
+            }
+
+            _hoveredProjectIds.Remove(projectId);
+            ApplyProjectRowState(projectId, !_showingSettings && string.Equals(projectId, _activeProject?.Id, StringComparison.Ordinal));
+        }
+
+        private void OnThreadButtonPointerEntered(object sender, PointerRoutedEventArgs e)
+        {
+            if (sender is not FrameworkElement element || element.Tag is not string threadId)
+            {
+                return;
+            }
+
+            _hoveredThreadIds.Add(threadId);
+            UpdateThreadTreeSelectionVisual(threadId, !_showingSettings);
+        }
+
+        private void OnThreadButtonPointerExited(object sender, PointerRoutedEventArgs e)
+        {
+            if (sender is not FrameworkElement element || element.Tag is not string threadId)
+            {
+                return;
+            }
+
+            _hoveredThreadIds.Remove(threadId);
+            UpdateThreadTreeSelectionVisual(threadId, !_showingSettings);
+        }
+
+        private void ApplyProjectRowState(string projectId, bool active)
+        {
+            if (!_projectButtonsById.TryGetValue(projectId, out Button projectButton))
+            {
+                return;
+            }
+
+            bool hovered = _hoveredProjectIds.Contains(projectId);
+
+            if (_projectHeaderBordersById.TryGetValue(projectId, out Border projectHeaderChrome))
+            {
+                projectHeaderChrome.Background = active
+                    ? CreateSidebarTintedBrush(AppBrush(projectHeaderChrome, "ShellPaneActiveBorderBrush"), hovered ? (byte)0x24 : (byte)0x18, Windows.UI.Color.FromArgb(0xFF, 0x2C, 0x2D, 0x31))
+                    : hovered
+                        ? AppBrush(projectHeaderChrome, "ShellNavHoverBrush")
+                        : new SolidColorBrush(Windows.UI.Color.FromArgb(0x00, 0x00, 0x00, 0x00));
+                projectHeaderChrome.BorderBrush = null;
+                projectButton.Background = null;
+                projectButton.BorderBrush = null;
+                projectButton.Foreground = AppBrush(projectButton, "ShellTextPrimaryBrush");
+                return;
+            }
+
+            ApplyProjectButtonState(projectButton, active, hovered);
+        }
+
         private void RefreshTabView()
         {
+            using var perfScope = NativeAutomationDiagnostics.TrackOperation("render.tab-strip");
+            NativeAutomationDiagnostics.IncrementCounter("tabStripRefresh.count");
             if (_activeThread is null)
             {
                 bool previousSuppressSelection = _suppressTabSelectionChanged;
@@ -4596,6 +7280,7 @@ namespace SelfContainedDeployment
                 _suppressTabSelectionChanged = true;
                 try
                 {
+                    _lastTabStripThreadId = null;
                     if (TerminalTabs.TabItems.Count > 0)
                     {
                         TerminalTabs.TabItems.Clear();
@@ -4622,29 +7307,41 @@ namespace SelfContainedDeployment
             _suppressTabSelectionChanged = true;
             try
             {
-                foreach (TabViewItem existingItem in TerminalTabs.TabItems.OfType<TabViewItem>().ToList())
+                bool threadChanged = !string.Equals(_lastTabStripThreadId, _activeThread.Id, StringComparison.Ordinal);
+                if (threadChanged)
                 {
-                    if (!desiredItems.Contains(existingItem))
+                    TerminalTabs.TabItems.Clear();
+                    foreach (TabViewItem desiredItem in desiredItems)
                     {
-                        TerminalTabs.TabItems.Remove(existingItem);
+                        TerminalTabs.TabItems.Add(desiredItem);
                     }
                 }
-
-                for (int index = 0; index < desiredItems.Count; index++)
+                else
                 {
-                    TabViewItem desiredItem = desiredItems[index];
-                    int existingIndex = FindTabViewIndex(desiredItem);
-                    if (existingIndex == index)
+                    foreach (TabViewItem existingItem in TerminalTabs.TabItems.OfType<TabViewItem>().ToList())
                     {
-                        continue;
+                        if (!desiredItems.Contains(existingItem))
+                        {
+                            TerminalTabs.TabItems.Remove(existingItem);
+                        }
                     }
 
-                    if (existingIndex >= 0)
+                    for (int index = 0; index < desiredItems.Count; index++)
                     {
-                        TerminalTabs.TabItems.RemoveAt(existingIndex);
-                    }
+                        TabViewItem desiredItem = desiredItems[index];
+                        int existingIndex = FindTabViewIndex(desiredItem);
+                        if (existingIndex == index)
+                        {
+                            continue;
+                        }
 
-                    TerminalTabs.TabItems.Insert(index, desiredItem);
+                        if (existingIndex >= 0)
+                        {
+                            TerminalTabs.TabItems.RemoveAt(existingIndex);
+                        }
+
+                        TerminalTabs.TabItems.Insert(index, desiredItem);
+                    }
                 }
 
                 string selectedTabId = _activeThread.SelectedPaneId ?? _activeThread.Panes.FirstOrDefault()?.Id;
@@ -4660,15 +7357,9 @@ namespace SelfContainedDeployment
                 if (selectedItem?.Tag is WorkspacePaneRecord selectedPane)
                 {
                     _activeThread.SelectedPaneId = selectedPane.Id;
-                    if (selectedPane.Kind == WorkspacePaneKind.Editor)
-                    {
-                        SetInspectorSection(InspectorSection.Files);
-                    }
-                    else if (selectedPane.Kind == WorkspacePaneKind.Diff)
-                    {
-                        SetInspectorSection(InspectorSection.Review);
-                    }
                 }
+
+                _lastTabStripThreadId = _activeThread.Id;
             }
             finally
             {
@@ -4702,11 +7393,10 @@ namespace SelfContainedDeployment
 
             item.Tag = pane;
             AutomationProperties.SetName(item, FormatTabHeader(pane.Title, pane.Kind, pane.IsExited));
-            item.ContextFlyout = BuildPaneContextMenu(pane);
-            object nextHeader = BuildPaneTabHeader(pane);
-            if (!Equals(item.Header, nextHeader))
+            item.ContextFlyout ??= BuildPaneContextMenu(pane);
+            if (!TryUpdatePaneTabHeader(item, pane))
             {
-                item.Header = nextHeader;
+                item.Header = BuildPaneTabHeader(pane);
             }
             item.IsClosable = true;
             return item;
@@ -4720,12 +7410,57 @@ namespace SelfContainedDeployment
             }
 
             TabViewItem item = GetOrCreateTabViewItem(pane);
-            item.ContextFlyout = BuildPaneContextMenu(pane);
-            object nextHeader = BuildPaneTabHeader(pane);
-            if (!Equals(item.Header, nextHeader))
+            if (!TryUpdatePaneTabHeader(item, pane))
             {
-                item.Header = nextHeader;
+                item.Header = BuildPaneTabHeader(pane);
             }
+        }
+
+        private void SyncTabViewItemWithPane(WorkspacePaneRecord pane)
+        {
+            if (pane is null)
+            {
+                return;
+            }
+
+            if (_tabItemsById.TryGetValue(pane.Id, out TabViewItem item))
+            {
+                item.Tag = pane;
+            }
+
+            UpdateTabViewItem(pane);
+        }
+
+        private bool TryUpdatePaneTabHeader(TabViewItem item, WorkspacePaneRecord pane)
+        {
+            if (item is null || pane is null)
+            {
+                return false;
+            }
+
+            if (string.Equals(_inlineRenamingPaneId, pane.Id, StringComparison.Ordinal))
+            {
+                if (item.Header is TextBox editor)
+                {
+                    editor.Text = pane.Title;
+                    return true;
+                }
+
+                return false;
+            }
+
+            if (item.Header is not Grid header ||
+                header.Children.Count < 2 ||
+                header.Children[0] is not FontIcon kindIcon ||
+                header.Children[1] is not TextBlock titleText)
+            {
+                return false;
+            }
+
+            kindIcon.Glyph = ResolvePaneKindGlyph(pane.Kind);
+            kindIcon.Foreground = AppBrush(header, ResolvePaneKindBrushKey(pane.Kind));
+            titleText.Text = FormatTabHeader(pane.Title, pane.Kind, pane.IsExited);
+            return true;
         }
 
         private MenuFlyout BuildPaneContextMenu(WorkspacePaneRecord pane)
@@ -4739,6 +7474,23 @@ namespace SelfContainedDeployment
             AutomationProperties.SetAutomationId(renameItem, $"shell-tab-rename-{pane.Id}");
             renameItem.Click += OnRenamePaneMenuClicked;
             menu.Items.Add(renameItem);
+            menu.Items.Add(new MenuFlyoutSeparator());
+            MenuFlyoutItem editNoteItem = new()
+            {
+                Text = "Notes",
+                Tag = pane.Id,
+            };
+            AutomationProperties.SetAutomationId(editNoteItem, $"shell-tab-thread-note-{pane.Id}");
+            editNoteItem.Click += OnEditPaneThreadNotesMenuClicked;
+            menu.Items.Add(editNoteItem);
+            MenuFlyoutItem newPaneNoteItem = new()
+            {
+                Text = "New note for this pane",
+                Tag = pane.Id,
+            };
+            AutomationProperties.SetAutomationId(newPaneNoteItem, $"shell-tab-pane-note-{pane.Id}");
+            newPaneNoteItem.Click += OnNewPaneNoteMenuClicked;
+            menu.Items.Add(newPaneNoteItem);
             return menu;
         }
 
@@ -4754,31 +7506,27 @@ namespace SelfContainedDeployment
                 string title = FormatTabHeader(pane.Title, pane.Kind, pane.IsExited);
                 Grid header = new()
                 {
-                    ColumnSpacing = 6,
+                    ColumnSpacing = 5,
+                    MinWidth = 0,
                 };
                 header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
                 header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
                 AutomationProperties.SetAutomationId(header, $"shell-tab-header-{pane.Id}");
 
-                TextBlock kindText = new()
+                FontIcon kindIcon = new()
                 {
-                    Text = pane.Kind switch
-                    {
-                        WorkspacePaneKind.Browser => "Web",
-                        WorkspacePaneKind.Editor => "Edit",
-                        WorkspacePaneKind.Diff => "Diff",
-                        _ => "Term",
-                    },
-                    FontSize = 10,
-                    Opacity = 0.72,
+                    Glyph = ResolvePaneKindGlyph(pane.Kind),
+                    FontSize = 10.5,
+                    Foreground = AppBrush(header, ResolvePaneKindBrushKey(pane.Kind)),
                     VerticalAlignment = VerticalAlignment.Center,
                 };
-                AutomationProperties.SetAutomationId(kindText, $"shell-tab-kind-{pane.Id}");
-                header.Children.Add(kindText);
+                AutomationProperties.SetAutomationId(kindIcon, $"shell-tab-kind-{pane.Id}");
+                header.Children.Add(kindIcon);
 
                 TextBlock titleText = new()
                 {
                     Text = title,
+                    FontSize = 10.9,
                     TextTrimming = TextTrimming.CharacterEllipsis,
                     VerticalAlignment = VerticalAlignment.Center,
                 };
@@ -4817,14 +7565,14 @@ namespace SelfContainedDeployment
             return editor;
         }
 
-        private static string ResolvePaneKindTabLabel(WorkspacePaneKind kind)
+        private static string ResolvePaneKindGlyph(WorkspacePaneKind kind)
         {
             return kind switch
             {
-                WorkspacePaneKind.Browser => "WEB",
-                WorkspacePaneKind.Editor => "EDIT",
-                WorkspacePaneKind.Diff => "DIFF",
-                _ => "TERM",
+                WorkspacePaneKind.Browser => "\uE774",
+                WorkspacePaneKind.Editor => "\uE70F",
+                WorkspacePaneKind.Diff => "\uE8A5",
+                _ => "\uE756",
             };
         }
 
@@ -4832,10 +7580,10 @@ namespace SelfContainedDeployment
         {
             return kind switch
             {
-                WorkspacePaneKind.Browser => "ShellWarningBrush",
+                WorkspacePaneKind.Browser => "ShellInfoBrush",
                 WorkspacePaneKind.Editor => "ShellSuccessBrush",
-                WorkspacePaneKind.Diff => "ShellInfoBrush",
-                _ => "ShellTextSecondaryBrush",
+                WorkspacePaneKind.Diff => "ShellWarningBrush",
+                _ => "ShellTextTertiaryBrush",
             };
         }
 
@@ -4911,6 +7659,8 @@ namespace SelfContainedDeployment
 
         private void RenderPaneWorkspace()
         {
+            using var perfScope = NativeAutomationDiagnostics.TrackOperation("render.pane-workspace");
+            NativeAutomationDiagnostics.IncrementCounter("paneWorkspaceRenderCount");
             string renderKey = BuildPaneWorkspaceRenderKey();
             if (string.Equals(renderKey, _lastPaneWorkspaceRenderKey, StringComparison.Ordinal))
             {
@@ -4919,7 +7669,7 @@ namespace SelfContainedDeployment
             }
 
             _lastPaneWorkspaceRenderKey = renderKey;
-            PaneWorkspaceGrid.Children.Clear();
+            RemovePaneSplitters();
             PaneWorkspaceGrid.RowDefinitions.Clear();
             PaneWorkspaceGrid.ColumnDefinitions.Clear();
 
@@ -5009,6 +7759,11 @@ namespace SelfContainedDeployment
             }
             else
             {
+                if (!ReferenceEquals(border.Tag, pane))
+                {
+                    border.Child = BuildPaneContainerContent(pane);
+                }
+
                 border.Tag = pane;
             }
 
@@ -5018,9 +7773,26 @@ namespace SelfContainedDeployment
             Grid.SetColumn(border, column);
             Grid.SetRowSpan(border, rowSpan);
             Grid.SetColumnSpan(border, columnSpan);
-            PaneWorkspaceGrid.Children.Add(border);
+            if (!ReferenceEquals(border.Parent, PaneWorkspaceGrid))
+            {
+                PaneWorkspaceGrid.Children.Add(border);
+            }
             UpdatePaneZoomButtonState(border, pane);
 
+        }
+
+        private void RemovePaneSplitters()
+        {
+            foreach (Border splitter in PaneWorkspaceGrid.Children
+                         .OfType<Border>()
+                         .Where(candidate => candidate.Tag is string direction &&
+                             (string.Equals(direction, "vertical", StringComparison.Ordinal) ||
+                              string.Equals(direction, "horizontal", StringComparison.Ordinal) ||
+                              string.Equals(direction, "both", StringComparison.Ordinal)))
+                         .ToList())
+            {
+                PaneWorkspaceGrid.Children.Remove(splitter);
+            }
         }
 
         private Grid BuildPaneContainerContent(WorkspacePaneRecord pane)
@@ -5036,8 +7808,9 @@ namespace SelfContainedDeployment
                 Margin = new Thickness(0, 6, 6, 0),
                 HorizontalAlignment = HorizontalAlignment.Right,
                 VerticalAlignment = VerticalAlignment.Top,
-                Style = (Style)Application.Current.Resources["ShellChromeButtonStyle"],
+                Style = (Style)Application.Current.Resources["ShellGhostToolbarButtonStyle"],
                 Tag = pane,
+                Opacity = 0.78,
             };
             zoomButton.Click += OnPaneZoomButtonClicked;
             content.Children.Add(zoomButton);
@@ -5064,6 +7837,14 @@ namespace SelfContainedDeployment
                 FontSize = 10.5,
                 Glyph = isZoomed ? "\uE73F" : "\uE740",
             };
+            zoomButton.Opacity = isZoomed ? 1.0 : 0.78;
+            zoomButton.Background = isZoomed
+                ? CreateSidebarTintedBrush(AppBrush(border, "ShellPaneActiveBorderBrush"), 0x0A, Windows.UI.Color.FromArgb(0xFF, 0x2C, 0x2D, 0x31))
+                : new SolidColorBrush(Windows.UI.Color.FromArgb(0x00, 0x00, 0x00, 0x00));
+            zoomButton.BorderBrush = isZoomed
+                ? CreateSidebarTintedBrush(AppBrush(border, "ShellPaneActiveBorderBrush"), 0x38, Windows.UI.Color.FromArgb(0xFF, 0x2C, 0x2D, 0x31))
+                : new SolidColorBrush(Windows.UI.Color.FromArgb(0x00, 0x00, 0x00, 0x00));
+            zoomButton.Foreground = AppBrush(border, isZoomed ? "ShellTextPrimaryBrush" : "ShellTextTertiaryBrush");
             AutomationProperties.SetAutomationId(zoomButton, $"shell-pane-zoom-{pane.Id}");
             AutomationProperties.SetName(zoomButton, isZoomed ? "Restore pane layout" : "Focus pane");
             ToolTipService.SetToolTip(zoomButton, isZoomed ? "Restore pane layout" : "Focus this pane");
@@ -5092,15 +7873,17 @@ namespace SelfContainedDeployment
                 Width = PaneDividerThickness,
                 HorizontalAlignment = HorizontalAlignment.Stretch,
                 VerticalAlignment = VerticalAlignment.Stretch,
-                Background = AppBrush(PaneWorkspaceGrid, "ShellPaneDividerBrush"),
                 Tag = "vertical",
             };
+            ApplyPaneSplitterVisual(splitter, emphasized: false);
             AutomationProperties.SetAutomationId(splitter, $"shell-pane-splitter-vertical-{row}-{column}");
             ToolTipService.SetToolTip(splitter, "Drag to resize. Hold Shift to resize both axes. Double-click to fit panes.");
             splitter.PointerPressed += OnPaneSplitterPointerPressed;
             splitter.PointerMoved += OnPaneSplitterPointerMoved;
             splitter.PointerReleased += OnPaneSplitterPointerReleased;
             splitter.PointerCanceled += OnPaneSplitterPointerCanceled;
+            splitter.PointerEntered += OnPaneSplitterPointerEntered;
+            splitter.PointerExited += OnPaneSplitterPointerExited;
             splitter.DoubleTapped += OnPaneSplitterDoubleTapped;
             Grid.SetRow(splitter, row);
             Grid.SetColumn(splitter, column);
@@ -5115,15 +7898,17 @@ namespace SelfContainedDeployment
                 Height = PaneDividerThickness,
                 HorizontalAlignment = HorizontalAlignment.Stretch,
                 VerticalAlignment = VerticalAlignment.Stretch,
-                Background = AppBrush(PaneWorkspaceGrid, "ShellPaneDividerBrush"),
                 Tag = "horizontal",
             };
+            ApplyPaneSplitterVisual(splitter, emphasized: false);
             AutomationProperties.SetAutomationId(splitter, $"shell-pane-splitter-horizontal-{row}-{column}");
             ToolTipService.SetToolTip(splitter, "Drag to resize. Hold Shift to resize both axes. Double-click to fit panes.");
             splitter.PointerPressed += OnPaneSplitterPointerPressed;
             splitter.PointerMoved += OnPaneSplitterPointerMoved;
             splitter.PointerReleased += OnPaneSplitterPointerReleased;
             splitter.PointerCanceled += OnPaneSplitterPointerCanceled;
+            splitter.PointerEntered += OnPaneSplitterPointerEntered;
+            splitter.PointerExited += OnPaneSplitterPointerExited;
             splitter.DoubleTapped += OnPaneSplitterDoubleTapped;
             Grid.SetRow(splitter, row);
             Grid.SetColumn(splitter, column);
@@ -5135,23 +7920,24 @@ namespace SelfContainedDeployment
         {
             Border splitter = new()
             {
-                Width = 14,
-                Height = 14,
+                Width = 12,
+                Height = 12,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
-                Background = AppBrush(PaneWorkspaceGrid, "ShellPaneDividerBrush"),
-                BorderBrush = AppBrush(PaneWorkspaceGrid, "ShellBorderBrush"),
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(2),
-                Margin = new Thickness(-5),
+                Margin = new Thickness(-4),
                 Tag = "both",
             };
+            ApplyPaneSplitterVisual(splitter, emphasized: false);
             AutomationProperties.SetAutomationId(splitter, $"shell-pane-splitter-both-{row}-{column}");
             ToolTipService.SetToolTip(splitter, "Drag to resize both axes. Double-click to fit panes.");
             splitter.PointerPressed += OnPaneSplitterPointerPressed;
             splitter.PointerMoved += OnPaneSplitterPointerMoved;
             splitter.PointerReleased += OnPaneSplitterPointerReleased;
             splitter.PointerCanceled += OnPaneSplitterPointerCanceled;
+            splitter.PointerEntered += OnPaneSplitterPointerEntered;
+            splitter.PointerExited += OnPaneSplitterPointerExited;
             splitter.DoubleTapped += OnPaneSplitterDoubleTapped;
             Grid.SetRow(splitter, row);
             Grid.SetColumn(splitter, column);
@@ -5174,6 +7960,7 @@ namespace SelfContainedDeployment
             _splitterDragOriginY = point.Y;
             _splitterStartPrimaryRatio = _activeThread.PrimarySplitRatio;
             _splitterStartSecondaryRatio = _activeThread.SecondarySplitRatio;
+            ApplyPaneSplitterVisual(splitter, emphasized: true);
             splitter.CapturePointer(e.Pointer);
             e.Handled = true;
         }
@@ -5220,6 +8007,7 @@ namespace SelfContainedDeployment
             if (sender is Border splitter && ReferenceEquals(splitter, _activeSplitter) && _activeSplitterPointerId == e.Pointer.PointerId)
             {
                 splitter.ReleasePointerCapture(e.Pointer);
+                ApplyPaneSplitterVisual(splitter, emphasized: false);
                 ClearActiveSplitterTracking();
                 e.Handled = true;
             }
@@ -5232,9 +8020,50 @@ namespace SelfContainedDeployment
             if (sender is Border splitter && ReferenceEquals(splitter, _activeSplitter) && _activeSplitterPointerId == e.Pointer.PointerId)
             {
                 splitter.ReleasePointerCaptures();
+                ApplyPaneSplitterVisual(splitter, emphasized: false);
                 ClearActiveSplitterTracking();
                 e.Handled = true;
             }
+        }
+
+        private void OnPaneSplitterPointerEntered(object sender, PointerRoutedEventArgs e)
+        {
+            if (sender is Border splitter && !ReferenceEquals(splitter, _activeSplitter))
+            {
+                ApplyPaneSplitterVisual(splitter, emphasized: true);
+            }
+        }
+
+        private void OnPaneSplitterPointerExited(object sender, PointerRoutedEventArgs e)
+        {
+            if (sender is Border splitter && !ReferenceEquals(splitter, _activeSplitter))
+            {
+                ApplyPaneSplitterVisual(splitter, emphasized: false);
+            }
+        }
+
+        private void ApplyPaneSplitterVisual(Border splitter, bool emphasized)
+        {
+            if (splitter is null || PaneWorkspaceGrid is null)
+            {
+                return;
+            }
+
+            bool isCenterSplitter = string.Equals(splitter.Tag as string, "both", StringComparison.Ordinal);
+            if (isCenterSplitter)
+            {
+                splitter.Background = emphasized
+                    ? CreateSidebarTintedBrush(AppBrush(PaneWorkspaceGrid, "ShellPaneActiveBorderBrush"), 0x10, Windows.UI.Color.FromArgb(0xFF, 0x2C, 0x2D, 0x31))
+                    : AppBrush(PaneWorkspaceGrid, "ShellSurfaceBackgroundBrush");
+                splitter.BorderBrush = emphasized
+                    ? CreateSidebarTintedBrush(AppBrush(PaneWorkspaceGrid, "ShellPaneActiveBorderBrush"), 0x40, Windows.UI.Color.FromArgb(0xFF, 0x2C, 0x2D, 0x31))
+                    : CreateSidebarTintedBrush(AppBrush(PaneWorkspaceGrid, "ShellBorderBrush"), 0x30, Windows.UI.Color.FromArgb(0xFF, 0x7E, 0x86, 0x91));
+                return;
+            }
+
+            splitter.Background = emphasized
+                ? CreateSidebarTintedBrush(AppBrush(PaneWorkspaceGrid, "ShellPaneActiveBorderBrush"), 0x20, Windows.UI.Color.FromArgb(0xFF, 0x2C, 0x2D, 0x31))
+                : CreateSidebarTintedBrush(AppBrush(PaneWorkspaceGrid, "ShellBorderBrush"), 0x20, Windows.UI.Color.FromArgb(0xFF, 0x7E, 0x86, 0x91));
         }
 
         private void ClearActiveSplitterTracking()
@@ -5447,6 +8276,9 @@ namespace SelfContainedDeployment
             }
 
             _activeThread.SelectedPaneId = pane.Id;
+            EnsureThreadPanesMaterialized(_activeProject, _activeThread);
+            pane = GetSelectedPane(_activeThread) ?? pane;
+            SyncTabViewItemWithPane(pane);
             if (!string.IsNullOrWhiteSpace(_activeThread.ZoomedPaneId) &&
                 !string.Equals(_activeThread.ZoomedPaneId, pane.Id, StringComparison.Ordinal))
             {
@@ -5472,6 +8304,7 @@ namespace SelfContainedDeployment
                 FocusSelectedPane();
             }
             RequestLayoutForVisiblePanes();
+            QueueVisibleDeferredPaneMaterialization(_activeProject, _activeThread);
             LogAutomationEvent("shell", "pane.selected", $"Selected pane {pane.Id}", new Dictionary<string, string>
             {
                 ["paneId"] = pane.Id,
@@ -5493,11 +8326,13 @@ namespace SelfContainedDeployment
                 }
 
                 bool isSelected = string.Equals(selectedPane?.Id, paneId, StringComparison.Ordinal);
-                border.Background = AppBrush(border, "ShellSurfaceBackgroundBrush");
-                border.BorderBrush = AppBrush(border, isSelected
-                    ? "ShellPaneActiveBorderBrush"
-                    : "ShellBorderBrush");
-                border.BorderThickness = isSelected ? new Thickness(2) : new Thickness(1);
+                border.Background = isSelected
+                    ? CreateSidebarTintedBrush(AppBrush(border, "ShellPaneActiveBorderBrush"), 0x06, Windows.UI.Color.FromArgb(0xFF, 0x2C, 0x2D, 0x31))
+                    : AppBrush(border, "ShellSurfaceBackgroundBrush");
+                border.BorderBrush = isSelected
+                    ? CreateSidebarTintedBrush(AppBrush(border, "ShellPaneActiveBorderBrush"), 0x46, Windows.UI.Color.FromArgb(0xFF, 0x2C, 0x2D, 0x31))
+                    : AppBrush(border, "ShellBorderBrush");
+                border.BorderThickness = new Thickness(1);
             }
         }
 
@@ -5553,36 +8388,151 @@ namespace SelfContainedDeployment
 
         private void ShowSettings()
         {
+            if (ShouldSuppressSettingsNavigation())
+            {
+                return;
+            }
+
+            SettingsPage existingSettingsPage = SettingsFrame?.Content as SettingsPage;
+            bool needsSettingsRefresh = _settingsPageNeedsRefresh;
+
+            if (_showingSettings)
+            {
+                if (existingSettingsPage is not null)
+                {
+                    if (needsSettingsRefresh)
+                    {
+                        existingSettingsPage.RefreshFromCurrentState(refreshCredentialVault: false);
+                        _settingsPageNeedsRefresh = false;
+                    }
+
+                    existingSettingsPage.QueueBrowserCredentialVaultRefresh();
+                }
+                else
+                {
+                    EnsureSettingsPageLoaded(refreshExisting: false, preloadOnly: true);
+                    DispatcherQueue.TryEnqueue(() =>
+                    {
+                        if (_showingSettings && SettingsFrame?.Content is SettingsPage visibleSettingsPage)
+                        {
+                            visibleSettingsPage.QueueBrowserCredentialVaultRefresh();
+                        }
+                    });
+                }
+
+                return;
+            }
+
             _showingSettings = true;
-            _showingOverview = false;
-            SettingsFrame.Navigate(typeof(SettingsPage));
+            CancelPendingInspectorDirectoryBuilds();
+            if (existingSettingsPage is not null)
+            {
+                if (needsSettingsRefresh)
+                {
+                    existingSettingsPage.RefreshFromCurrentState(refreshCredentialVault: false);
+                    _settingsPageNeedsRefresh = false;
+                }
+            }
+            else
+            {
+                EnsureSettingsPageLoaded(refreshExisting: false, preloadOnly: true);
+            }
+            UpdateProjectTreeSelectionVisuals();
             UpdateWorkspaceVisibility();
             UpdateSidebarActions();
             UpdateHeader();
             QueueSessionSave();
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                if (_showingSettings && SettingsFrame?.Content is SettingsPage visibleSettingsPage)
+                {
+                    visibleSettingsPage.QueueBrowserCredentialVaultRefresh();
+                }
+            });
             LogAutomationEvent("shell", "view.settings", "Opened preferences");
+        }
+
+        private void QueueSettingsPagePreload()
+        {
+            if (_settingsPagePreloadStarted)
+            {
+                return;
+            }
+
+            _settingsPagePreloadStarted = true;
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                if (_showingSettings)
+                {
+                    return;
+                }
+
+                EnsureSettingsPageLoaded(refreshExisting: false, preloadOnly: true);
+            });
+        }
+
+        private void EnsureSettingsPageLoaded(bool refreshExisting, bool preloadOnly = false)
+        {
+            if (SettingsFrame is null)
+            {
+                return;
+            }
+
+            if (SettingsFrame.Content is SettingsPage settingsPage)
+            {
+                if (refreshExisting)
+                {
+                    settingsPage.RefreshFromCurrentState(refreshCredentialVault: !preloadOnly);
+                    _settingsPageNeedsRefresh = false;
+                }
+
+                return;
+            }
+
+            SettingsFrame.Navigate(typeof(SettingsPage), preloadOnly);
+            _settingsPageNeedsRefresh = false;
         }
 
         private void ShowTerminalShell(bool queueGitRefresh = true)
         {
             bool wasShowingSettings = _showingSettings;
-            bool wasShowingOverview = _showingOverview;
             _showingSettings = false;
-            _showingOverview = false;
-            UpdateWorkspaceVisibility();
-            if (wasShowingSettings || wasShowingOverview)
+            if (wasShowingSettings)
+            {
+                // Ignore one stale settings reopen after leaving the preferences view.
+                _suppressSettingsUntil = DateTimeOffset.UtcNow.AddSeconds(2);
+            }
+            EnsureThreadPanesMaterialized(_activeProject, _activeThread);
+            UpdateProjectTreeSelectionVisuals();
+            if (wasShowingSettings)
             {
                 _lastPaneWorkspaceRenderKey = null;
-                RenderPaneWorkspace();
                 RefreshTabView();
             }
+            else
+            {
+                UpdateWorkspaceVisibility();
+            }
             UpdateSidebarActions();
-            FocusSelectedPane();
+            QueueSelectedPaneFocus();
             RequestLayoutForVisiblePanes();
+            QueueVisibleDeferredPaneMaterialization(_activeProject, _activeThread);
+            if (_activeGitSnapshot is null &&
+                _activeThread?.DiffReviewSource == DiffReviewSourceKind.Live &&
+                _activeThread.LiveSnapshot is not null)
+            {
+                _activeGitSnapshot = GitStatusService.CloneSnapshot(_activeThread.LiveSnapshot);
+                ApplyGitSnapshotToUi();
+            }
             UpdateHeader();
             if (queueGitRefresh)
             {
-                QueueActiveThreadGitRefresh(_activeThread?.SelectedDiffPath ?? _activeGitSnapshot?.SelectedPath, preserveSelection: true);
+                string selectedDiffPath = _activeThread?.SelectedDiffPath ?? _activeGitSnapshot?.SelectedPath;
+                QueueActiveThreadGitRefresh(
+                    selectedDiffPath,
+                    preserveSelection: true,
+                    includeSelectedDiff: false,
+                    preferFastRefresh: true);
             }
 
             QueueSessionSave();
@@ -5593,22 +8543,16 @@ namespace SelfContainedDeployment
             });
         }
 
-        private void ShowThreadOverview()
+        private bool ShouldSuppressSettingsNavigation()
         {
-            _showingSettings = false;
-            _showingOverview = _activeProject is not null;
-            UpdateWorkspaceVisibility();
-            UpdateSidebarActions();
-            UpdateHeader();
-            QueueSessionSave();
-            LogAutomationEvent("shell", "view.overview", _activeProject is null ? "Overview unavailable" : "Showing thread overview", new Dictionary<string, string>
-            {
-                ["projectId"] = _activeProject?.Id ?? string.Empty,
-                ["threadId"] = _activeThread?.Id ?? string.Empty,
-            });
+            return !_showingSettings && _suppressSettingsUntil > DateTimeOffset.UtcNow;
         }
 
-        private async System.Threading.Tasks.Task RefreshActiveThreadGitStateAsync(string selectedPath = null, bool preserveSelection = false)
+        private async System.Threading.Tasks.Task RefreshActiveThreadGitStateAsync(
+            string selectedPath = null,
+            bool preserveSelection = false,
+            bool includeSelectedDiff = true,
+            bool preferFastRefresh = false)
         {
             if (_activeThread is null)
             {
@@ -5621,14 +8565,25 @@ namespace SelfContainedDeployment
             WorkspaceProject project = _activeProject;
             string targetPath = ResolveSelectedDiffPathForRefresh(thread, selectedPath, preserveSelection);
             int requestId = ++_latestGitRefreshRequestId;
+            string correlationId = _pendingGitCorrelationId;
+            _pendingGitCorrelationId = null;
             string worktreePath = thread.WorktreePath ?? project?.RootPath;
-            bool captureComplete = thread.Panes.OfType<DiffPaneRecord>().FirstOrDefault()?.DiffPane.RequiresCompleteSnapshot == true;
+            bool captureComplete = !preferFastRefresh && VisibleDiffPaneRequiresCompleteSnapshot(thread);
             Stopwatch stopwatch = Stopwatch.StartNew();
+            NativeAutomationDiagnostics.IncrementCounter("gitRefresh.count");
 
             GitThreadSnapshot snapshot = await System.Threading.Tasks.Task
-                .Run(() => captureComplete
-                    ? GitStatusService.CaptureComplete(worktreePath, targetPath)
-                    : GitStatusService.Capture(worktreePath, targetPath))
+                .Run(() =>
+                {
+                    using var perfScope = NativeAutomationDiagnostics.TrackOperation("git.refresh.active", correlationId, background: true);
+                    return captureComplete
+                        ? GitStatusService.CaptureComplete(worktreePath, targetPath)
+                        : includeSelectedDiff
+                            ? GitStatusService.Capture(worktreePath, targetPath)
+                            : preferFastRefresh
+                                ? GitStatusService.CaptureStatusOnly(worktreePath, targetPath)
+                                : GitStatusService.CaptureMetadata(worktreePath, targetPath);
+                })
                 .ConfigureAwait(true);
 
             if (requestId != _latestGitRefreshRequestId ||
@@ -5639,11 +8594,18 @@ namespace SelfContainedDeployment
             }
 
             ApplyActiveGitSnapshot(snapshot);
+            QueueVisibleDiffHydrationIfNeeded(thread, project, snapshot);
             LogAutomationEvent("performance", "git.snapshot_ready", "Refreshed active thread git state", new Dictionary<string, string>
             {
                 ["selectedPath"] = targetPath ?? string.Empty,
                 ["durationMs"] = stopwatch.ElapsedMilliseconds.ToString(),
-                ["mode"] = captureComplete ? "complete" : "partial",
+                ["mode"] = captureComplete
+                    ? "complete"
+                    : includeSelectedDiff
+                        ? "selected-diff"
+                        : preferFastRefresh
+                            ? "status-only"
+                            : "metadata",
             });
         }
 
@@ -5690,7 +8652,7 @@ namespace SelfContainedDeployment
                 thread.DiffCheckpoints.Add(checkpoint);
 
                 RefreshDiffReviewSourceControls();
-                QueueSessionSave();
+                QueueSessionSave(SessionSaveDetail.Full);
                 LogAutomationEvent("git", "checkpoint.captured", $"Captured {checkpoint.Name}", new Dictionary<string, string>
                 {
                     ["threadId"] = thread.Id,
@@ -5715,7 +8677,12 @@ namespace SelfContainedDeployment
             _activeThread.WorktreePath = string.IsNullOrWhiteSpace(_activeThread.WorktreePath) ? snapshot.WorktreePath : _activeThread.WorktreePath;
             _activeThread.ChangedFileCount = snapshot.ChangedFiles.Count;
             _activeThread.SelectedDiffPath = snapshot.SelectedPath;
-            EnsureThreadBaselineCapture(_activeThread, _activeProject, snapshot);
+            _activeThread.LiveSnapshot = GitStatusService.CloneSnapshot(snapshot);
+            _activeThread.LiveSnapshotCapturedAt = DateTimeOffset.UtcNow;
+            if (EnableAutomaticBaselineCapture)
+            {
+                EnsureThreadBaselineCapture(_activeThread, _activeProject, snapshot);
+            }
             ApplyGitSnapshotToUi();
             QueueProjectTreeRefresh();
             LogAutomationEvent("git", "thread.snapshot_refreshed", string.IsNullOrWhiteSpace(snapshot.Error) ? "Refreshed thread git snapshot" : snapshot.Error, new Dictionary<string, string>
@@ -5788,56 +8755,109 @@ namespace SelfContainedDeployment
         {
             RefreshDiffReviewSourceControls();
             GitThreadSnapshot displayedSnapshot = ResolveDisplayedGitSnapshot();
+            bool renderDiffReviewUi = ShouldRenderDiffReviewUi();
+            bool refreshFilesInspector = _inspectorOpen && _activeInspectorSection == InspectorSection.Files;
             if (displayedSnapshot is null)
             {
-                DiffBranchText.Text = "No git context";
-                DiffWorktreeText.Text = string.Empty;
-                DiffSummaryText.Text = "No working tree changes";
-                PopulateDiffFileList(null, null, null);
-                if (_activeThread?.Panes.OfType<DiffPaneRecord>().FirstOrDefault() is DiffPaneRecord emptyDiffPane)
+                if (ShouldRefreshReviewInspectorUi())
                 {
-                    UpdateDiffPane(emptyDiffPane, emptyDiffPane.DiffPath, null);
+                    DiffBranchText.Text = "No git context";
+                    DiffWorktreeText.Text = string.Empty;
+                    DiffSummaryText.Text = "No working tree changes";
                 }
+                if (renderDiffReviewUi)
+                {
+                    PopulateDiffFileList(null, null, null);
+                    foreach (DiffPaneRecord emptyDiffPane in GetVisiblePanes(_activeThread).OfType<DiffPaneRecord>())
+                    {
+                        UpdateDiffPane(emptyDiffPane, emptyDiffPane.DiffPath, null);
+                    }
+                }
+
                 return;
             }
 
             int totalAddedLines = displayedSnapshot.ChangedFiles.Sum(file => file.AddedLines);
             int totalRemovedLines = displayedSnapshot.ChangedFiles.Sum(file => file.RemovedLines);
-            DiffBranchText.Text = string.IsNullOrWhiteSpace(displayedSnapshot.BranchName)
-                ? "Git metadata unavailable"
-                : displayedSnapshot.BranchName;
-            DiffWorktreeText.Text = displayedSnapshot.WorktreePath ?? string.Empty;
-            DiffSummaryText.Text = string.IsNullOrWhiteSpace(displayedSnapshot.Error)
-                ? FormatGitSummary(displayedSnapshot.StatusSummary, totalAddedLines, totalRemovedLines)
-                : displayedSnapshot.Error;
+            if (ShouldRefreshReviewInspectorUi())
+            {
+                DiffBranchText.Text = string.IsNullOrWhiteSpace(displayedSnapshot.BranchName)
+                    ? "Git metadata unavailable"
+                    : displayedSnapshot.BranchName;
+                DiffWorktreeText.Text = displayedSnapshot.WorktreePath ?? string.Empty;
+                DiffSummaryText.Text = string.IsNullOrWhiteSpace(displayedSnapshot.Error)
+                    ? FormatGitSummary(displayedSnapshot.StatusSummary, totalAddedLines, totalRemovedLines)
+                    : displayedSnapshot.Error;
+            }
+
+            if (!renderDiffReviewUi)
+            {
+                if (refreshFilesInspector)
+                {
+                    RefreshInspectorFileBrowser();
+                }
+
+                return;
+            }
+
             PopulateDiffFileList(displayedSnapshot.ChangedFiles, displayedSnapshot.SelectedPath, displayedSnapshot);
 
-            if (_activeThread?.Panes.OfType<DiffPaneRecord>().FirstOrDefault() is DiffPaneRecord diffPane)
+            foreach (DiffPaneRecord diffPane in GetVisiblePanes(_activeThread).OfType<DiffPaneRecord>())
             {
-                bool hasSelectedDiff = !string.IsNullOrWhiteSpace(displayedSnapshot.SelectedPath) &&
-                    displayedSnapshot.ChangedFiles.Any(file => string.Equals(file.Path, displayedSnapshot.SelectedPath, StringComparison.Ordinal));
                 DiffPaneDisplayMode displayMode = diffPane.DiffPane.DisplayMode;
+                string panePath = displayMode == DiffPaneDisplayMode.FullPatchReview
+                    ? (string.IsNullOrWhiteSpace(diffPane.DiffPath) ? displayedSnapshot.SelectedPath : diffPane.DiffPath)
+                    : ResolveVisibleDiffPanePath(diffPane, displayedSnapshot.SelectedPath);
                 UpdateDiffPane(
                     diffPane,
-                    hasSelectedDiff ? displayedSnapshot.SelectedPath : null,
-                    hasSelectedDiff ? displayedSnapshot.SelectedDiff : null,
+                    panePath,
+                    null,
                     displayedSnapshot.ChangedFiles.Count > 0 ? displayedSnapshot : null,
                     displayMode);
             }
 
-            RefreshInspectorFileBrowser();
+            if (refreshFilesInspector)
+            {
+                RefreshInspectorFileBrowser();
+            }
+        }
+
+        private bool ShouldRenderDiffReviewUi()
+        {
+            if (_activeThread is null)
+            {
+                return false;
+            }
+
+            return (_inspectorOpen && _activeInspectorSection == InspectorSection.Review) ||
+                GetVisiblePanes(_activeThread).OfType<DiffPaneRecord>().Any();
+        }
+
+        private bool ShouldRefreshReviewInspectorUi()
+        {
+            return _inspectorOpen && _activeInspectorSection == InspectorSection.Review;
         }
 
         private void PopulateDiffFileList(IReadOnlyList<GitChangedFile> changedFiles, string selectedPath, GitThreadSnapshot sourceSnapshot)
         {
-            DiffFileListPanel.Children.Clear();
             IReadOnlyList<GitChangedFile> files = changedFiles ?? Array.Empty<GitChangedFile>();
-            DiffEmptyText.Visibility = files.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-
-            foreach (GitChangedFile changedFile in files)
+            string renderKey = BuildDiffFileListRenderKey(files);
+            if (!string.Equals(renderKey, _lastDiffFileListRenderKey, StringComparison.Ordinal))
             {
-                DiffFileListPanel.Children.Add(BuildDiffFileButton(changedFile));
+                using var perfScope = NativeAutomationDiagnostics.TrackOperation("render.diff-file-list");
+                _diffFileButtonsByPath.Clear();
+                _diffFileListItems.Clear();
+                _diffFileListItems.AddRange(files.Select(BuildDiffFileListItem));
+                if (DiffFileListView is not null)
+                {
+                    DiffFileListView.ItemsSource = null;
+                    DiffFileListView.ItemsSource = _diffFileListItems;
+                }
+
+                _lastDiffFileListRenderKey = renderKey;
             }
+
+            DiffEmptyText.Visibility = files.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
 
             if (sourceSnapshot is not null)
             {
@@ -5849,6 +8869,25 @@ namespace SelfContainedDeployment
             }
 
             UpdateDiffFileSelection();
+        }
+
+        private DiffFileListItem BuildDiffFileListItem(GitChangedFile changedFile)
+        {
+            Brush statusBrush = AppBrush(this, ResolveGitStatusBrushKey(changedFile?.Status));
+            return new DiffFileListItem
+            {
+                File = changedFile,
+                AutomationId = $"shell-diff-file-{BuildAutomationKey(changedFile?.Path)}",
+                AutomationName = changedFile?.DisplayName,
+                StatusSymbol = ResolveGitStatusSymbol(changedFile?.Status),
+                StatusBrush = statusBrush,
+                FileName = Path.GetFileName(changedFile?.DisplayName ?? string.Empty),
+                MetaText = BuildDiffFileMeta(changedFile),
+                AddedText = changedFile?.AddedLines > 0 ? $"+{changedFile.AddedLines}" : string.Empty,
+                AddedVisibility = changedFile?.AddedLines > 0 ? Visibility.Visible : Visibility.Collapsed,
+                RemovedText = changedFile?.RemovedLines > 0 ? $"-{changedFile.RemovedLines}" : string.Empty,
+                RemovedVisibility = changedFile?.RemovedLines > 0 ? Visibility.Visible : Visibility.Collapsed,
+            };
         }
 
         private async void SelectDiffPathInCurrentReview(string selectedPath)
@@ -5872,10 +8911,10 @@ namespace SelfContainedDeployment
                 if (HasSelectedDiffAvailable(displayedSnapshot, displayedSnapshot.SelectedPath))
                 {
                     AddOrSelectDiffPane(_activeProject, _activeThread, displayedSnapshot.SelectedPath, null, displayedSnapshot, DiffPaneDisplayMode.FileCompare);
-                    QueueSessionSave();
                 }
                 else
                 {
+                    AddOrSelectDiffPane(_activeProject, _activeThread, displayedSnapshot.SelectedPath, null, displayedSnapshot, DiffPaneDisplayMode.FileCompare);
                     await EnsureSelectedDiffReadyAsync(_activeThread, _activeProject, displayedSnapshot.SelectedPath).ConfigureAwait(true);
                 }
             }
@@ -5883,7 +8922,6 @@ namespace SelfContainedDeployment
             {
                 UpdateDiffFileSelection();
                 AddOrSelectDiffPane(_activeProject, _activeThread, displayedSnapshot.SelectedPath, displayedSnapshot.SelectedDiff, displayedSnapshot, DiffPaneDisplayMode.FileCompare);
-                QueueSessionSave();
             }
         }
 
@@ -5947,7 +8985,6 @@ namespace SelfContainedDeployment
                 if (!string.IsNullOrWhiteSpace(snapshot.SelectedPath))
                 {
                     AddOrSelectDiffPane(project, thread, snapshot.SelectedPath, snapshot.SelectedDiff, snapshot, DiffPaneDisplayMode.FileCompare);
-                    QueueSessionSave();
                 }
 
                 LogAutomationEvent("performance", "diff.selection_ready", "Loaded selected diff via full snapshot capture", new Dictionary<string, string>
@@ -5985,7 +9022,6 @@ namespace SelfContainedDeployment
             if (!string.IsNullOrWhiteSpace(activeSnapshot?.SelectedPath))
             {
                 AddOrSelectDiffPane(project, thread, activeSnapshot.SelectedPath, activeSnapshot.SelectedDiff, activeSnapshot, DiffPaneDisplayMode.FileCompare);
-                QueueSessionSave();
             }
 
             LogAutomationEvent("performance", "diff.selection_ready", "Loaded selected diff from cached snapshot", new Dictionary<string, string>
@@ -6067,6 +9103,19 @@ namespace SelfContainedDeployment
                 return;
             }
 
+            string cachedOrigin = string.IsNullOrWhiteSpace(cachedSnapshot.WorktreePath)
+                ? cachedSnapshot.RepositoryRootPath
+                : cachedSnapshot.WorktreePath;
+            string nextOrigin = string.IsNullOrWhiteSpace(nextSnapshot.WorktreePath)
+                ? nextSnapshot.RepositoryRootPath
+                : nextSnapshot.WorktreePath;
+            if (!string.IsNullOrWhiteSpace(cachedOrigin) &&
+                !string.IsNullOrWhiteSpace(nextOrigin) &&
+                !string.Equals(cachedOrigin, nextOrigin, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
             Dictionary<string, GitChangedFile> cachedFilesByPath = cachedSnapshot.ChangedFiles
                 .Where(file => !string.IsNullOrWhiteSpace(file.Path))
                 .ToDictionary(file => file.Path, StringComparer.Ordinal);
@@ -6098,6 +9147,7 @@ namespace SelfContainedDeployment
                 {
                     changedFile.OriginalPath = cachedFile.OriginalPath;
                 }
+
             }
 
             if (string.IsNullOrWhiteSpace(nextSnapshot.SelectedDiff) && !string.IsNullOrWhiteSpace(nextSnapshot.SelectedPath))
@@ -6151,24 +9201,15 @@ namespace SelfContainedDeployment
             layout.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
             Brush statusBrush = AppBrush(button, ResolveGitStatusBrushKey(changedFile.Status));
-            Border statusBadge = new()
+            TextBlock statusBadge = new()
             {
-                Padding = new Thickness(5, 0, 5, 0),
-                MinWidth = 20,
-                Height = 18,
-                CornerRadius = new CornerRadius(4),
+                Text = ResolveGitStatusSymbol(changedFile.Status),
+                FontFamily = new FontFamily("Consolas"),
+                FontSize = 10.25,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = statusBrush,
+                Opacity = 0.92,
                 VerticalAlignment = VerticalAlignment.Top,
-                Background = CreateInspectorStatusBackground(statusBrush, isDirectory: false),
-                Child = new TextBlock
-                {
-                    Text = ResolveGitStatusSymbol(changedFile.Status),
-                    FontSize = 10,
-                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                    Foreground = statusBrush,
-                    HorizontalAlignment = HorizontalAlignment.Center,
-                    VerticalAlignment = VerticalAlignment.Center,
-                    TextAlignment = TextAlignment.Center,
-                },
             };
             AutomationProperties.SetAutomationId(statusBadge, $"shell-diff-file-status-{BuildAutomationKey(changedFile.Path)}");
             layout.Children.Add(statusBadge);
@@ -6266,11 +9307,36 @@ namespace SelfContainedDeployment
         private void UpdateDiffFileSelection()
         {
             string selectedPath = ResolveDisplayedGitSnapshot()?.SelectedPath;
-            foreach (Button button in DiffFileListPanel.Children.OfType<Button>())
+            foreach (Button button in _diffFileButtonsByPath.Values)
             {
                 GitChangedFile changedFile = ResolveSelectedDiffFile(button);
                 ApplyDiffFileButtonState(button, string.Equals(changedFile?.Path, selectedPath, StringComparison.Ordinal));
             }
+        }
+
+        private string BuildDiffFileListRenderKey(IReadOnlyList<GitChangedFile> changedFiles)
+        {
+            StringBuilder builder = new();
+            builder.Append(ResolveTheme(SampleConfig.CurrentTheme).ToString());
+            builder.Append('|');
+            IReadOnlyList<GitChangedFile> files = changedFiles ?? Array.Empty<GitChangedFile>();
+            builder.Append(files.Count);
+
+            foreach (GitChangedFile changedFile in files)
+            {
+                builder.Append('|');
+                builder.Append(changedFile?.Status ?? string.Empty);
+                builder.Append(':');
+                builder.Append(changedFile?.Path ?? string.Empty);
+                builder.Append(':');
+                builder.Append(changedFile?.OriginalPath ?? string.Empty);
+                builder.Append(':');
+                builder.Append(changedFile?.AddedLines ?? 0);
+                builder.Append(':');
+                builder.Append(changedFile?.RemovedLines ?? 0);
+            }
+
+            return builder.ToString();
         }
 
         private static string FormatGitSummary(string statusSummary, int totalAddedLines, int totalRemovedLines)
@@ -6339,6 +9405,56 @@ namespace SelfContainedDeployment
             }
         }
 
+        private void QueueSelectedPaneFocus()
+        {
+            if (GetSelectedPane(_activeThread) is not TerminalPaneRecord)
+            {
+                return;
+            }
+
+            int requestId = ++_paneFocusRequestId;
+            _ = System.Threading.Tasks.Task.Delay(45)
+                .ContinueWith(_ =>
+                {
+                    DispatcherQueue.TryEnqueue(() =>
+                    {
+                        if (requestId != _paneFocusRequestId || _showingSettings)
+                        {
+                            return;
+                        }
+
+                        FocusSelectedPane();
+                    });
+                }, System.Threading.Tasks.TaskScheduler.Default);
+        }
+
+        private System.Threading.Tasks.Task EnqueueOnUiThreadAsync(Action action)
+        {
+            if (action is null)
+            {
+                return System.Threading.Tasks.Task.CompletedTask;
+            }
+
+            var completion = new System.Threading.Tasks.TaskCompletionSource<object>(System.Threading.Tasks.TaskCreationOptions.RunContinuationsAsynchronously);
+            if (!DispatcherQueue.TryEnqueue(() =>
+                {
+                    try
+                    {
+                        action();
+                        completion.TrySetResult(null);
+                    }
+                    catch (Exception ex)
+                    {
+                        completion.TrySetException(ex);
+                    }
+                }))
+            {
+                completion.TrySetCanceled();
+            }
+
+            return completion.Task;
+        }
+
         private void RequestLayoutForVisiblePanes()
         {
             if (_activeThread is null)
@@ -6353,6 +9469,8 @@ namespace SelfContainedDeployment
         private void OnPaneLayoutTimerTick(DispatcherQueueTimer sender, object args)
         {
             _paneLayoutTimer.Stop();
+            using var perfScope = NativeAutomationDiagnostics.TrackOperation("pane.layout.apply");
+            NativeAutomationDiagnostics.IncrementCounter("paneLayout.count");
             foreach (WorkspacePaneRecord pane in GetVisiblePanes(_activeThread))
             {
                 pane.RequestLayout();
@@ -6463,6 +9581,16 @@ namespace SelfContainedDeployment
         private void ToggleInspector()
         {
             _inspectorOpen = !_inspectorOpen;
+            if (!_inspectorOpen)
+            {
+                CancelPendingInspectorDirectoryBuilds();
+            }
+            else
+            {
+                SyncInspectorSectionWithSelectedPane();
+                ApplyGitSnapshotToUi();
+            }
+
             UpdateInspectorVisibility();
             _lastPaneWorkspaceRenderKey = null;
             QueueSessionSave();
@@ -6474,17 +9602,19 @@ namespace SelfContainedDeployment
 
         private void UpdateInspectorVisibility()
         {
-            if (InspectorColumn is null || InspectorSidebar is null || ToggleInspectorButton is null)
+            if (InspectorSplitView is null || InspectorSidebar is null || ToggleInspectorButton is null)
             {
                 return;
             }
 
-            bool showInspector = _inspectorOpen && !_showingSettings && !_showingOverview && _activeThread is not null;
+            bool showInspector = _inspectorOpen && !_showingSettings && _activeThread is not null;
 
-            InspectorColumn.Width = showInspector
-                ? new GridLength(320)
-                : new GridLength(0);
-            InspectorSidebar.Visibility = showInspector ? Visibility.Visible : Visibility.Collapsed;
+            InspectorSplitView.IsPaneOpen = showInspector;
+            InspectorSidebar.IsHitTestVisible = showInspector;
+            if (showInspector)
+            {
+                RefreshInspectorNotes();
+            }
 
             ToolTipService.SetToolTip(ToggleInspectorButton, _inspectorOpen ? "Hide inspector" : "Show inspector");
             if (ToggleInspectorButton.Content is FontIcon icon)
@@ -6497,10 +9627,13 @@ namespace SelfContainedDeployment
         {
             bool isOpen = ShellSplitView.IsPaneOpen;
 
-            PaneBrandText.Visibility = isOpen ? Visibility.Visible : Visibility.Collapsed;
+            PaneBrandMark.Visibility = isOpen ? Visibility.Visible : Visibility.Collapsed;
+            PaneBrandTextStack.Visibility = isOpen ? Visibility.Visible : Visibility.Collapsed;
             ProjectSectionText.Visibility = isOpen ? Visibility.Visible : Visibility.Collapsed;
             NewProjectText.Visibility = isOpen ? Visibility.Visible : Visibility.Collapsed;
             SettingsNavText.Visibility = isOpen ? Visibility.Visible : Visibility.Collapsed;
+            ApplySidebarActionLayout(NewProjectButton, isOpen);
+            ApplySidebarActionLayout(SettingsNavButton, isOpen);
             _lastProjectTreeRenderKey = null;
 
             ToolTipService.SetToolTip(PaneToggleButton, isOpen ? "Collapse sidebar" : "Expand sidebar");
@@ -6521,26 +9654,26 @@ namespace SelfContainedDeployment
                 {
                     ThreadNameBox.Text = "Preferences";
                     ThreadNameBox.IsReadOnly = true;
+                    string settingsContext = "Theme, shell, pane limit, and vault";
+                    ActiveDirectoryText.Text = settingsContext;
                     ActiveDirectoryText.Visibility = Visibility.Visible;
-                    ActiveDirectoryText.Text = "Theme, shell profile, and launch defaults";
-                    return;
-                }
-
-                if (_showingOverview)
-                {
-                    ThreadNameBox.Text = _activeProject?.Name ?? "Thread overview";
-                    ThreadNameBox.IsReadOnly = true;
-                    ActiveDirectoryText.Visibility = Visibility.Visible;
-                    ActiveDirectoryText.Text = _activeProject is null
-                        ? "No active project"
-                        : $"{_activeProject.Threads.Count} thread{(_activeProject.Threads.Count == 1 ? string.Empty : "s")}";
+                    if (ActiveDirectorySeparator is not null)
+                    {
+                        ActiveDirectorySeparator.Visibility = Visibility.Visible;
+                    }
                     return;
                 }
 
                 ThreadNameBox.IsReadOnly = _activeThread is null;
                 ThreadNameBox.Text = _activeThread?.Name ?? "No thread selected";
-                ActiveDirectoryText.Visibility = Visibility.Visible;
-                ActiveDirectoryText.Text = _activeProject is null ? string.Empty : BuildHeaderContext(_activeProject, _activeThread);
+                string context = _activeProject is null ? string.Empty : BuildHeaderContext(_activeProject, _activeThread);
+                bool hasContext = !string.IsNullOrWhiteSpace(context);
+                ActiveDirectoryText.Text = context;
+                ActiveDirectoryText.Visibility = hasContext ? Visibility.Visible : Visibility.Collapsed;
+                if (ActiveDirectorySeparator is not null)
+                {
+                    ActiveDirectorySeparator.Visibility = hasContext ? Visibility.Visible : Visibility.Collapsed;
+                }
             }
             finally
             {
@@ -6580,6 +9713,8 @@ namespace SelfContainedDeployment
             thread.BranchName = null;
             thread.ChangedFileCount = 0;
             thread.SelectedDiffPath = null;
+            thread.LiveSnapshot = null;
+            thread.LiveSnapshotCapturedAt = default;
             thread.BaselineSnapshot = null;
             thread.DiffCheckpoints.Clear();
             thread.SelectedCheckpointId = null;
@@ -6588,7 +9723,7 @@ namespace SelfContainedDeployment
             if (thread == _activeThread)
             {
                 UpdateHeader();
-                QueueActiveThreadGitRefresh();
+                QueueActiveThreadGitRefresh(includeSelectedDiff: true);
             }
 
             QueueProjectTreeRefresh();
@@ -6608,7 +9743,9 @@ namespace SelfContainedDeployment
             if (_showingSettings)
             {
                 SettingsFrame.Visibility = Visibility.Visible;
-                PaneWorkspaceShell.Visibility = Visibility.Collapsed;
+                PaneWorkspaceShell.Visibility = Visibility.Visible;
+                PaneWorkspaceShell.Opacity = 0;
+                PaneWorkspaceShell.IsHitTestVisible = false;
                 EmptyThreadStatePanel.Visibility = Visibility.Collapsed;
                 UpdateInspectorVisibility();
                 return;
@@ -6617,239 +9754,11 @@ namespace SelfContainedDeployment
             SettingsFrame.Visibility = Visibility.Collapsed;
 
             bool showEmptyState = _activeProject is not null && _activeThread is null;
+            PaneWorkspaceShell.Opacity = 1;
+            PaneWorkspaceShell.IsHitTestVisible = true;
             PaneWorkspaceShell.Visibility = showEmptyState ? Visibility.Collapsed : Visibility.Visible;
             EmptyThreadStatePanel.Visibility = showEmptyState ? Visibility.Visible : Visibility.Collapsed;
-            UpdateThreadOverviewVisibility();
             UpdateInspectorVisibility();
-        }
-
-        private void UpdateThreadOverviewVisibility()
-        {
-            if (ThreadOverviewPanel is null || PaneWorkspaceGrid is null)
-            {
-                return;
-            }
-
-            bool showOverview = _showingOverview && !_showingSettings && _activeProject is not null;
-            ThreadOverviewPanel.Visibility = showOverview ? Visibility.Visible : Visibility.Collapsed;
-            PaneWorkspaceGrid.Visibility = showOverview ? Visibility.Collapsed : Visibility.Visible;
-
-            if (showOverview)
-            {
-                RenderThreadOverview();
-            }
-        }
-
-        private void RenderThreadOverview()
-        {
-            if (ThreadOverviewListPanel is null)
-            {
-                return;
-            }
-
-            string renderKey = BuildThreadOverviewRenderKey();
-            if (string.Equals(renderKey, _lastThreadOverviewRenderKey, StringComparison.Ordinal))
-            {
-                return;
-            }
-
-            _lastThreadOverviewRenderKey = renderKey;
-            ThreadOverviewListPanel.Children.Clear();
-
-            if (_activeProject is null)
-            {
-                ThreadOverviewMetaText.Text = "No active project";
-                return;
-            }
-
-            ThreadOverviewMetaText.Text = $"{_activeProject.Name} · {_activeProject.Threads.Count} thread{(_activeProject.Threads.Count == 1 ? string.Empty : "s")}";
-            foreach (WorkspaceThread thread in _activeProject.Threads
-                         .OrderByDescending(candidate => ReferenceEquals(candidate, _activeThread))
-                         .ThenBy(candidate => candidate.Name, StringComparer.OrdinalIgnoreCase))
-            {
-                bool isActiveThread = ReferenceEquals(thread, _activeThread);
-                Border card = new()
-                {
-                    Background = AppBrush(ThreadOverviewListPanel, "ShellSurfaceBackgroundBrush"),
-                    BorderBrush = AppBrush(ThreadOverviewListPanel, isActiveThread ? "ShellPaneActiveBorderBrush" : "ShellBorderBrush"),
-                    BorderThickness = new Thickness(1),
-                    CornerRadius = new CornerRadius(8),
-                    Padding = new Thickness(12),
-                };
-                AutomationProperties.SetAutomationId(card, $"shell-overview-card-{thread.Id}");
-
-                Button button = new()
-                {
-                    Style = (Style)Application.Current.Resources["ShellButtonBaseStyle"],
-                    Tag = thread.Id,
-                    HorizontalAlignment = HorizontalAlignment.Stretch,
-                    HorizontalContentAlignment = HorizontalAlignment.Stretch,
-                    Padding = new Thickness(0),
-                };
-                AutomationProperties.SetAutomationId(button, $"shell-overview-thread-{thread.Id}");
-                button.Click += OnOverviewThreadClicked;
-
-                Grid layout = new()
-                {
-                    RowSpacing = 10,
-                };
-                layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-                layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-                layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-                layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-
-                Grid titleRow = new()
-                {
-                    ColumnDefinitions =
-                    {
-                        new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) },
-                        new ColumnDefinition { Width = GridLength.Auto },
-                    },
-                    ColumnSpacing = 8,
-                };
-
-                StackPanel headingStack = new()
-                {
-                    Spacing = 4,
-                };
-
-                TextBlock title = new()
-                {
-                    Text = thread.Name,
-                    Style = (Style)Application.Current.Resources["ShellSectionTextStyle"],
-                    TextTrimming = TextTrimming.CharacterEllipsis,
-                };
-                AutomationProperties.SetAutomationId(title, $"shell-overview-title-{thread.Id}");
-                headingStack.Children.Add(title);
-
-                TextBlock path = new()
-                {
-                    Text = FormatThreadPath(_activeProject, thread),
-                    Style = (Style)Application.Current.Resources["ShellInteractiveMetaTextStyle"],
-                    TextTrimming = TextTrimming.CharacterEllipsis,
-                };
-                AutomationProperties.SetAutomationId(path, $"shell-overview-path-{thread.Id}");
-                headingStack.Children.Add(path);
-                titleRow.Children.Add(headingStack);
-
-                StackPanel summaryStack = new()
-                {
-                    Spacing = 2,
-                    HorizontalAlignment = HorizontalAlignment.Right,
-                };
-
-                TextBlock paneCount = new()
-                {
-                    Text = thread.PaneSummary,
-                    Style = (Style)Application.Current.Resources["ShellInteractiveMetaTextStyle"],
-                    HorizontalTextAlignment = TextAlignment.Right,
-                };
-                AutomationProperties.SetAutomationId(paneCount, $"shell-overview-panes-{thread.Id}");
-                summaryStack.Children.Add(paneCount);
-
-                TextBlock layoutText = new()
-                {
-                    Text = $"{FormatLayoutPresetLabel(thread.LayoutPreset)} · {Math.Min(thread.VisiblePaneCapacity, thread.Panes.Count)} visible",
-                    Style = (Style)Application.Current.Resources["ShellInteractiveHintTextStyle"],
-                    HorizontalTextAlignment = TextAlignment.Right,
-                };
-                AutomationProperties.SetAutomationId(layoutText, $"shell-overview-layout-{thread.Id}");
-                summaryStack.Children.Add(layoutText);
-
-                Grid.SetColumn(summaryStack, 1);
-                titleRow.Children.Add(summaryStack);
-                layout.Children.Add(titleRow);
-
-                TextBlock meta = new()
-                {
-                    Text = BuildOverviewMeta(thread),
-                    Style = (Style)Application.Current.Resources["ShellInteractiveMetaTextStyle"],
-                    TextWrapping = TextWrapping.NoWrap,
-                    TextTrimming = TextTrimming.CharacterEllipsis,
-                };
-                AutomationProperties.SetAutomationId(meta, $"shell-overview-meta-{thread.Id}");
-                Grid.SetRow(meta, 1);
-                layout.Children.Add(meta);
-
-                TextBlock paneMapText = new()
-                {
-                    Text = BuildOverviewPaneSummary(thread),
-                    Style = (Style)Application.Current.Resources["ShellInteractiveHintTextStyle"],
-                    TextWrapping = TextWrapping.NoWrap,
-                    TextTrimming = TextTrimming.CharacterEllipsis,
-                };
-                AutomationProperties.SetAutomationId(paneMapText, $"shell-overview-pane-map-{thread.Id}");
-                Grid.SetRow(paneMapText, 2);
-                layout.Children.Add(paneMapText);
-
-                button.Content = layout;
-                card.Child = button;
-                ThreadOverviewListPanel.Children.Add(card);
-            }
-        }
-
-        private string BuildThreadOverviewRenderKey()
-        {
-            StringBuilder builder = new();
-            builder.Append(_showingOverview ? '1' : '0')
-                .Append('|')
-                .Append(_activeProject?.Id)
-                .Append('|')
-                .Append(_activeThread?.Id);
-
-            foreach (WorkspaceThread thread in _activeProject?.Threads ?? Enumerable.Empty<WorkspaceThread>())
-            {
-                builder.Append('|')
-                    .Append(thread.Id)
-                    .Append(':')
-                    .Append(thread.Name)
-                    .Append(':')
-                    .Append(thread.WorktreePath)
-                    .Append(':')
-                    .Append(thread.BranchName)
-                    .Append(':')
-                    .Append(thread.LayoutPreset)
-                    .Append(':')
-                    .Append(thread.VisiblePaneCapacity)
-                    .Append(':')
-                    .Append(thread.Panes.Count)
-                    .Append(':')
-                    .Append(thread.SelectedPaneId)
-                    .Append(':')
-                    .Append(thread.SelectedDiffPath)
-                    .Append(':')
-                    .Append(thread.ChangedFileCount)
-                    .Append(':')
-                    .Append(thread.DiffCheckpoints.Count)
-                    .Append(':')
-                    .Append(thread.DiffReviewSource)
-                    .Append(':')
-                    .Append(thread.SelectedCheckpointId);
-
-                foreach (WorkspacePaneRecord pane in thread.Panes)
-                {
-                    builder.Append(':')
-                        .Append(pane.Id)
-                        .Append(',')
-                        .Append(pane.Kind)
-                        .Append(',')
-                        .Append(pane.Title)
-                        .Append(',')
-                        .Append(pane.IsExited);
-                }
-            }
-
-            return builder.ToString();
-        }
-
-        private static string FormatOverviewReviewSource(WorkspaceThread thread)
-        {
-            return thread.DiffReviewSource switch
-            {
-                DiffReviewSourceKind.Baseline => "Baseline",
-                DiffReviewSourceKind.Checkpoint => "Checkpoint",
-                _ => "Live",
-            };
         }
 
         private static string BuildOverviewPaneLabel(WorkspacePaneRecord pane)
@@ -6910,7 +9819,7 @@ namespace SelfContainedDeployment
             };
             if (liveCount > 0)
             {
-                parts.Add($"{liveCount} live");
+                parts.Add($"{liveCount} active");
             }
 
             if (readyCount > 0)
@@ -7007,6 +9916,18 @@ namespace SelfContainedDeployment
                     .Append(" active");
             }
 
+            int noteCount = thread?.NoteEntries.Count ?? 0;
+            if (noteCount > 0)
+            {
+                builder.Append(' ')
+                    .Append(noteCount)
+                    .Append(" note");
+                if (noteCount != 1)
+                {
+                    builder.Append('s');
+                }
+            }
+
             return builder.ToString();
         }
 
@@ -7016,10 +9937,286 @@ namespace SelfContainedDeployment
             string location = string.IsNullOrWhiteSpace(thread.BranchName)
                 ? worktreeName
                 : thread.BranchName;
-            string changeText = thread.ChangedFileCount <= 0
-                ? "clean"
-                : $"{thread.ChangedFileCount} changed";
-            return $"{location} · {changeText}";
+
+            if (location?.Length > 20)
+            {
+                location = location[..17] + "...";
+            }
+
+            string meta = thread.ChangedFileCount <= 0
+                ? location
+                : $"{location} · {thread.ChangedFileCount} files";
+            int noteCount = thread?.NoteEntries.Count ?? 0;
+            if (noteCount > 0)
+            {
+                meta += $" · {noteCount} note{(noteCount == 1 ? string.Empty : "s")}";
+            }
+
+            return meta;
+        }
+
+        private static string BuildThreadButtonToolTip(WorkspaceProject project, WorkspaceThread thread, string paneSummary)
+        {
+            StringBuilder builder = new();
+            builder.Append(FormatThreadPath(project, thread))
+                .Append(" · ")
+                .Append(paneSummary);
+
+            int noteCount = thread?.NoteEntries.Count ?? 0;
+            string notePreview = BuildThreadNotePreview(thread?.Notes, maxLength: 120);
+            if (noteCount > 0)
+            {
+                builder.Append(Environment.NewLine)
+                    .Append(noteCount == 1 ? "Note: " : $"{noteCount} notes: ");
+                if (!string.IsNullOrWhiteSpace(notePreview))
+                {
+                    builder.Append(notePreview);
+                }
+            }
+
+            return builder.ToString();
+        }
+
+        private IEnumerable<ProjectNoteListItem> BuildInspectorNoteListItems(WorkspaceProject project, WorkspaceThread thread, NotesListScope scope)
+        {
+            if (scope == NotesListScope.Thread)
+            {
+                foreach (ProjectNoteListItem item in BuildThreadNoteListItems(thread))
+                {
+                    yield return item;
+                }
+
+                yield break;
+            }
+
+            if (project is null)
+            {
+                yield break;
+            }
+
+            foreach ((WorkspaceThread ownerThread, WorkspaceThreadNote note) in project.Threads
+                         .SelectMany(candidate => candidate.NoteEntries.Select(note => (candidate, note)))
+                         .OrderByDescending(candidate => candidate.note.UpdatedAt))
+            {
+                yield return BuildNoteListItem(ownerThread, note, scope);
+            }
+        }
+
+        private IEnumerable<ProjectNoteListItem> BuildThreadNoteListItems(WorkspaceThread thread)
+        {
+            if (thread is null)
+            {
+                yield break;
+            }
+
+            foreach (WorkspaceThreadNote note in thread.NoteEntries.OrderByDescending(candidate => candidate.UpdatedAt))
+            {
+                yield return BuildNoteListItem(thread, note, NotesListScope.Thread);
+            }
+        }
+
+        private ProjectNoteListItem BuildNoteListItem(WorkspaceThread thread, WorkspaceThreadNote note, NotesListScope scope)
+        {
+            WorkspacePaneRecord attachedPane = thread?.Panes.FirstOrDefault(candidate => string.Equals(candidate.Id, note?.PaneId, StringComparison.Ordinal));
+            return new ProjectNoteListItem
+            {
+                NoteId = note?.Id,
+                ThreadId = thread?.Id,
+                Title = string.IsNullOrWhiteSpace(note?.Title) ? "Note" : note.Title.Trim(),
+                Preview = string.IsNullOrWhiteSpace(note?.Text) ? "Empty note" : BuildThreadNotePreview(note.Text, maxLength: 84),
+                ScopeLabel = ResolveNoteScopeLabel(attachedPane),
+                Meta = BuildNoteListMeta(thread, attachedPane, scope),
+                AccentBrush = ResolveNoteAccentBrush(attachedPane),
+            };
+        }
+
+        private string BuildNoteListMeta(WorkspaceThread thread, WorkspacePaneRecord attachedPane, NotesListScope scope)
+        {
+            if (scope == NotesListScope.Thread)
+            {
+                return attachedPane is null
+                    ? "Thread note"
+                    : FormatTabHeader(attachedPane.Title, attachedPane.Kind);
+            }
+
+            return attachedPane is null
+                ? thread?.Name ?? "Thread"
+                : $"{thread?.Name ?? "Thread"} · {FormatTabHeader(attachedPane.Title, attachedPane.Kind)}";
+        }
+
+        private Brush ResolveNoteAccentBrush(WorkspacePaneRecord attachedPane)
+        {
+            string brushKey = attachedPane?.Kind switch
+            {
+                WorkspacePaneKind.Browser => "ShellInfoBrush",
+                WorkspacePaneKind.Editor => "ShellSuccessBrush",
+                WorkspacePaneKind.Diff => "ShellWarningBrush",
+                WorkspacePaneKind.Terminal => "ShellTextSecondaryBrush",
+                _ => "ShellWarningBrush",
+            };
+            return AppBrush(InspectorNotesListView, brushKey);
+        }
+
+        private static string ResolveNoteScopeLabel(WorkspacePaneRecord attachedPane)
+        {
+            return attachedPane?.Kind switch
+            {
+                WorkspacePaneKind.Browser => "WEB",
+                WorkspacePaneKind.Editor => "EDIT",
+                WorkspacePaneKind.Diff => "DIFF",
+                WorkspacePaneKind.Terminal => "TERM",
+                _ => "THREAD",
+            };
+        }
+
+        private static string BuildNotesMeta(WorkspaceProject project, WorkspaceThread thread, NotesListScope scope)
+        {
+            int noteCount = scope == NotesListScope.Thread
+                ? thread?.NoteEntries.Count ?? 0
+                : project?.Threads.Sum(candidate => candidate.NoteEntries.Count) ?? 0;
+            string noteText = noteCount == 0
+                ? "No notes"
+                : $"{noteCount} note{(noteCount == 1 ? string.Empty : "s")}";
+            return scope == NotesListScope.Thread
+                ? $"{thread?.Name ?? "Thread"} · {noteText}"
+                : $"Project · {noteText}";
+        }
+
+        private static IEnumerable<NoteScopeOption> BuildNoteScopeOptions(WorkspaceThread thread)
+        {
+            yield return new NoteScopeOption
+            {
+                PaneId = null,
+                Label = "Thread",
+            };
+
+            if (thread is null)
+            {
+                yield break;
+            }
+
+            foreach (WorkspacePaneRecord pane in thread.Panes)
+            {
+                yield return new NoteScopeOption
+                {
+                    PaneId = pane.Id,
+                    Label = $"Pane · {FormatTabHeader(pane.Title, pane.Kind)}",
+                };
+            }
+        }
+
+        private static string ResolveThreadNotesStateBrushKey(WorkspaceThread thread)
+        {
+            return (thread?.NoteEntries.Count ?? 0) == 0
+                ? "ShellTextTertiaryBrush"
+                : "ShellWarningBrush";
+        }
+
+        private static string BuildThreadNotePreview(string notes, int maxLength = 72)
+        {
+            if (string.IsNullOrWhiteSpace(notes))
+            {
+                return string.Empty;
+            }
+
+            StringBuilder builder = new();
+            bool lastWasWhitespace = false;
+            bool truncated = false;
+            foreach (char character in notes)
+            {
+                if (char.IsWhiteSpace(character))
+                {
+                    if (builder.Length == 0 || lastWasWhitespace)
+                    {
+                        continue;
+                    }
+
+                    builder.Append(' ');
+                    lastWasWhitespace = true;
+                }
+                else
+                {
+                    builder.Append(character);
+                    lastWasWhitespace = false;
+                }
+
+                if (builder.Length >= maxLength)
+                {
+                    truncated = true;
+                    break;
+                }
+            }
+
+            string preview = builder.ToString().Trim();
+            if (preview.Length == 0)
+            {
+                return string.Empty;
+            }
+
+            return truncated
+                ? preview[..Math.Max(0, maxLength - 3)].TrimEnd() + "..."
+                : preview;
+        }
+
+        private string ResolveProjectRailIconBrushKey(WorkspaceProject project)
+        {
+            if (ReferenceEquals(project, _activeProject))
+            {
+                return "ShellTextPrimaryBrush";
+            }
+
+            bool requiresAttention = false;
+            bool isRunning = false;
+            bool hasChanges = false;
+            foreach (WorkspaceThread thread in project?.Threads ?? Enumerable.Empty<WorkspaceThread>())
+            {
+                ThreadActivitySummary summary = ResolveThreadActivitySummary(thread);
+                requiresAttention |= summary?.RequiresAttention == true;
+                isRunning |= summary?.IsRunning == true;
+                hasChanges |= thread.ChangedFileCount > 0;
+            }
+
+            if (requiresAttention)
+            {
+                return "ShellSuccessBrush";
+            }
+
+            if (isRunning)
+            {
+                return "ShellInfoBrush";
+            }
+
+            if (hasChanges)
+            {
+                return "ShellWarningBrush";
+            }
+
+            return "ShellTextTertiaryBrush";
+        }
+
+        private static string ResolveThreadRailIconBrushKey(WorkspaceThread thread, ThreadActivitySummary summary)
+        {
+            if (summary?.RequiresAttention == true)
+            {
+                return "ShellSuccessBrush";
+            }
+
+            if (summary?.IsRunning == true)
+            {
+                return "ShellInfoBrush";
+            }
+
+            if (thread?.ChangedFileCount > 0)
+            {
+                return "ShellWarningBrush";
+            }
+
+            if ((thread?.NoteEntries.Count ?? 0) > 0)
+            {
+                return "ShellWarningBrush";
+            }
+
+            return "ShellTextTertiaryBrush";
         }
 
         private FrameworkElement BuildThreadPaneStrip(WorkspaceThread thread)
@@ -7027,7 +10224,7 @@ namespace SelfContainedDeployment
             StackPanel strip = new()
             {
                 Orientation = Orientation.Horizontal,
-                Spacing = 2,
+                Spacing = 3,
                 VerticalAlignment = VerticalAlignment.Center,
             };
 
@@ -7040,21 +10237,14 @@ namespace SelfContainedDeployment
             int hiddenPaneCount = Math.Max(0, thread.Panes.Count - visiblePanes.Count);
             if (hiddenPaneCount > 0)
             {
-                Border overflowBadge = new()
+                TextBlock overflowBadge = new()
                 {
-                    MinWidth = 16,
-                    Padding = new Thickness(3, 0, 3, 0),
-                    CornerRadius = new CornerRadius(2.5),
-                    BorderThickness = new Thickness(1),
-                    BorderBrush = AppBrush(strip, "ShellBorderBrush"),
-                    Background = AppBrush(strip, "ShellMutedSurfaceBrush"),
+                    Text = $"+{hiddenPaneCount}",
+                    FontFamily = new FontFamily("Consolas"),
+                    FontSize = 9.4,
+                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                    Foreground = AppBrush(strip, "ShellTextSecondaryBrush"),
                     VerticalAlignment = VerticalAlignment.Center,
-                    Child = new TextBlock
-                    {
-                        Text = $"+{hiddenPaneCount}",
-                        FontSize = 8.8,
-                        Foreground = AppBrush(strip, "ShellTextTertiaryBrush"),
-                    },
                 };
                 ToolTipService.SetToolTip(overflowBadge, $"{hiddenPaneCount} additional pane{(hiddenPaneCount == 1 ? string.Empty : "s")} are hidden in this layout.");
                 strip.Children.Add(overflowBadge);
@@ -7065,24 +10255,12 @@ namespace SelfContainedDeployment
 
         private static FrameworkElement BuildThreadPaneBadge(WorkspacePaneRecord pane, bool selected)
         {
-            Border badge = new()
+            string brushKey = selected
+                ? "ShellTextPrimaryBrush"
+                : "ShellTextSecondaryBrush";
+            TextBlock badge = new()
             {
-                MinWidth = 15,
-                Padding = new Thickness(3, 0, 3, 0),
-                CornerRadius = new CornerRadius(2.5),
-                BorderThickness = new Thickness(1),
                 VerticalAlignment = VerticalAlignment.Center,
-            };
-
-            badge.Background = selected
-                ? CreateSidebarTintedBrush(AppBrush(badge, "ShellPaneActiveBorderBrush"), 0x18, Windows.UI.Color.FromArgb(0xFF, 0x25, 0x63, 0xEB))
-                : CreateSidebarTintedBrush(AppBrush(badge, "ShellBorderBrush"), 0x0A, Windows.UI.Color.FromArgb(0xFF, 0x71, 0x71, 0x7A));
-            badge.BorderBrush = selected
-                ? CreateSidebarTintedBrush(AppBrush(badge, "ShellPaneActiveBorderBrush"), 0x78, Windows.UI.Color.FromArgb(0xFF, 0x25, 0x63, 0xEB))
-                : CreateSidebarTintedBrush(AppBrush(badge, "ShellBorderBrush"), 0x7C, Windows.UI.Color.FromArgb(0xFF, 0x71, 0x71, 0x7A));
-
-            TextBlock label = new()
-            {
                 Text = pane.Kind switch
                 {
                     WorkspacePaneKind.Browser => "W",
@@ -7090,13 +10268,11 @@ namespace SelfContainedDeployment
                     WorkspacePaneKind.Diff => "D",
                     _ => "T",
                 },
-                FontSize = 8.6,
+                FontFamily = new FontFamily("Consolas"),
+                FontSize = 9.6,
                 FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                Foreground = selected
-                    ? AppBrush(badge, "ShellPaneActiveBorderBrush")
-                    : AppBrush(badge, "ShellTextTertiaryBrush"),
+                Foreground = (Brush)Application.Current.Resources[brushKey],
             };
-            badge.Child = label;
             ToolTipService.SetToolTip(badge, BuildOverviewPaneLabel(pane));
             return badge;
         }
@@ -7109,89 +10285,56 @@ namespace SelfContainedDeployment
             }
 
             string accentKey = summary.RequiresAttention ? "ShellSuccessBrush" : "ShellInfoBrush";
-            Border badge = new()
-            {
-                Padding = new Thickness(5, 2, 5, 2),
-                CornerRadius = new CornerRadius(999),
-                BorderThickness = new Thickness(1),
-                VerticalAlignment = VerticalAlignment.Center,
-            };
-            badge.Background = CreateSidebarTintedBrush(AppBrush(badge, accentKey), summary.RequiresAttention ? (byte)0x1E : (byte)0x14, Windows.UI.Color.FromArgb(0xFF, 0x25, 0x63, 0xEB));
-            badge.BorderBrush = CreateSidebarTintedBrush(AppBrush(badge, accentKey), summary.RequiresAttention ? (byte)0x52 : (byte)0x36, Windows.UI.Color.FromArgb(0xFF, 0x25, 0x63, 0xEB));
-
-            StackPanel layout = new()
-            {
-                Orientation = Orientation.Horizontal,
-                Spacing = 4,
-                VerticalAlignment = VerticalAlignment.Center,
-            };
-
-            if (summary.RequiresAttention)
-            {
-                layout.Children.Add(new Border
-                {
-                    Width = 6,
-                    Height = 6,
-                    CornerRadius = new CornerRadius(3),
-                    Background = AppBrush(badge, accentKey),
-                    VerticalAlignment = VerticalAlignment.Center,
-                });
-            }
-            else
-            {
-                layout.Children.Add(new ProgressRing
-                {
-                    Width = 10,
-                    Height = 10,
-                    IsActive = true,
-                    Foreground = AppBrush(badge, accentKey),
-                });
-            }
-
-            layout.Children.Add(new TextBlock
+            TextBlock label = new()
             {
                 Text = summary.Label,
-                FontSize = 10,
+                FontSize = 9.9,
                 FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                Foreground = AppBrush(badge, summary.RequiresAttention ? "ShellTextPrimaryBrush" : "ShellTextSecondaryBrush"),
-            });
+                Foreground = AppBrush(null, accentKey),
+                VerticalAlignment = VerticalAlignment.Center,
+            };
 
-            badge.Child = layout;
-            ToolTipService.SetToolTip(badge, summary.ToolTip);
-            return badge;
+            ToolTipService.SetToolTip(label, summary.ToolTip);
+            return label;
         }
 
-        private static void ApplySidebarThreadButtonState(Button button, bool active, ThreadActivitySummary summary)
+        private static void ApplySidebarThreadButtonState(Button button, bool active, ThreadActivitySummary summary, bool hovered)
         {
             if (active)
             {
-                button.Background = AppBrush(button, "ShellNavActiveBrush");
-                button.BorderBrush = CreateSidebarTintedBrush(AppBrush(button, "ShellBorderBrush"), 0x7A, Windows.UI.Color.FromArgb(0xFF, 0x71, 0x71, 0x7A));
+                button.Background = CreateSidebarTintedBrush(AppBrush(button, "ShellPaneActiveBorderBrush"), hovered ? (byte)0x24 : (byte)0x18, Windows.UI.Color.FromArgb(0xFF, 0x2C, 0x2D, 0x31));
+                button.BorderBrush = null;
+                button.Foreground = AppBrush(button, "ShellTextPrimaryBrush");
+                return;
+            }
+
+            if (hovered)
+            {
+                button.Background = AppBrush(button, "ShellNavHoverBrush");
+                button.BorderBrush = null;
                 button.Foreground = AppBrush(button, "ShellTextPrimaryBrush");
                 return;
             }
 
             if (summary?.RequiresAttention == true)
             {
-                Brush accentBrush = AppBrush(button, "ShellSuccessBrush");
-                button.Background = CreateSidebarTintedBrush(accentBrush, 0x12, Windows.UI.Color.FromArgb(0xFF, 0x16, 0xA3, 0x4A));
-                button.BorderBrush = CreateSidebarTintedBrush(accentBrush, 0x34, Windows.UI.Color.FromArgb(0xFF, 0x16, 0xA3, 0x4A));
+                button.Background = null;
+                button.BorderBrush = null;
                 button.Foreground = AppBrush(button, "ShellTextPrimaryBrush");
                 return;
             }
 
             if (summary?.IsRunning == true)
             {
-                Brush accentBrush = AppBrush(button, "ShellInfoBrush");
-                button.Background = CreateSidebarTintedBrush(accentBrush, 0x0F, Windows.UI.Color.FromArgb(0xFF, 0x25, 0x63, 0xEB));
-                button.BorderBrush = CreateSidebarTintedBrush(accentBrush, 0x1E, Windows.UI.Color.FromArgb(0xFF, 0x25, 0x63, 0xEB));
+                button.Background = null;
+                button.BorderBrush = null;
                 button.Foreground = AppBrush(button, "ShellTextPrimaryBrush");
                 return;
             }
 
             button.Background = null;
             button.BorderBrush = null;
-            button.Foreground = AppBrush(button, "ShellTextSecondaryBrush");
+            button.Foreground = AppBrush(button, "ShellTextPrimaryBrush");
         }
 
         private static Brush CreateSidebarTintedBrush(Brush source, byte alpha, Windows.UI.Color fallbackBaseColor)
@@ -7200,13 +10343,6 @@ namespace SelfContainedDeployment
                 ? solid.Color
                 : fallbackBaseColor;
             return new SolidColorBrush(Windows.UI.Color.FromArgb(alpha, baseColor.R, baseColor.G, baseColor.B));
-        }
-
-        private static string BuildOverviewMeta(WorkspaceThread thread)
-        {
-            string branchText = string.IsNullOrWhiteSpace(thread.BranchName) ? "No branch" : thread.BranchName;
-            string diffText = string.IsNullOrWhiteSpace(thread.SelectedDiffPath) ? "No diff selected" : $"Reviewing {thread.SelectedDiffPath}";
-            return $"{branchText} · {thread.ChangedFileCount} changed · {thread.DiffCheckpoints.Count} checkpoints · {FormatOverviewReviewSource(thread)} · {diffText}";
         }
 
         private string BuildOverviewPaneSummary(WorkspaceThread thread)
@@ -7952,6 +11088,11 @@ namespace SelfContainedDeployment
 
             if (string.Equals(automationId, "shell-nav-settings", StringComparison.Ordinal))
             {
+                if (ShouldSuppressSettingsNavigation())
+                {
+                    return true;
+                }
+
                 ShowSettings();
                 return true;
             }
@@ -8172,10 +11313,67 @@ namespace SelfContainedDeployment
                 }
             }
 
+            if (automationId.StartsWith("shell-tab-thread-note-", StringComparison.Ordinal))
+            {
+                switch (action)
+                {
+                    case "notes":
+                    case "edit thread note":
+                    case "open notes":
+                    case "note":
+                    {
+                        WorkspaceThread thread = FindThreadForPane(targetId);
+                        if (thread is null)
+                        {
+                            return false;
+                        }
+
+                        WorkspaceThreadNote note = thread.NoteEntries.FirstOrDefault(candidate => string.Equals(candidate.PaneId, targetId, StringComparison.Ordinal));
+                        if (note is not null)
+                        {
+                            thread.SelectedNoteId = note.Id;
+                        }
+
+                        OpenThreadNotes(thread, scope: NotesListScope.Thread);
+                        return true;
+                    }
+                    default:
+                        return false;
+                }
+            }
+
+            if (automationId.StartsWith("shell-tab-pane-note-", StringComparison.Ordinal))
+            {
+                switch (action)
+                {
+                    case "new note":
+                    case "new note for this pane":
+                    {
+                        WorkspaceThread thread = FindThreadForPane(targetId);
+                        if (thread is null)
+                        {
+                            return false;
+                        }
+
+                        AddThreadNote(thread, title: null, text: null, selectAfterCreate: true, paneId: targetId);
+                        OpenThreadNotes(thread, scope: NotesListScope.Thread);
+                        return true;
+                    }
+                    default:
+                        return false;
+                }
+            }
+
             switch (action)
             {
                 case "rename":
                     _ = BeginRenameThreadAsync(targetId);
+                    return true;
+                case "notes":
+                case "open notes":
+                case "edit note":
+                case "note":
+                    OpenThreadNotes(FindThread(targetId), scope: NotesListScope.Thread);
                     return true;
                 case "duplicate":
                     DuplicateThread(targetId);
@@ -8184,6 +11382,18 @@ namespace SelfContainedDeployment
                 case "delete":
                     DeleteThread(targetId);
                     return true;
+                case "new note":
+                {
+                    WorkspaceThread thread = FindThread(targetId);
+                    if (thread is null)
+                    {
+                        return false;
+                    }
+
+                    AddThreadNote(thread, title: null, text: null, selectAfterCreate: true, paneId: null);
+                    OpenThreadNotes(thread, scope: NotesListScope.Thread);
+                    return true;
+                }
                 default:
                     return false;
             }
@@ -8202,6 +11412,24 @@ namespace SelfContainedDeployment
                 case "rename":
                     _ = BeginRenameThreadAsync(threadId);
                     return true;
+                case "notes":
+                case "open notes":
+                case "edit note":
+                case "note":
+                    OpenThreadNotes(FindThread(threadId), scope: NotesListScope.Thread);
+                    return true;
+                case "new note":
+                {
+                    WorkspaceThread thread = FindThread(threadId);
+                    if (thread is null)
+                    {
+                        return false;
+                    }
+
+                    AddThreadNote(thread, title: null, text: null, selectAfterCreate: true, paneId: null);
+                    OpenThreadNotes(thread, scope: NotesListScope.Thread);
+                    return true;
+                }
                 case "duplicate":
                     DuplicateThread(threadId);
                     return true;
@@ -8239,6 +11467,15 @@ namespace SelfContainedDeployment
 
         private static NativeAutomationThreadState BuildThreadState(WorkspaceThread thread)
         {
+            List<NativeAutomationTabState> tabStates = thread.Panes.Select(tab => new NativeAutomationTabState
+            {
+                Id = tab.Id,
+                Kind = tab.Kind.ToString().ToLowerInvariant(),
+                Title = FormatTabHeader(tab.Title, tab.Kind),
+                Exited = tab.IsExited,
+            }).ToList();
+            List<NativeAutomationThreadNoteState> noteStates = BuildThreadNoteStates(thread).ToList();
+
             return new NativeAutomationThreadState
             {
                 Id = thread.Id,
@@ -8250,29 +11487,52 @@ namespace SelfContainedDeployment
                 TabCount = thread.Panes.Count,
                 PaneCount = thread.Panes.Count,
                 Layout = thread.LayoutPreset.ToString().ToLowerInvariant(),
+                AutoFitPaneContentLocked = thread.AutoFitPaneContentLocked,
+                ZoomedPaneId = thread.ZoomedPaneId,
                 PaneLimit = thread.PaneLimit,
                 VisiblePaneCapacity = thread.VisiblePaneCapacity,
                 PrimarySplitRatio = thread.PrimarySplitRatio,
                 SecondarySplitRatio = thread.SecondarySplitRatio,
                 ChangedFileCount = thread.ChangedFileCount,
+                HasNotes = thread.NoteEntries.Count > 0,
+                NoteCount = thread.NoteEntries.Count,
+                SelectedNoteId = thread.SelectedNoteId,
+                NotePreview = BuildThreadNotePreview(thread.Notes),
                 DiffReviewSource = FormatDiffReviewSource(thread.DiffReviewSource),
                 SelectedCheckpointId = thread.SelectedCheckpointId,
                 CheckpointCount = thread.DiffCheckpoints.Count,
-                Tabs = thread.Panes.Select(tab => new NativeAutomationTabState
-                {
-                    Id = tab.Id,
-                    Kind = tab.Kind.ToString().ToLowerInvariant(),
-                    Title = FormatTabHeader(tab.Title, tab.Kind),
-                    Exited = tab.IsExited,
-                }).ToList(),
-                Panes = thread.Panes.Select(tab => new NativeAutomationTabState
-                {
-                    Id = tab.Id,
-                    Kind = tab.Kind.ToString().ToLowerInvariant(),
-                    Title = FormatTabHeader(tab.Title, tab.Kind),
-                    Exited = tab.IsExited,
-                }).ToList(),
+                Tabs = tabStates,
+                Panes = tabStates,
+                Notes = noteStates,
             };
+        }
+
+        private static IEnumerable<NativeAutomationThreadNoteState> BuildThreadNoteStates(WorkspaceThread thread)
+        {
+            if (thread is null)
+            {
+                yield break;
+            }
+
+            foreach (WorkspaceThreadNote note in thread.NoteEntries)
+            {
+                WorkspacePaneRecord attachedPane = thread.Panes.FirstOrDefault(candidate => string.Equals(candidate.Id, note.PaneId, StringComparison.Ordinal));
+                yield return new NativeAutomationThreadNoteState
+                {
+                    Id = note.Id,
+                    Title = note.Title,
+                    Text = note.Text,
+                    Preview = BuildThreadNotePreview(note.Text),
+                    ProjectId = thread.Project?.Id,
+                    ProjectName = thread.Project?.Name,
+                    ThreadId = thread.Id,
+                    ThreadName = thread.Name,
+                    PaneId = note.PaneId,
+                    PaneTitle = attachedPane is null ? null : FormatTabHeader(attachedPane.Title, attachedPane.Kind),
+                    Selected = string.Equals(thread.SelectedNoteId, note.Id, StringComparison.Ordinal),
+                    UpdatedAt = note.UpdatedAt.ToString("O"),
+                };
+            }
         }
 
         private static ElementTheme ParseTheme(string value)
@@ -8304,30 +11564,38 @@ namespace SelfContainedDeployment
 
             Windows.UI.Color color = (effectiveTheme, key) switch
             {
-                (ElementTheme.Light, "ShellPageBackgroundBrush") => Windows.UI.Color.FromArgb(0xFF, 0xFA, 0xFA, 0xFA),
-                (ElementTheme.Light, "ShellPaneBackgroundBrush") => Windows.UI.Color.FromArgb(0xFF, 0xFA, 0xFA, 0xFA),
-                (ElementTheme.Light, "ShellSurfaceBackgroundBrush") => Windows.UI.Color.FromArgb(0xFF, 0xFF, 0xFF, 0xFF),
-                (ElementTheme.Light, "ShellPaneDividerBrush") => Windows.UI.Color.FromArgb(0xFF, 0xE5, 0xE7, 0xEB),
-                (ElementTheme.Light, "ShellNavActiveBrush") => Windows.UI.Color.FromArgb(0xFF, 0xE7, 0xE7, 0xEB),
-                (ElementTheme.Light, "ShellBorderBrush") => Windows.UI.Color.FromArgb(0xFF, 0xE4, 0xE4, 0xE7),
-                (ElementTheme.Light, "ShellPaneActiveBorderBrush") => Windows.UI.Color.FromArgb(0xFF, 0x25, 0x63, 0xEB),
-                (ElementTheme.Light, "ShellTextPrimaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0x18, 0x18, 0x1B),
-                (ElementTheme.Light, "ShellTextSecondaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0x52, 0x52, 0x5B),
-                (ElementTheme.Light, "ShellTextTertiaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0x71, 0x71, 0x7A),
+                (ElementTheme.Light, "ShellPageBackgroundBrush") => Windows.UI.Color.FromArgb(0xFF, 0xF5, 0xF6, 0xF8),
+                (ElementTheme.Light, "ShellPaneBackgroundBrush") => Windows.UI.Color.FromArgb(0xFF, 0xF5, 0xF6, 0xF8),
+                (ElementTheme.Light, "ShellSurfaceBackgroundBrush") => Windows.UI.Color.FromArgb(0xFF, 0xFB, 0xFC, 0xFD),
+                (ElementTheme.Light, "ShellMutedSurfaceBrush") => Windows.UI.Color.FromArgb(0xFF, 0xEE, 0xF1, 0xF4),
+                (ElementTheme.Light, "ShellBrandMarkBackgroundBrush") => Windows.UI.Color.FromArgb(0xFF, 0xFC, 0xFD, 0xFE),
+                (ElementTheme.Light, "ShellBrandMarkBorderBrush") => Windows.UI.Color.FromArgb(0xFF, 0xD7, 0xDD, 0xE5),
+                (ElementTheme.Light, "ShellPaneDividerBrush") => Windows.UI.Color.FromArgb(0xFF, 0xE5, 0xE9, 0xEE),
+                (ElementTheme.Light, "ShellNavHoverBrush") => Windows.UI.Color.FromArgb(0xFF, 0xE8, 0xED, 0xF2),
+                (ElementTheme.Light, "ShellNavActiveBrush") => Windows.UI.Color.FromArgb(0xFF, 0xDD, 0xE4, 0xEB),
+                (ElementTheme.Light, "ShellBorderBrush") => Windows.UI.Color.FromArgb(0xFF, 0xE1, 0xE5, 0xEA),
+                (ElementTheme.Light, "ShellPaneActiveBorderBrush") => Windows.UI.Color.FromArgb(0xFF, 0x2C, 0x2D, 0x31),
+                (ElementTheme.Light, "ShellTextPrimaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0x1B, 0x1F, 0x24),
+                (ElementTheme.Light, "ShellTextSecondaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0x48, 0x50, 0x5A),
+                (ElementTheme.Light, "ShellTextTertiaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0x66, 0x6F, 0x7B),
                 (ElementTheme.Light, "ShellSuccessBrush") => Windows.UI.Color.FromArgb(0xFF, 0x16, 0xA3, 0x4A),
                 (ElementTheme.Light, "ShellWarningBrush") => Windows.UI.Color.FromArgb(0xFF, 0xCA, 0x8A, 0x04),
                 (ElementTheme.Light, "ShellDangerBrush") => Windows.UI.Color.FromArgb(0xFF, 0xDC, 0x26, 0x26),
                 (ElementTheme.Light, "ShellInfoBrush") => Windows.UI.Color.FromArgb(0xFF, 0x25, 0x63, 0xEB),
-                (ElementTheme.Dark, "ShellPageBackgroundBrush") => Windows.UI.Color.FromArgb(0xFF, 0x09, 0x09, 0x0B),
-                (ElementTheme.Dark, "ShellPaneBackgroundBrush") => Windows.UI.Color.FromArgb(0xFF, 0x09, 0x09, 0x0B),
-                (ElementTheme.Dark, "ShellSurfaceBackgroundBrush") => Windows.UI.Color.FromArgb(0xFF, 0x11, 0x12, 0x14),
-                (ElementTheme.Dark, "ShellPaneDividerBrush") => Windows.UI.Color.FromArgb(0xFF, 0x20, 0x23, 0x2A),
-                (ElementTheme.Dark, "ShellNavActiveBrush") => Windows.UI.Color.FromArgb(0xFF, 0x1F, 0x22, 0x28),
-                (ElementTheme.Dark, "ShellBorderBrush") => Windows.UI.Color.FromArgb(0xFF, 0x23, 0x25, 0x2B),
-                (ElementTheme.Dark, "ShellPaneActiveBorderBrush") => Windows.UI.Color.FromArgb(0xFF, 0x60, 0xA5, 0xFA),
-                (ElementTheme.Dark, "ShellTextPrimaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0xFA, 0xFA, 0xFA),
-                (ElementTheme.Dark, "ShellTextSecondaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0xA1, 0xA1, 0xAA),
-                (ElementTheme.Dark, "ShellTextTertiaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0x71, 0x71, 0x7A),
+                (ElementTheme.Dark, "ShellPageBackgroundBrush") => Windows.UI.Color.FromArgb(0xFF, 0x0C, 0x0D, 0x10),
+                (ElementTheme.Dark, "ShellPaneBackgroundBrush") => Windows.UI.Color.FromArgb(0xFF, 0x0C, 0x0D, 0x10),
+                (ElementTheme.Dark, "ShellSurfaceBackgroundBrush") => Windows.UI.Color.FromArgb(0xFF, 0x10, 0x12, 0x16),
+                (ElementTheme.Dark, "ShellMutedSurfaceBrush") => Windows.UI.Color.FromArgb(0xFF, 0x14, 0x16, 0x1B),
+                (ElementTheme.Dark, "ShellBrandMarkBackgroundBrush") => Windows.UI.Color.FromArgb(0xFF, 0x13, 0x16, 0x1B),
+                (ElementTheme.Dark, "ShellBrandMarkBorderBrush") => Windows.UI.Color.FromArgb(0xFF, 0x26, 0x2B, 0x33),
+                (ElementTheme.Dark, "ShellPaneDividerBrush") => Windows.UI.Color.FromArgb(0xFF, 0x1A, 0x1D, 0x23),
+                (ElementTheme.Dark, "ShellNavHoverBrush") => Windows.UI.Color.FromArgb(0xFF, 0x13, 0x16, 0x1B),
+                (ElementTheme.Dark, "ShellNavActiveBrush") => Windows.UI.Color.FromArgb(0xFF, 0x17, 0x1A, 0x20),
+                (ElementTheme.Dark, "ShellBorderBrush") => Windows.UI.Color.FromArgb(0xFF, 0x1E, 0x21, 0x27),
+                (ElementTheme.Dark, "ShellPaneActiveBorderBrush") => Windows.UI.Color.FromArgb(0xFF, 0xC9, 0xCD, 0xD4),
+                (ElementTheme.Dark, "ShellTextPrimaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0xF3, 0xF4, 0xF6),
+                (ElementTheme.Dark, "ShellTextSecondaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0xA7, 0xAD, 0xB7),
+                (ElementTheme.Dark, "ShellTextTertiaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0x7A, 0x80, 0x8B),
                 (ElementTheme.Dark, "ShellSuccessBrush") => Windows.UI.Color.FromArgb(0xFF, 0x4A, 0xDE, 0x80),
                 (ElementTheme.Dark, "ShellWarningBrush") => Windows.UI.Color.FromArgb(0xFF, 0xFB, 0xBF, 0x24),
                 (ElementTheme.Dark, "ShellDangerBrush") => Windows.UI.Color.FromArgb(0xFF, 0xF8, 0x71, 0x71),
@@ -8348,7 +11616,9 @@ namespace SelfContainedDeployment
             return selectedItem switch
             {
                 GitChangedFile changedFile => changedFile,
+                DiffFileListItem item => item.File,
                 Button button when button.Tag is GitChangedFile changedFile => changedFile,
+                Button button when button.Tag is DiffFileListItem item => item.File,
                 ListViewItem item when item.Tag is GitChangedFile changedFile => changedFile,
                 _ => null,
             };
@@ -8356,8 +11626,12 @@ namespace SelfContainedDeployment
 
         private static void ApplyDiffFileButtonState(Button button, bool active)
         {
-            button.Background = active ? AppBrush(button, "ShellNavActiveBrush") : null;
-            button.BorderBrush = active ? AppBrush(button, "ShellPaneActiveBorderBrush") : null;
+            button.Background = active
+                ? CreateSidebarTintedBrush(AppBrush(button, "ShellPaneActiveBorderBrush"), 0x0A, Windows.UI.Color.FromArgb(0xFF, 0x2C, 0x2D, 0x31))
+                : null;
+            button.BorderBrush = active
+                ? CreateSidebarTintedBrush(AppBrush(button, "ShellPaneActiveBorderBrush"), 0x38, Windows.UI.Color.FromArgb(0xFF, 0x2C, 0x2D, 0x31))
+                : null;
             button.Foreground = active ? AppBrush(button, "ShellTextPrimaryBrush") : AppBrush(button, "ShellTextSecondaryBrush");
         }
 
@@ -8426,8 +11700,10 @@ namespace SelfContainedDeployment
 
         private static void ApplyActionButtonState(Button button, TextBlock label, bool active)
         {
-            button.Background = active ? AppBrush(button, "ShellNavActiveBrush") : null;
-            button.BorderBrush = active ? AppBrush(button, "ShellBorderBrush") : null;
+            button.Background = active
+                ? CreateSidebarTintedBrush(AppBrush(button, "ShellPaneActiveBorderBrush"), 0x10, Windows.UI.Color.FromArgb(0xFF, 0x2C, 0x2D, 0x31))
+                : null;
+            button.BorderBrush = null;
             button.Foreground = active ? AppBrush(button, "ShellTextPrimaryBrush") : AppBrush(button, "ShellTextSecondaryBrush");
             label.Foreground = active ? AppBrush(label, "ShellTextPrimaryBrush") : AppBrush(label, "ShellTextSecondaryBrush");
         }
@@ -8444,13 +11720,58 @@ namespace SelfContainedDeployment
             button.Foreground = active ? AppBrush(button, "ShellTextPrimaryBrush") : AppBrush(button, "ShellTextSecondaryBrush");
         }
 
-        private static void ApplyProjectButtonState(Button button, bool active)
+        private static void ApplySidebarActionLayout(Button button, bool isOpen)
         {
-            button.Background = active ? AppBrush(button, "ShellNavActiveBrush") : null;
-            button.BorderBrush = active
-                ? CreateSidebarTintedBrush(AppBrush(button, "ShellBorderBrush"), 0x72, Windows.UI.Color.FromArgb(0xFF, 0x71, 0x71, 0x7A))
-                : null;
-            button.Foreground = active ? AppBrush(button, "ShellTextPrimaryBrush") : AppBrush(button, "ShellTextSecondaryBrush");
+            if (button is null)
+            {
+                return;
+            }
+
+            button.Width = isOpen ? double.NaN : 32;
+            button.Padding = isOpen ? new Thickness(5, 3, 5, 3) : new Thickness(0);
+            button.HorizontalAlignment = isOpen ? HorizontalAlignment.Stretch : HorizontalAlignment.Center;
+            button.HorizontalContentAlignment = isOpen ? HorizontalAlignment.Stretch : HorizontalAlignment.Center;
+        }
+
+        private static void ApplyProjectButtonState(Button button, bool active, bool hovered)
+        {
+            if (active)
+            {
+                button.Background = CreateSidebarTintedBrush(AppBrush(button, "ShellPaneActiveBorderBrush"), hovered ? (byte)0x22 : (byte)0x16, Windows.UI.Color.FromArgb(0xFF, 0x2C, 0x2D, 0x31));
+                button.BorderBrush = null;
+            }
+            else if (hovered)
+            {
+                button.Background = AppBrush(button, "ShellNavHoverBrush");
+                button.BorderBrush = null;
+            }
+            else
+            {
+                button.Background = null;
+                button.BorderBrush = null;
+            }
+            button.Foreground = AppBrush(button, "ShellTextPrimaryBrush");
+        }
+
+        private static void ApplyInspectorTabButtonState(Button button, bool active)
+        {
+            if (button is null)
+            {
+                return;
+            }
+
+            if (active)
+            {
+                button.Background = CreateSidebarTintedBrush(AppBrush(button, "ShellPaneActiveBorderBrush"), 0x14, Windows.UI.Color.FromArgb(0xFF, 0x2C, 0x2D, 0x31));
+                button.BorderBrush = null;
+                button.Foreground = AppBrush(button, "ShellTextPrimaryBrush");
+                return;
+            }
+
+            button.Background = null;
+            button.BorderBrush = null;
+            button.BorderThickness = new Thickness(0);
+            button.Foreground = AppBrush(button, "ShellTextPrimaryBrush");
         }
 
         private static void ApplyThreadButtonState(Button button, bool active)
@@ -8475,6 +11796,13 @@ namespace SelfContainedDeployment
             return project.DisplayPath;
         }
 
+        private static bool IsFeatureEnabled(string environmentVariable)
+        {
+            string raw = Environment.GetEnvironmentVariable(environmentVariable);
+            return string.Equals(raw, "1", StringComparison.Ordinal) ||
+                string.Equals(raw, "true", StringComparison.OrdinalIgnoreCase);
+        }
+
         private string BuildProjectTreeRenderKey()
         {
             StringBuilder builder = new();
@@ -8485,8 +11813,6 @@ namespace SelfContainedDeployment
                 .Append(_showingSettings ? '1' : '0')
                 .Append('|')
                 .Append(_activeProject?.Id)
-                .Append('|')
-                .Append(_activeThread?.Id)
                 .Append('|');
 
             foreach (WorkspaceProject project in _projects)
@@ -8510,8 +11836,6 @@ namespace SelfContainedDeployment
                 builder.Append(project.Id)
                     .Append(':')
                     .Append(project.Name)
-                    .Append(':')
-                    .Append(project.SelectedThreadId)
                     .Append(':')
                     .Append(project.Threads.Count)
                     .Append(':')
@@ -8539,10 +11863,26 @@ namespace SelfContainedDeployment
                         .Append(':')
                         .Append(thread.WorktreePath)
                         .Append(':')
+                        .Append(thread.SelectedNoteId)
+                        .Append(':')
                         .Append(thread.ChangedFileCount)
                         .Append(':')
                         .Append(thread.SelectedPaneId)
                         .Append('|');
+
+                    foreach (WorkspaceThreadNote note in thread.NoteEntries)
+                    {
+                        builder.Append(note.Id)
+                            .Append(',')
+                            .Append(note.Title)
+                            .Append(',')
+                            .Append(note.PaneId)
+                            .Append(',')
+                            .Append(note.UpdatedAt.ToString("O"))
+                            .Append(',')
+                            .Append(note.Text)
+                            .Append('|');
+                    }
 
                     foreach (WorkspacePaneRecord pane in thread.Panes)
                     {
@@ -8607,6 +11947,8 @@ namespace SelfContainedDeployment
                     .Append(pane.Title)
                     .Append(':')
                     .Append(pane.Kind)
+                    .Append(':')
+                    .Append(pane.IsDeferred ? '1' : '0')
                     .Append(':')
                     .Append(pane.IsExited ? '1' : '0')
                     .Append('|');

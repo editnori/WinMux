@@ -18,6 +18,8 @@ namespace SelfContainedDeployment.Terminal
         private const int CreateUnicodeEnvironment = 0x00000400;
         private const int ProcThreadAttributePseudoConsole = 0x00020016;
         private static readonly UTF8Encoding Utf8NoBom = new(false);
+        private static readonly object LaunchEnvironmentSync = new();
+        private static IReadOnlyDictionary<string, string> CachedBaseLaunchEnvironment;
 
         private Process _process;
         private StreamWriter _inputWriter;
@@ -180,46 +182,11 @@ namespace SelfContainedDeployment.Terminal
 
         private static IReadOnlyDictionary<string, string> BuildLaunchEnvironment(string workingDirectory, IReadOnlyDictionary<string, string> overrides)
         {
-            Dictionary<string, string> values = Environment.GetEnvironmentVariables()
-                .Cast<System.Collections.DictionaryEntry>()
-                .Where(entry => entry.Key is string && entry.Value is not null)
-                .ToDictionary(
-                    entry => (string)entry.Key,
-                    entry => entry.Value?.ToString() ?? string.Empty,
-                    StringComparer.OrdinalIgnoreCase);
-
-            values["TERM_PROGRAM"] = SelfContainedDeployment.SampleConfig.FeatureName;
-            values["TERM_PROGRAM_VERSION"] = "0.1";
-            values["COLORTERM"] = "truecolor";
-            values["TERM"] = "xterm-256color";
-
-            string automationPort = values.TryGetValue("NATIVE_TERMINAL_AUTOMATION_PORT", out string portValue)
-                ? portValue
-                : Environment.GetEnvironmentVariable("NATIVE_TERMINAL_AUTOMATION_PORT");
-            if (!string.IsNullOrWhiteSpace(automationPort))
+            Dictionary<string, string> values = new(GetBaseLaunchEnvironment(), StringComparer.OrdinalIgnoreCase)
             {
-                string baseUrl = $"http://127.0.0.1:{automationPort}";
-                values["WINMUX_AUTOMATION_URL"] = baseUrl;
-                values["WINMUX_BROWSER_STATE_URL"] = $"{baseUrl}/browser-state";
-                values["WINMUX_BROWSER_EVAL_URL"] = $"{baseUrl}/browser-eval";
-                values["WINMUX_BROWSER_SCREENSHOT_URL"] = $"{baseUrl}/browser-screenshot";
-            }
-
-            values["WINMUX_BROWSER_PROFILE_MODE"] = "shared";
-            values["WINMUX_REPO_ROOT"] = values.TryGetValue("WINMUX_REPO_ROOT", out string repoRoot) && !string.IsNullOrWhiteSpace(repoRoot)
-                ? repoRoot
-                : Environment.CurrentDirectory;
-            values["WINMUX_THREAD_ROOT"] = values.TryGetValue("WINMUX_THREAD_ROOT", out string threadRoot) && !string.IsNullOrWhiteSpace(threadRoot)
-                ? threadRoot
-                : workingDirectory ?? Environment.CurrentDirectory;
-
-            values["WSLENV"] = AppendWslenvEntry(values.TryGetValue("WSLENV", out string wslenv) ? wslenv : null, "WINMUX_BROWSER_PROFILE_MODE/u");
-            values["WSLENV"] = AppendWslenvEntry(values["WSLENV"], "WINMUX_AUTOMATION_URL/u");
-            values["WSLENV"] = AppendWslenvEntry(values["WSLENV"], "WINMUX_BROWSER_STATE_URL/u");
-            values["WSLENV"] = AppendWslenvEntry(values["WSLENV"], "WINMUX_BROWSER_EVAL_URL/u");
-            values["WSLENV"] = AppendWslenvEntry(values["WSLENV"], "WINMUX_BROWSER_SCREENSHOT_URL/u");
-            values["WSLENV"] = AppendWslenvEntry(values["WSLENV"], "WINMUX_REPO_ROOT/p");
-            values["WSLENV"] = AppendWslenvEntry(values["WSLENV"], "WINMUX_THREAD_ROOT/p");
+                ["WINMUX_REPO_ROOT"] = GetBaseLaunchEnvironment()["WINMUX_REPO_ROOT"],
+                ["WINMUX_THREAD_ROOT"] = string.IsNullOrWhiteSpace(workingDirectory) ? Environment.CurrentDirectory : workingDirectory,
+            };
 
             if (overrides is not null)
             {
@@ -235,6 +202,63 @@ namespace SelfContainedDeployment.Terminal
             }
 
             return values;
+        }
+
+        private static IReadOnlyDictionary<string, string> GetBaseLaunchEnvironment()
+        {
+            lock (LaunchEnvironmentSync)
+            {
+                if (CachedBaseLaunchEnvironment is not null)
+                {
+                    return CachedBaseLaunchEnvironment;
+                }
+
+                Dictionary<string, string> values = Environment.GetEnvironmentVariables()
+                    .Cast<System.Collections.DictionaryEntry>()
+                    .Where(entry => entry.Key is string && entry.Value is not null)
+                    .ToDictionary(
+                        entry => (string)entry.Key,
+                        entry => entry.Value?.ToString() ?? string.Empty,
+                        StringComparer.OrdinalIgnoreCase);
+
+                values["TERM_PROGRAM"] = SelfContainedDeployment.SampleConfig.FeatureName;
+                values["TERM_PROGRAM_VERSION"] = "0.1";
+                values["COLORTERM"] = "truecolor";
+                values["TERM"] = "xterm-256color";
+
+                string automationPort = values.TryGetValue("NATIVE_TERMINAL_AUTOMATION_PORT", out string portValue)
+                    ? portValue
+                    : Environment.GetEnvironmentVariable("NATIVE_TERMINAL_AUTOMATION_PORT");
+                if (!string.IsNullOrWhiteSpace(automationPort))
+                {
+                    string baseUrl = $"http://127.0.0.1:{automationPort}";
+                    values["WINMUX_AUTOMATION_PORT"] = automationPort;
+                    values["WINMUX_AUTOMATION_URL"] = baseUrl;
+                    values["WINMUX_BROWSER_STATE_URL"] = $"{baseUrl}/browser-state";
+                    values["WINMUX_BROWSER_EVAL_URL"] = $"{baseUrl}/browser-eval";
+                    values["WINMUX_BROWSER_SCREENSHOT_URL"] = $"{baseUrl}/browser-screenshot";
+                }
+
+                values["WINMUX_BROWSER_PROFILE_MODE"] = "shared";
+                values["WINMUX_REPO_ROOT"] = values.TryGetValue("WINMUX_REPO_ROOT", out string repoRoot) && !string.IsNullOrWhiteSpace(repoRoot)
+                    ? repoRoot
+                    : Environment.CurrentDirectory;
+                values["WINMUX_THREAD_ROOT"] = Environment.CurrentDirectory;
+
+                values["WSLENV"] = AppendWslenvEntry(values.TryGetValue("WSLENV", out string wslenv) ? wslenv : null, "WINMUX_BROWSER_PROFILE_MODE/u");
+                values["WSLENV"] = AppendWslenvEntry(values["WSLENV"], "WINMUX_AUTOMATION_PORT/u");
+                values["WSLENV"] = AppendWslenvEntry(values["WSLENV"], "WINMUX_AUTOMATION_URL/u");
+                values["WSLENV"] = AppendWslenvEntry(values["WSLENV"], "WINMUX_BROWSER_STATE_URL/u");
+                values["WSLENV"] = AppendWslenvEntry(values["WSLENV"], "WINMUX_BROWSER_EVAL_URL/u");
+                values["WSLENV"] = AppendWslenvEntry(values["WSLENV"], "WINMUX_BROWSER_SCREENSHOT_URL/u");
+                values["WSLENV"] = AppendWslenvEntry(values["WSLENV"], "WINMUX_REPO_ROOT/p");
+                values["WSLENV"] = AppendWslenvEntry(values["WSLENV"], "WINMUX_PROJECT_ROOT/p");
+                values["WSLENV"] = AppendWslenvEntry(values["WSLENV"], "WINMUX_THREAD_ROOT/p");
+                values["WSLENV"] = AppendWslenvEntry(values["WSLENV"], "WINMUX_BROWSER_BRIDGE/p");
+
+                CachedBaseLaunchEnvironment = values;
+                return CachedBaseLaunchEnvironment;
+            }
         }
 
         private static string AppendWslenvEntry(string existing, string entry)

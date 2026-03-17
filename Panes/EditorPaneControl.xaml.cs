@@ -6,6 +6,7 @@ using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Dispatching;
 using Microsoft.Web.WebView2.Core;
 using SelfContainedDeployment.Shell;
+using SelfContainedDeployment.Automation;
 using SelfContainedDeployment.Terminal;
 using System;
 using System.Collections.Generic;
@@ -14,6 +15,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using Windows.UI;
 
@@ -96,7 +98,9 @@ namespace SelfContainedDeployment.Panes
             ".zip",
         };
 
-        private static readonly TimeSpan ProjectFileCacheLifetime = TimeSpan.FromSeconds(3);
+        private static readonly TimeSpan ProjectFileCacheLifetime = TimeSpan.FromMinutes(5);
+        private static readonly TimeSpan DocumentApplyAckTimeout = TimeSpan.FromMilliseconds(220);
+        private const int MaxProjectFileCacheEntries = 12;
         private static readonly object ProjectFileCacheGate = new();
         private static readonly Dictionary<string, CachedProjectFileSnapshot> ProjectFileCache = new(StringComparer.OrdinalIgnoreCase);
 
@@ -179,6 +183,10 @@ namespace SelfContainedDeployment.Panes
         private double _lastLayoutWidth = -1;
         private double _lastLayoutHeight = -1;
         private string _lastAppliedDocumentRequestId;
+        private string _lastAppliedDocumentSignature;
+        private string _pendingDocumentApplyRequestId;
+        private string _pendingDocumentApplySignature;
+        private TaskCompletionSource<bool> _pendingDocumentApplyCompletion;
         private bool _showCompactHeader = true;
         private bool _autoFitWidthLocked;
         private bool _fitWidthRequested;
@@ -190,7 +198,7 @@ namespace SelfContainedDeployment.Panes
             InitializeComponent();
             PointerPressed += (_, _) => RaiseInteractionRequested();
             GotFocus += (_, _) => RaiseInteractionRequested();
-            EditorView.GotFocus += (_, _) => RaiseInteractionRequested();
+            EditorView.GotFocus += OnEditorViewGotFocus;
             ActualThemeChanged += OnActualThemeChanged;
             SizeChanged += OnEditorSizeChanged;
             _layoutTimer = DispatcherQueue.CreateTimer();
@@ -260,6 +268,11 @@ namespace SelfContainedDeployment.Panes
             _ = ExecuteEditorScriptAsync("window.__winmuxEditorHost?.focus?.();");
         }
 
+        public Task WarmupAsync()
+        {
+            return EnsureInitializedAsync();
+        }
+
         public void RequestLayout()
         {
             QueueEditorLayout(force: true);
@@ -285,6 +298,14 @@ namespace SelfContainedDeployment.Panes
         {
             _disposed = true;
             _layoutTimer.Stop();
+            CancelPendingDocumentApply();
+            ActualThemeChanged -= OnActualThemeChanged;
+            SizeChanged -= OnEditorSizeChanged;
+            EditorView.GotFocus -= OnEditorViewGotFocus;
+            _files.Clear();
+            _fileListLoaded = false;
+            _selectedFullPath = null;
+            _selectedRelativePath = null;
 
             if (EditorView.CoreWebView2 is not null)
             {
@@ -369,9 +390,9 @@ namespace SelfContainedDeployment.Panes
             RaiseStateChanged();
         }
 
-        internal static List<EditorPaneFileEntry> EnumerateProjectFilesForRoot(string rootPath, bool bypassCache = false)
+        internal static List<EditorPaneFileEntry> EnumerateProjectFilesForRoot(string rootPath, bool bypassCache = false, CancellationToken cancellationToken = default)
         {
-            return EnumerateProjectFiles(rootPath, bypassCache);
+            return EnumerateProjectFiles(rootPath, bypassCache, cancellationToken);
         }
 
         internal EditorPaneRenderSnapshot GetRenderSnapshot(int maxChars = 0, int maxFiles = 0)
@@ -486,6 +507,11 @@ namespace SelfContainedDeployment.Panes
             _layoutTimer.Stop();
         }
 
+        private void OnEditorViewGotFocus(object sender, RoutedEventArgs e)
+        {
+            RaiseInteractionRequested();
+        }
+
         private void OnActualThemeChanged(FrameworkElement sender, object args)
         {
             if (_themePreference != ElementTheme.Default)
@@ -518,17 +544,39 @@ namespace SelfContainedDeployment.Panes
 
         private async Task InitializeEditorWebViewAsync()
         {
+            using var perfScope = NativeAutomationDiagnostics.TrackOperation("editor.webview.init");
+            NativeAutomationDiagnostics.IncrementCounter("editorWebViewInit.count");
             CoreWebView2 core;
             try
             {
                 CoreWebView2Environment environment = await TerminalControl.GetEnvironmentAsync().ConfigureAwait(true);
+                if (_disposed)
+                {
+                    return;
+                }
+
                 await EditorView.EnsureCoreWebView2Async(environment).AsTask().ConfigureAwait(true);
+                if (_disposed)
+                {
+                    return;
+                }
+
                 core = await WaitForCoreWebView2Async().ConfigureAwait(true);
             }
             catch
             {
                 await EditorView.EnsureCoreWebView2Async().AsTask().ConfigureAwait(true);
+                if (_disposed)
+                {
+                    return;
+                }
+
                 core = await WaitForCoreWebView2Async().ConfigureAwait(true);
+            }
+
+            if (_disposed)
+            {
+                return;
             }
 
             ConfigureInitializedEditor(core);
@@ -584,6 +632,10 @@ namespace SelfContainedDeployment.Panes
                 return;
             }
 
+            // A navigation invalidates the renderer-side document state.
+            _lastAppliedDocumentRequestId = null;
+            _lastAppliedDocumentSignature = null;
+            CancelPendingDocumentApply();
             ApplyEditorSurfaceTheme();
             _ = ApplyEditorShellThemeAsync();
             _ = ApplyEditorThemeAsync();
@@ -640,6 +692,7 @@ namespace SelfContainedDeployment.Panes
                     if (!string.IsNullOrWhiteSpace(message.RequestId))
                     {
                         _lastAppliedDocumentRequestId = message.RequestId;
+                        TryCompletePendingDocumentApply(message.RequestId);
                     }
 
                     if (_fitWidthRequested || _autoFitWidthLocked)
@@ -677,7 +730,7 @@ namespace SelfContainedDeployment.Panes
 
         private async Task EnsureFileListLoadedAsync()
         {
-            if (_fileListLoaded)
+            if (_disposed || _fileListLoaded)
             {
                 return;
             }
@@ -692,6 +745,11 @@ namespace SelfContainedDeployment.Panes
             }
 
             List<EditorPaneFileEntry> files = await Task.Run(() => EnumerateProjectFiles(rootPath)).ConfigureAwait(true);
+            if (_disposed)
+            {
+                return;
+            }
+
             _files.Clear();
             _files.AddRange(files);
             _fileListLoaded = true;
@@ -700,6 +758,11 @@ namespace SelfContainedDeployment.Panes
 
         private async Task OpenInitialFileAsync()
         {
+            if (_disposed)
+            {
+                return;
+            }
+
             string targetPath = ResolveInitialPath();
             if (!string.IsNullOrWhiteSpace(targetPath))
             {
@@ -750,7 +813,7 @@ namespace SelfContainedDeployment.Panes
 
         private async Task OpenFileAsync(string path, bool savePendingChanges = true)
         {
-            if (string.IsNullOrWhiteSpace(path))
+            if (_disposed || string.IsNullOrWhiteSpace(path))
             {
                 return;
             }
@@ -769,6 +832,11 @@ namespace SelfContainedDeployment.Panes
             try
             {
                 byte[] bytes = await File.ReadAllBytesAsync(fullPath).ConfigureAwait(true);
+                if (_disposed)
+                {
+                    return;
+                }
+
                 if (LooksBinary(bytes))
                 {
                     _selectedFullPath = fullPath;
@@ -806,6 +874,11 @@ namespace SelfContainedDeployment.Panes
             }
             catch (Exception ex)
             {
+                if (_disposed)
+                {
+                    return;
+                }
+
                 _selectedFullPath = fullPath;
                 _selectedRelativePath = relativePath;
                 _loadedText = string.Empty;
@@ -897,14 +970,81 @@ namespace SelfContainedDeployment.Panes
                 EmptyBody = DiffModeEnabled ? DiffEmptyBody : "Use the Files tab in the inspector to open a file.",
             };
 
-            PostEditorMessage("document", payload);
-            await Task.Delay(140).ConfigureAwait(true);
-            if (!string.Equals(_lastAppliedDocumentRequestId, requestId, StringComparison.Ordinal))
+            string signature = BuildDocumentSignature(payload);
+            if (string.Equals(_lastAppliedDocumentSignature, signature, StringComparison.Ordinal))
             {
-                string json = JsonSerializer.Serialize(payload, JsonOptions);
-                string base64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(json));
-                await ExecuteEditorScriptAsync($"window.__winmuxEditorHost?.setDocument?.(JSON.parse(atob('{base64}')));").ConfigureAwait(true);
+                return;
             }
+
+            var applyCompletion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            SetPendingDocumentApply(requestId, signature, applyCompletion);
+            PostEditorMessage("document", payload);
+            Task completedTask = await Task.WhenAny(applyCompletion.Task, Task.Delay(DocumentApplyAckTimeout)).ConfigureAwait(true);
+            if (completedTask == applyCompletion.Task || string.Equals(_lastAppliedDocumentRequestId, requestId, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            if (_disposed)
+            {
+                return;
+            }
+
+            string json = JsonSerializer.Serialize(payload, JsonOptions);
+            string base64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(json));
+            await ExecuteEditorScriptAsync($"window.__winmuxEditorHost?.setDocument?.(JSON.parse(atob('{base64}')));").ConfigureAwait(true);
+        }
+
+        private void SetPendingDocumentApply(string requestId, string signature, TaskCompletionSource<bool> completion)
+        {
+            TaskCompletionSource<bool> previousCompletion = _pendingDocumentApplyCompletion;
+            _pendingDocumentApplyRequestId = requestId;
+            _pendingDocumentApplySignature = signature;
+            _pendingDocumentApplyCompletion = completion;
+            previousCompletion?.TrySetCanceled();
+        }
+
+        private void TryCompletePendingDocumentApply(string requestId)
+        {
+            if (!string.Equals(_pendingDocumentApplyRequestId, requestId, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _lastAppliedDocumentSignature = _pendingDocumentApplySignature;
+            _pendingDocumentApplyRequestId = null;
+            _pendingDocumentApplySignature = null;
+            TaskCompletionSource<bool> completion = _pendingDocumentApplyCompletion;
+            _pendingDocumentApplyCompletion = null;
+            completion?.TrySetResult(true);
+        }
+
+        private void CancelPendingDocumentApply()
+        {
+            _pendingDocumentApplyRequestId = null;
+            _pendingDocumentApplySignature = null;
+            TaskCompletionSource<bool> completion = _pendingDocumentApplyCompletion;
+            _pendingDocumentApplyCompletion = null;
+            completion?.TrySetCanceled();
+        }
+
+        private static string BuildDocumentSignature(EditorDocumentPayload payload)
+        {
+            HashCode hash = new();
+            hash.Add(payload?.Mode, StringComparer.Ordinal);
+            hash.Add(payload?.Path, StringComparer.Ordinal);
+            hash.Add(payload?.Text, StringComparer.Ordinal);
+            hash.Add(payload?.OriginalText, StringComparer.Ordinal);
+            hash.Add(payload?.ModifiedText, StringComparer.Ordinal);
+            hash.Add(payload?.Language, StringComparer.Ordinal);
+            hash.Add(payload?.Theme, StringComparer.Ordinal);
+            hash.Add(payload?.LineEnding, StringComparer.Ordinal);
+            hash.Add(payload?.ReadOnly ?? false);
+            hash.Add(payload?.LineNumbers, StringComparer.Ordinal);
+            hash.Add(payload?.RenderLineHighlight, StringComparer.Ordinal);
+            hash.Add(payload?.EmptyTitle, StringComparer.Ordinal);
+            hash.Add(payload?.EmptyBody, StringComparer.Ordinal);
+            return hash.ToHashCode().ToString(CultureInfo.InvariantCulture);
         }
 
         private async Task ApplyEditorThemeAsync()
@@ -1341,8 +1481,9 @@ namespace SelfContainedDeployment.Panes
                 : normalized;
         }
 
-        private static List<EditorPaneFileEntry> EnumerateProjectFiles(string rootPath, bool bypassCache = false)
+        private static List<EditorPaneFileEntry> EnumerateProjectFiles(string rootPath, bool bypassCache = false, CancellationToken cancellationToken = default)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             string normalizedRootPath = NormalizeRootPath(rootPath);
             if (string.IsNullOrWhiteSpace(normalizedRootPath) || !Directory.Exists(normalizedRootPath))
             {
@@ -1353,8 +1494,10 @@ namespace SelfContainedDeployment.Panes
             {
                 lock (ProjectFileCacheGate)
                 {
+                    DateTimeOffset now = DateTimeOffset.UtcNow;
+                    PruneProjectFileCache(now);
                     if (ProjectFileCache.TryGetValue(normalizedRootPath, out CachedProjectFileSnapshot cached) &&
-                        DateTimeOffset.UtcNow - cached.CapturedAt <= ProjectFileCacheLifetime)
+                        now - cached.CapturedAt <= ProjectFileCacheLifetime)
                     {
                         return CloneFileEntries(cached.Files);
                     }
@@ -1367,11 +1510,13 @@ namespace SelfContainedDeployment.Panes
 
             while (stack.Count > 0)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 string current = stack.Pop();
                 try
                 {
                     foreach (string directory in Directory.EnumerateDirectories(current))
                     {
+                        cancellationToken.ThrowIfCancellationRequested();
                         string name = Path.GetFileName(directory);
                         if (IgnoredDirectoryNames.Contains(name))
                         {
@@ -1383,6 +1528,7 @@ namespace SelfContainedDeployment.Panes
 
                     foreach (string file in Directory.EnumerateFiles(current))
                     {
+                        cancellationToken.ThrowIfCancellationRequested();
                         if (!IsProbablyEditableFile(file))
                         {
                             continue;
@@ -1406,14 +1552,43 @@ namespace SelfContainedDeployment.Panes
 
             lock (ProjectFileCacheGate)
             {
+                DateTimeOffset capturedAt = DateTimeOffset.UtcNow;
+                PruneProjectFileCache(capturedAt);
                 ProjectFileCache[normalizedRootPath] = new CachedProjectFileSnapshot
                 {
-                    CapturedAt = DateTimeOffset.UtcNow,
+                    CapturedAt = capturedAt,
                     Files = CloneFileEntries(ordered),
                 };
+                PruneProjectFileCache(capturedAt);
             }
 
             return ordered;
+        }
+
+        private static void PruneProjectFileCache(DateTimeOffset now)
+        {
+            string[] expiredRoots = ProjectFileCache
+                .Where(entry => now - entry.Value.CapturedAt > ProjectFileCacheLifetime)
+                .Select(entry => entry.Key)
+                .ToArray();
+            foreach (string expiredRoot in expiredRoots)
+            {
+                ProjectFileCache.Remove(expiredRoot);
+            }
+
+            while (ProjectFileCache.Count > MaxProjectFileCacheEntries)
+            {
+                string oldestRoot = ProjectFileCache
+                    .OrderBy(entry => entry.Value.CapturedAt)
+                    .Select(entry => entry.Key)
+                    .FirstOrDefault();
+                if (string.IsNullOrWhiteSpace(oldestRoot))
+                {
+                    break;
+                }
+
+                ProjectFileCache.Remove(oldestRoot);
+            }
         }
 
         private static bool IsProbablyEditableFile(string filePath)

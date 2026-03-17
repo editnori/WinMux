@@ -1,0 +1,478 @@
+{
+  "budgetProfiles": {
+    "instant": { "responseMs": 10, "firstRenderMs": 10 },
+    "tight": { "responseMs": 25, "firstRenderMs": 20 },
+    "snappy": { "responseMs": 50, "firstRenderMs": 33 },
+    "standard": { "responseMs": 75, "firstRenderMs": 50 },
+    "heavy": { "responseMs": 100, "firstRenderMs": 75 },
+    "background": { "asyncMs": 1500 }
+  },
+  "features": [
+    {
+      "id": "shell.toggle-pane",
+      "name": "Shell pane toggle",
+      "category": "shell",
+      "measurementMode": "automated",
+      "mutation": "safe",
+      "budget": { "responseMs": 25, "firstRenderMs": 20 },
+      "automationActions": ["togglepane"],
+      "runner": "togglePane"
+    },
+    {
+      "id": "shell.inspector-toggle",
+      "name": "Inspector toggle",
+      "category": "shell",
+      "measurementMode": "automated",
+      "mutation": "safe",
+      "budget": { "responseMs": 10, "firstRenderMs": 10 },
+      "automationActions": ["toggleinspector"],
+      "runner": "toggleInspector"
+    },
+    {
+      "id": "shell.show-settings",
+      "name": "Settings view",
+      "category": "shell",
+      "measurementMode": "automated",
+      "mutation": "safe",
+      "budget": { "responseMs": 25, "firstRenderMs": 20 },
+      "automationActions": ["showsettings"],
+      "runner": "showSettings"
+    },
+    {
+      "id": "shell.show-terminal",
+      "name": "Terminal workspace view",
+      "category": "shell",
+      "measurementMode": "automated",
+      "mutation": "safe",
+      "budget": { "responseMs": 25, "firstRenderMs": 20 },
+      "automationActions": ["showterminal"],
+      "runner": "showTerminal"
+    },
+    {
+      "id": "shell.project-switch",
+      "name": "Project switch",
+      "category": "shell",
+      "measurementMode": "automated",
+      "mutation": "safe",
+      "budget": { "responseMs": 50, "firstRenderMs": 33, "asyncMs": 1500 },
+      "automationActions": ["selectproject"],
+      "runner": "projectSwitch"
+    },
+    {
+      "id": "shell.thread-switch",
+      "name": "Thread switch",
+      "category": "shell",
+      "measurementMode": "automated",
+      "mutation": "safe",
+      "budget": { "responseMs": 50, "firstRenderMs": 33, "asyncMs": 1500 },
+      "automationActions": ["selectthread"],
+      "runner": "threadSwitch"
+    },
+    {
+      "id": "shell.layout-dual",
+      "name": "Set layout dual",
+      "category": "shell",
+      "measurementMode": "automated",
+      "mutation": "safe",
+      "budget": { "responseMs": 25, "firstRenderMs": 20 },
+      "automationActions": ["setlayout"],
+      "runner": "layoutDual"
+    },
+    {
+      "id": "shell.layout-quad",
+      "name": "Set layout quad",
+      "category": "shell",
+      "measurementMode": "automated",
+      "mutation": "safe",
+      "budget": { "responseMs": 25, "firstRenderMs": 20 },
+      "automationActions": ["setlayout"],
+      "runner": "layoutQuad"
+    },
+    {
+      "id": "shell.pane-split",
+      "name": "Set pane split",
+      "category": "shell",
+      "measurementMode": "automated",
+      "mutation": "safe",
+      "budget": { "responseMs": 50, "firstRenderMs": 33 },
+      "automationActions": ["setpanesplit"],
+      "runner": "setPaneSplit"
+    },
+    {
+      "id": "shell.fit-panes",
+      "name": "Fit panes",
+      "category": "shell",
+      "measurementMode": "automated",
+      "mutation": "safe",
+      "budget": { "responseMs": 50, "firstRenderMs": 33 },
+      "automationActions": ["fitpanes"],
+      "runner": "fitPanes"
+    },
+    {
+      "id": "shell.fit-visible-panes",
+      "name": "Fit visible panes",
+      "category": "shell",
+      "measurementMode": "automated",
+      "mutation": "safe",
+      "budget": { "responseMs": 50, "firstRenderMs": 33 },
+      "automationActions": ["fitvisiblepanes"],
+      "runner": "fitVisiblePanes"
+    },
+    {
+      "id": "shell.fit-panes-lock",
+      "name": "Toggle fit-panes lock",
+      "category": "shell",
+      "measurementMode": "automated",
+      "mutation": "safe",
+      "budget": { "responseMs": 50, "firstRenderMs": 33 },
+      "automationActions": ["togglefitpaneslock"],
+      "runner": "toggleFitPanesLock"
+    },
+    {
+      "id": "shell.fit-visible-panes-lock",
+      "name": "Toggle fit-visible-panes lock",
+      "category": "shell",
+      "measurementMode": "automated",
+      "mutation": "safe",
+      "budget": { "responseMs": 50, "firstRenderMs": 33 },
+      "automationActions": ["togglefitvisiblepaneslock"],
+      "runner": "toggleFitVisiblePanesLock"
+    },
+    {
+      "id": "pane.zoom",
+      "name": "Toggle pane zoom",
+      "category": "pane",
+      "measurementMode": "fixture_required",
+      "mutation": "safe",
+      "budget": { "responseMs": 50, "firstRenderMs": 33 },
+      "automationActions": ["togglepanezoom"]
+    },
+    {
+      "id": "pane.focus",
+      "name": "Focus pane",
+      "category": "pane",
+      "measurementMode": "fixture_required",
+      "mutation": "safe",
+      "budget": { "responseMs": 25, "firstRenderMs": 20 },
+      "automationActions": ["focuspane"]
+    },
+    {
+      "id": "shell.thread-worktree",
+      "name": "Set thread worktree",
+      "category": "shell",
+      "measurementMode": "fixture_required",
+      "mutation": "destructive",
+      "budget": { "responseMs": 100, "firstRenderMs": 75 },
+      "automationActions": ["setthreadworktree"]
+    },
+    {
+      "id": "shell.theme",
+      "name": "Theme switch",
+      "category": "shell",
+      "measurementMode": "fixture_required",
+      "mutation": "safe",
+      "budget": { "responseMs": 100, "firstRenderMs": 75 },
+      "automationActions": ["settheme"]
+    },
+    {
+      "id": "shell.profile",
+      "name": "Shell profile switch",
+      "category": "shell",
+      "measurementMode": "fixture_required",
+      "mutation": "safe",
+      "budget": { "responseMs": 100, "firstRenderMs": 75 },
+      "automationActions": ["setprofile"]
+    },
+    {
+      "id": "workspace.new-project",
+      "name": "Create project",
+      "category": "workspace",
+      "measurementMode": "fixture_required",
+      "mutation": "destructive",
+      "budget": { "responseMs": 100, "firstRenderMs": 75 },
+      "automationActions": ["newproject"]
+    },
+    {
+      "id": "workspace.new-thread",
+      "name": "Create thread",
+      "category": "workspace",
+      "measurementMode": "fixture_required",
+      "mutation": "destructive",
+      "budget": { "responseMs": 75, "firstRenderMs": 50 },
+      "automationActions": ["newthread"]
+    },
+    {
+      "id": "workspace.rename-thread",
+      "name": "Rename thread",
+      "category": "workspace",
+      "measurementMode": "fixture_required",
+      "mutation": "destructive",
+      "budget": { "responseMs": 50, "firstRenderMs": 33 },
+      "automationActions": ["renamethread"]
+    },
+    {
+      "id": "workspace.duplicate-thread",
+      "name": "Duplicate thread",
+      "category": "workspace",
+      "measurementMode": "fixture_required",
+      "mutation": "destructive",
+      "budget": { "responseMs": 100, "firstRenderMs": 75 },
+      "automationActions": ["duplicatethread"]
+    },
+    {
+      "id": "workspace.delete-thread",
+      "name": "Delete thread",
+      "category": "workspace",
+      "measurementMode": "fixture_required",
+      "mutation": "destructive",
+      "budget": { "responseMs": 75, "firstRenderMs": 50 },
+      "automationActions": ["deletethread"]
+    },
+    {
+      "id": "workspace.clear-project-threads",
+      "name": "Clear project threads",
+      "category": "workspace",
+      "measurementMode": "fixture_required",
+      "mutation": "destructive",
+      "budget": { "responseMs": 100, "firstRenderMs": 75 },
+      "automationActions": ["clearprojectthreads"]
+    },
+    {
+      "id": "workspace.delete-project",
+      "name": "Delete project",
+      "category": "workspace",
+      "measurementMode": "fixture_required",
+      "mutation": "destructive",
+      "budget": { "responseMs": 100, "firstRenderMs": 75 },
+      "automationActions": ["deleteproject"]
+    },
+    {
+      "id": "pane.new-terminal-tab",
+      "name": "Create terminal tab",
+      "category": "pane",
+      "measurementMode": "automated",
+      "mutation": "mutating",
+      "budget": { "responseMs": 25, "firstRenderMs": 20 },
+      "automationActions": ["newtab"],
+      "runner": "newTerminalTab"
+    },
+    {
+      "id": "pane.new-browser-pane",
+      "name": "Create browser pane",
+      "category": "pane",
+      "measurementMode": "automated",
+      "mutation": "mutating",
+      "budget": { "responseMs": 35, "firstRenderMs": 25 },
+      "automationActions": ["newbrowserpane"],
+      "runner": "newBrowserPane"
+    },
+    {
+      "id": "pane.new-editor-pane",
+      "name": "Create editor pane",
+      "category": "pane",
+      "measurementMode": "automated",
+      "mutation": "mutating",
+      "budget": { "responseMs": 100, "firstRenderMs": 75, "asyncMs": 1500 },
+      "automationActions": ["neweditorpane"],
+      "runner": "newEditorPane"
+    },
+    {
+      "id": "pane.select-tab",
+      "name": "Select tab",
+      "category": "pane",
+      "measurementMode": "fixture_required",
+      "mutation": "safe",
+      "budget": { "responseMs": 25, "firstRenderMs": 20 },
+      "automationActions": ["selecttab"]
+    },
+    {
+      "id": "pane.move-tab-after",
+      "name": "Reorder tab",
+      "category": "pane",
+      "measurementMode": "fixture_required",
+      "mutation": "destructive",
+      "budget": { "responseMs": 50, "firstRenderMs": 33 },
+      "automationActions": ["movetabafter"]
+    },
+    {
+      "id": "pane.close-tab",
+      "name": "Close tab",
+      "category": "pane",
+      "measurementMode": "fixture_required",
+      "mutation": "destructive",
+      "budget": { "responseMs": 50, "firstRenderMs": 33 },
+      "automationActions": ["closetab"]
+    },
+    {
+      "id": "pane.rename",
+      "name": "Rename pane",
+      "category": "pane",
+      "measurementMode": "fixture_required",
+      "mutation": "destructive",
+      "budget": { "responseMs": 50, "firstRenderMs": 33 },
+      "automationActions": ["renamepane"]
+    },
+    {
+      "id": "diff.refresh",
+      "name": "Refresh diff",
+      "category": "diff",
+      "measurementMode": "fixture_required",
+      "mutation": "safe",
+      "budget": { "responseMs": 75, "firstRenderMs": 50, "asyncMs": 1500 },
+      "automationActions": ["refreshdiff"]
+    },
+    {
+      "id": "diff.select-file",
+      "name": "Select diff file",
+      "category": "diff",
+      "measurementMode": "automated",
+      "mutation": "safe",
+      "budget": { "responseMs": 75, "firstRenderMs": 75 },
+      "automationActions": ["selectdifffile"],
+      "runner": "selectDiffFile"
+    },
+    {
+      "id": "diff.full-patch-review",
+      "name": "Open full patch review",
+      "category": "diff",
+      "measurementMode": "fixture_required",
+      "mutation": "safe",
+      "budget": { "responseMs": 100, "firstRenderMs": 75 },
+      "automationActions": ["openfullpatch", "openfullpatchreview"]
+    },
+    {
+      "id": "diff.capture-checkpoint",
+      "name": "Capture checkpoint",
+      "category": "diff",
+      "measurementMode": "fixture_required",
+      "mutation": "mutating",
+      "budget": { "responseMs": 100, "firstRenderMs": 75, "asyncMs": 1500 },
+      "automationActions": ["capturecheckpoint"]
+    },
+    {
+      "id": "diff.select-review-source",
+      "name": "Select review source",
+      "category": "diff",
+      "measurementMode": "fixture_required",
+      "mutation": "safe",
+      "budget": { "responseMs": 50, "firstRenderMs": 33 },
+      "automationActions": ["selectreviewsource"]
+    },
+    {
+      "id": "browser.navigate",
+      "name": "Navigate browser pane",
+      "category": "browser",
+      "measurementMode": "fixture_required",
+      "mutation": "mutating",
+      "budget": { "responseMs": 50, "firstRenderMs": 33 },
+      "automationActions": ["navigatebrowser"]
+    },
+    {
+      "id": "browser.new-tab",
+      "name": "Create browser in-pane tab",
+      "category": "browser",
+      "measurementMode": "fixture_required",
+      "mutation": "mutating",
+      "budget": { "responseMs": 50, "firstRenderMs": 33 },
+      "automationActions": ["newbrowsertab"]
+    },
+    {
+      "id": "browser.select-tab",
+      "name": "Select browser in-pane tab",
+      "category": "browser",
+      "measurementMode": "fixture_required",
+      "mutation": "safe",
+      "budget": { "responseMs": 25, "firstRenderMs": 20 },
+      "automationActions": ["selectbrowsertab"]
+    },
+    {
+      "id": "browser.close-tab",
+      "name": "Close browser in-pane tab",
+      "category": "browser",
+      "measurementMode": "fixture_required",
+      "mutation": "destructive",
+      "budget": { "responseMs": 50, "firstRenderMs": 33 },
+      "automationActions": ["closebrowsertab"]
+    },
+    {
+      "id": "browser.credentials.import",
+      "name": "Import browser passwords CSV",
+      "category": "browser-credentials",
+      "measurementMode": "manual",
+      "mutation": "destructive",
+      "budget": { "responseMs": 250, "firstRenderMs": 150 },
+      "automationActions": ["importbrowserpasswordscsv"]
+    },
+    {
+      "id": "browser.credentials.delete",
+      "name": "Delete browser credential",
+      "category": "browser-credentials",
+      "measurementMode": "manual",
+      "mutation": "destructive",
+      "budget": { "responseMs": 100, "firstRenderMs": 75 },
+      "automationActions": ["deletebrowsercredential"]
+    },
+    {
+      "id": "browser.credentials.clear",
+      "name": "Clear browser credentials",
+      "category": "browser-credentials",
+      "measurementMode": "manual",
+      "mutation": "destructive",
+      "budget": { "responseMs": 150, "firstRenderMs": 100 },
+      "automationActions": ["clearbrowsercredentials"]
+    },
+    {
+      "id": "browser.credentials.autofill",
+      "name": "Manual browser autofill",
+      "category": "browser-credentials",
+      "measurementMode": "manual",
+      "mutation": "mutating",
+      "budget": { "responseMs": 100, "firstRenderMs": 75 },
+      "automationActions": ["autofillbrowser"]
+    },
+    {
+      "id": "terminal.input",
+      "name": "Terminal/editor input",
+      "category": "terminal",
+      "measurementMode": "manual",
+      "mutation": "mutating",
+      "budget": { "responseMs": 25, "firstRenderMs": 20 },
+      "automationActions": ["input"]
+    },
+    {
+      "id": "session.autosave-write",
+      "name": "Autosave write",
+      "category": "session",
+      "measurementMode": "automated",
+      "mutation": "safe",
+      "budget": { "asyncMs": 25 },
+      "runner": "autosaveWrite"
+    },
+    {
+      "id": "session.save",
+      "name": "Manual session save",
+      "category": "session",
+      "measurementMode": "automated",
+      "mutation": "safe",
+      "budget": { "responseMs": 25, "firstRenderMs": 25 },
+      "automationActions": ["savesession"],
+      "runner": "saveSession"
+    },
+    {
+      "id": "session.restore",
+      "name": "Session restore",
+      "category": "session",
+      "measurementMode": "fixture_required",
+      "mutation": "destructive",
+      "budget": { "responseMs": 2000, "firstRenderMs": 1500 }
+    },
+    {
+      "id": "session.replay-restore",
+      "name": "Replay restore",
+      "category": "session",
+      "measurementMode": "fixture_required",
+      "mutation": "destructive",
+      "budget": { "responseMs": 2000, "firstRenderMs": 1500 }
+    }
+  ]
+}

@@ -1,7 +1,9 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
 using SelfContainedDeployment.Git;
 using SelfContainedDeployment.Panes;
+using SelfContainedDeployment.Persistence;
 using SelfContainedDeployment.Terminal;
 using System;
 using System.Collections.Generic;
@@ -246,26 +248,8 @@ namespace SelfContainedDeployment.Shell
         private static string BuildWslLaunchCommand(string projectPath)
         {
             string normalizedPath = NormalizeProjectPath(projectPath);
-            string automationPort = Environment.GetEnvironmentVariable("NATIVE_TERMINAL_AUTOMATION_PORT");
-            if (string.IsNullOrWhiteSpace(automationPort))
-            {
-                automationPort = "9331";
-            }
-
-            string repoRoot = NormalizeProjectPath(Environment.CurrentDirectory);
-            string repoRootWsl = ResolveDisplayPath(repoRoot, ShellProfileIds.Wsl);
             string bootstrapScript =
-                $"export WINMUX_BROWSER_PROFILE_MODE=shared; " +
-                $"export WINMUX_AUTOMATION_PORT={automationPort}; " +
-                $"export WINMUX_REPO_ROOT=\"{repoRootWsl}\"; " +
-                "export WINMUX_BROWSER_BRIDGE=\"$WINMUX_REPO_ROOT/tools/winmux_browser_bridge.py\"; " +
                 "if [ -z \"$STARSHIP_CONFIG\" ] && [ ! -f \"$HOME/.config/starship.toml\" ] && [ -f \"$WINMUX_REPO_ROOT/tools/winmux-starship.toml\" ]; then export STARSHIP_CONFIG=\"$WINMUX_REPO_ROOT/tools/winmux-starship.toml\"; fi; " +
-                "winmux_host=$(awk \"/nameserver/{print \\$2; exit}\" /etc/resolv.conf); " +
-                "[ -n \"$winmux_host\" ] || winmux_host=127.0.0.1; " +
-                "export WINMUX_AUTOMATION_URL=\"http://$winmux_host:$WINMUX_AUTOMATION_PORT\"; " +
-                "export WINMUX_BROWSER_STATE_URL=\"$WINMUX_AUTOMATION_URL/browser-state\"; " +
-                "export WINMUX_BROWSER_EVAL_URL=\"$WINMUX_AUTOMATION_URL/browser-eval\"; " +
-                "export WINMUX_BROWSER_SCREENSHOT_URL=\"$WINMUX_AUTOMATION_URL/browser-screenshot\"; " +
                 "exec \"${SHELL:-bash}\" -il";
 
             if (TryParseWslSharePath(normalizedPath, out WslSharePath wslSharePath))
@@ -394,6 +378,30 @@ namespace SelfContainedDeployment.Shell
         public GitThreadSnapshot Snapshot { get; set; }
     }
 
+    public sealed class WorkspaceThreadNote
+    {
+        public WorkspaceThreadNote(string title = null, string text = null, string id = null)
+        {
+            Id = string.IsNullOrWhiteSpace(id) ? Guid.NewGuid().ToString("N") : id;
+            Title = string.IsNullOrWhiteSpace(title) ? "Note" : title.Trim();
+            Text = text;
+            CreatedAt = DateTimeOffset.UtcNow;
+            UpdatedAt = CreatedAt;
+        }
+
+        public string Id { get; }
+
+        public string Title { get; set; }
+
+        public string Text { get; set; }
+
+        public string PaneId { get; set; }
+
+        public DateTimeOffset CreatedAt { get; set; }
+
+        public DateTimeOffset UpdatedAt { get; set; }
+    }
+
     public sealed class WorkspaceThread
     {
         public WorkspaceThread(WorkspaceProject project, string name, string id = null)
@@ -415,6 +423,28 @@ namespace SelfContainedDeployment.Shell
 
         public string BranchName { get; set; }
 
+        public string SelectedNoteId { get; set; }
+
+        public List<WorkspaceThreadNote> NoteEntries { get; } = new();
+
+        public string Notes
+        {
+            get => ResolveSelectedNote()?.Text;
+            set
+            {
+                NoteEntries.Clear();
+                SelectedNoteId = null;
+                if (string.IsNullOrWhiteSpace(value))
+                {
+                    return;
+                }
+
+                WorkspaceThreadNote note = new("Handoff", value);
+                NoteEntries.Add(note);
+                SelectedNoteId = note.Id;
+            }
+        }
+
         public int ChangedFileCount { get; set; }
 
         public string SelectedPaneId { get; set; }
@@ -426,6 +456,10 @@ namespace SelfContainedDeployment.Shell
         public string SelectedCheckpointId { get; set; }
 
         internal GitThreadSnapshot BaselineSnapshot { get; set; }
+
+        internal GitThreadSnapshot LiveSnapshot { get; set; }
+
+        internal DateTimeOffset LiveSnapshotCapturedAt { get; set; }
 
         public string SelectedTabId
         {
@@ -454,6 +488,12 @@ namespace SelfContainedDeployment.Shell
         public string PaneSummary => Panes.Count == 1 ? "1 pane" : $"{Panes.Count} panes";
 
         public string TabSummary => PaneSummary;
+
+        private WorkspaceThreadNote ResolveSelectedNote()
+        {
+            return NoteEntries.FirstOrDefault(candidate => string.Equals(candidate.Id, SelectedNoteId, StringComparison.Ordinal))
+                ?? NoteEntries.FirstOrDefault();
+        }
     }
 
     public abstract class WorkspacePaneRecord
@@ -491,6 +531,8 @@ namespace SelfContainedDeployment.Shell
 
         public virtual bool IsExited { get; protected set; }
 
+        public virtual bool IsDeferred => false;
+
         public abstract FrameworkElement View { get; }
 
         public abstract void ApplyTheme(ElementTheme theme);
@@ -500,6 +542,168 @@ namespace SelfContainedDeployment.Shell
         public abstract void RequestLayout();
 
         public abstract void DisposePane();
+    }
+
+    internal sealed class DeferredPaneRecord : WorkspacePaneRecord
+    {
+        private FrameworkElement _placeholderView;
+
+        internal DeferredPaneRecord(PaneSessionSnapshot snapshot)
+            : base(ResolveTitle(snapshot), ParseKind(snapshot?.Kind), snapshot?.Id)
+        {
+            Snapshot = CloneSnapshot(snapshot);
+            HasCustomTitle = snapshot?.HasCustomTitle == true;
+            ReplayTool = snapshot?.ReplayTool;
+            ReplaySessionId = snapshot?.ReplaySessionId;
+            ReplayCommand = snapshot?.ReplayCommand;
+            ReplayRestoreFailed = snapshot?.ReplayRestoreFailed == true;
+            PersistExitedState = snapshot?.IsExited == true && snapshot?.ReplayRestoreFailed == true;
+            IsExited = snapshot?.IsExited == true;
+        }
+
+        internal PaneSessionSnapshot Snapshot { get; }
+
+        public string BrowserUri => Snapshot?.BrowserUri;
+
+        public string SelectedBrowserTabId => Snapshot?.SelectedBrowserTabId;
+
+        internal IReadOnlyList<BrowserTabSessionSnapshot> BrowserTabs => Snapshot?.BrowserTabs is { } tabs
+            ? tabs
+            : (IReadOnlyList<BrowserTabSessionSnapshot>)Array.Empty<BrowserTabSessionSnapshot>();
+
+        public string DiffPath => Snapshot?.DiffPath;
+
+        public string EditorFilePath => Snapshot?.EditorFilePath;
+
+        public override bool IsDeferred => true;
+
+        public override FrameworkElement View => _placeholderView ??= BuildPlaceholderView();
+
+        public override void ApplyTheme(ElementTheme theme)
+        {
+        }
+
+        public override void FocusPane()
+        {
+        }
+
+        public override void RequestLayout()
+        {
+        }
+
+        public override void DisposePane()
+        {
+        }
+
+        private FrameworkElement BuildPlaceholderView()
+        {
+            string kindLabel = Kind switch
+            {
+                WorkspacePaneKind.Browser => "Web",
+                WorkspacePaneKind.Editor => "Edit",
+                WorkspacePaneKind.Diff => "Diff",
+                _ => "Term",
+            };
+
+            StackPanel content = new()
+            {
+                Spacing = 4,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            content.Children.Add(new TextBlock
+            {
+                Text = kindLabel,
+                FontSize = 11,
+                Opacity = 0.6,
+                HorizontalAlignment = HorizontalAlignment.Center,
+            });
+            content.Children.Add(new TextBlock
+            {
+                Text = string.IsNullOrWhiteSpace(Title) ? $"{kindLabel} pane" : Title,
+                FontSize = 12,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                TextAlignment = TextAlignment.Center,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                MaxWidth = 240,
+            });
+            content.Children.Add(new TextBlock
+            {
+                Text = "Restoring pane…",
+                FontSize = 10,
+                Opacity = 0.55,
+                HorizontalAlignment = HorizontalAlignment.Center,
+            });
+
+            return new Grid
+            {
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x08, 0x7E, 0x86, 0x91)),
+                Children =
+                {
+                    content,
+                },
+            };
+        }
+
+        private static WorkspacePaneKind ParseKind(string kind)
+        {
+            return kind?.Trim().ToLowerInvariant() switch
+            {
+                "browser" => WorkspacePaneKind.Browser,
+                "editor" => WorkspacePaneKind.Editor,
+                "diff" => WorkspacePaneKind.Diff,
+                _ => WorkspacePaneKind.Terminal,
+            };
+        }
+
+        private static string ResolveTitle(PaneSessionSnapshot snapshot)
+        {
+            if (!string.IsNullOrWhiteSpace(snapshot?.Title))
+            {
+                return snapshot.Title.Trim();
+            }
+
+            return ParseKind(snapshot?.Kind) switch
+            {
+                WorkspacePaneKind.Browser => "Preview",
+                WorkspacePaneKind.Editor => "Editor",
+                WorkspacePaneKind.Diff => "Patch view",
+                _ => "Terminal",
+            };
+        }
+
+        private static PaneSessionSnapshot CloneSnapshot(PaneSessionSnapshot snapshot)
+        {
+            if (snapshot is null)
+            {
+                return null;
+            }
+
+            return new PaneSessionSnapshot
+            {
+                Id = snapshot.Id,
+                Kind = snapshot.Kind,
+                Title = snapshot.Title,
+                HasCustomTitle = snapshot.HasCustomTitle,
+                IsExited = snapshot.IsExited,
+                ReplayRestoreFailed = snapshot.ReplayRestoreFailed,
+                BrowserUri = snapshot.BrowserUri,
+                SelectedBrowserTabId = snapshot.SelectedBrowserTabId,
+                BrowserTabs = (snapshot.BrowserTabs ?? new List<BrowserTabSessionSnapshot>())
+                    .Select(tab => new BrowserTabSessionSnapshot
+                    {
+                        Id = tab.Id,
+                        Title = tab.Title,
+                        Uri = tab.Uri,
+                    })
+                    .ToList(),
+                DiffPath = snapshot.DiffPath,
+                EditorFilePath = snapshot.EditorFilePath,
+                ReplayTool = snapshot.ReplayTool,
+                ReplaySessionId = snapshot.ReplaySessionId,
+                ReplayCommand = snapshot.ReplayCommand,
+            };
+        }
     }
 
     public sealed class TerminalPaneRecord : WorkspacePaneRecord

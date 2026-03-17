@@ -47,24 +47,34 @@ namespace SelfContainedDeployment
 
         private void OnMainWindowClosed(object sender, WindowEventArgs args)
         {
-            MainWindowInstance?.PersistSessionState();
+            if (sender is MainWindow closedWindow)
+            {
+                closedWindow.Closed -= OnMainWindowClosed;
+                closedWindow.PersistSessionState();
+            }
+
             automationServer?.Dispose();
+            automationServer = null;
+            mainWindow = null;
         }
 
         private void OnUnhandledException(object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs e)
         {
+            string path = null;
             try
             {
                 string directory = Path.Combine(
                     Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                     "WinMux");
                 Directory.CreateDirectory(directory);
-                string path = Path.Combine(directory, "startup-error.log");
+                path = Path.Combine(directory, "startup-error.log");
                 File.AppendAllText(path, $"{DateTimeOffset.UtcNow:O}{Environment.NewLine}{e.Message}{Environment.NewLine}{e.Exception}{Environment.NewLine}{new string('-', 80)}{Environment.NewLine}");
             }
             catch
             {
             }
+
+            NativeAutomationDiagnostics.RecordUnhandledException(e.Message, e.Exception?.ToString(), path);
         }
     }
 }

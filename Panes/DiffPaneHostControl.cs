@@ -22,6 +22,11 @@ namespace SelfContainedDeployment.Panes
         private readonly EditorPaneControl _comparePane;
         private readonly DiffPaneControl _patchPane;
         private DiffPaneDisplayMode _displayMode = DiffPaneDisplayMode.FileCompare;
+        private string _lastInlineDiffPath = string.Empty;
+        private string _lastInlineDiffText = string.Empty;
+        private bool _lastInlineDiffLoading;
+        private IReadOnlyList<GitChangedFile> _lastFullPatchFiles = Array.Empty<GitChangedFile>();
+        private string _lastFullPatchSelectedPath = string.Empty;
 
         public DiffPaneHostControl()
         {
@@ -130,6 +135,7 @@ namespace SelfContainedDeployment.Panes
         public void DisposePane()
         {
             _comparePane.DisposePane();
+            _patchPane.DisposePane();
         }
 
         public void ApplyFitToWidth(bool autoLock)
@@ -153,28 +159,98 @@ namespace SelfContainedDeployment.Panes
 
         internal void ShowFileCompare(GitChangedFile changedFile, string summary = null)
         {
+            bool sameMode = _displayMode == DiffPaneDisplayMode.FileCompare;
+            string diffPath = changedFile?.Path ?? string.Empty;
+            string diffText = changedFile?.DiffText ?? string.Empty;
             _displayMode = DiffPaneDisplayMode.FileCompare;
             SetFileHeader(changedFile?.Path);
             _comparePane.Visibility = Visibility.Collapsed;
             _patchPane.Visibility = Visibility.Visible;
+            if (sameMode &&
+                !_lastInlineDiffLoading &&
+                string.Equals(_lastInlineDiffPath, diffPath, StringComparison.Ordinal) &&
+                string.Equals(_lastInlineDiffText, diffText, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _lastInlineDiffPath = diffPath;
+            _lastInlineDiffText = diffText;
+            _lastInlineDiffLoading = false;
+            _lastFullPatchFiles = Array.Empty<GitChangedFile>();
+            _lastFullPatchSelectedPath = string.Empty;
             _patchPane.SetDiff(changedFile?.Path, changedFile?.DiffText);
         }
 
         internal void ShowUnifiedDiff(string path, string diffText)
         {
+            bool sameMode = _displayMode == DiffPaneDisplayMode.FileCompare;
+            string normalizedPath = path ?? string.Empty;
+            string normalizedDiffText = diffText ?? string.Empty;
             _displayMode = DiffPaneDisplayMode.FileCompare;
             SetFileHeader(path);
             _comparePane.Visibility = Visibility.Collapsed;
             _patchPane.Visibility = Visibility.Visible;
+            if (sameMode &&
+                !_lastInlineDiffLoading &&
+                string.Equals(_lastInlineDiffPath, normalizedPath, StringComparison.Ordinal) &&
+                string.Equals(_lastInlineDiffText, normalizedDiffText, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _lastInlineDiffPath = normalizedPath;
+            _lastInlineDiffText = normalizedDiffText;
+            _lastInlineDiffLoading = false;
+            _lastFullPatchFiles = Array.Empty<GitChangedFile>();
+            _lastFullPatchSelectedPath = string.Empty;
             _patchPane.SetDiff(path, diffText);
+        }
+
+        internal void ShowLoading(string path, string summary = null)
+        {
+            bool sameMode = _displayMode == DiffPaneDisplayMode.FileCompare;
+            string normalizedPath = path ?? string.Empty;
+            _displayMode = DiffPaneDisplayMode.FileCompare;
+            SetFileHeader(path);
+            _comparePane.Visibility = Visibility.Collapsed;
+            _patchPane.Visibility = Visibility.Visible;
+            if (sameMode &&
+                string.Equals(_lastInlineDiffPath, normalizedPath, StringComparison.Ordinal) &&
+                _lastInlineDiffLoading &&
+                string.IsNullOrEmpty(_lastInlineDiffText))
+            {
+                return;
+            }
+
+            _lastInlineDiffPath = normalizedPath;
+            _lastInlineDiffText = string.Empty;
+            _lastInlineDiffLoading = true;
+            _lastFullPatchFiles = Array.Empty<GitChangedFile>();
+            _lastFullPatchSelectedPath = string.Empty;
+            _patchPane.SetLoadingState(path, summary);
         }
 
         internal void ShowFullPatch(IReadOnlyList<GitChangedFile> files, string selectedPath)
         {
+            bool sameMode = _displayMode == DiffPaneDisplayMode.FullPatchReview;
+            string normalizedSelectedPath = selectedPath ?? string.Empty;
             _displayMode = DiffPaneDisplayMode.FullPatchReview;
             SetFileHeader(null);
             _comparePane.Visibility = Visibility.Collapsed;
             _patchPane.Visibility = Visibility.Visible;
+            if (sameMode &&
+                ReferenceEquals(_lastFullPatchFiles, files) &&
+                string.Equals(_lastFullPatchSelectedPath, normalizedSelectedPath, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _lastInlineDiffPath = string.Empty;
+            _lastInlineDiffText = string.Empty;
+            _lastInlineDiffLoading = false;
+            _lastFullPatchFiles = files ?? Array.Empty<GitChangedFile>();
+            _lastFullPatchSelectedPath = normalizedSelectedPath;
             _patchPane.SetDiffSet(files, selectedPath);
         }
 

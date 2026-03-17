@@ -5,10 +5,11 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading.Tasks;
 
 namespace SelfContainedDeployment.Git
 {
-    internal sealed class GitChangedFile
+    public sealed class GitChangedFile
     {
         public string Status { get; set; }
 
@@ -41,7 +42,7 @@ namespace SelfContainedDeployment.Git
         }
     }
 
-    internal sealed class GitThreadSnapshot
+    public sealed class GitThreadSnapshot
     {
         public string BranchName { get; set; }
 
@@ -66,25 +67,111 @@ namespace SelfContainedDeployment.Git
     {
         private const string RootMarker = "__WINMUX_ROOT__";
         private const string StatusMarker = "__WINMUX_STATUS__";
-        private const string DiffStatMarker = "__WINMUX_DIFFSTAT__";
         private const string NumStatMarker = "__WINMUX_NUMSTAT__";
+        private static readonly TimeSpan SnapshotCacheMaxAge = TimeSpan.FromMinutes(5);
+        private const int MaxSnapshotCacheEntries = 32;
+        private static readonly object SnapshotCacheLock = new();
+        private static readonly Dictionary<string, CachedGitSnapshotEntry> SnapshotCache = new(StringComparer.OrdinalIgnoreCase);
 
-        public static GitThreadSnapshot Capture(string workingPath, string selectedPath = null)
+        private sealed class CachedGitSnapshotEntry
+        {
+            public DateTimeOffset CapturedAt { get; init; }
+
+            public GitThreadSnapshot Snapshot { get; init; }
+        }
+
+        public static GitThreadSnapshot Capture(string workingPath, string selectedPath = null, bool includeSelectedDiff = true)
         {
             string normalizedPath = ShellProfiles.NormalizeProjectPath(workingPath);
+            GitThreadSnapshot snapshot = TryGetCachedSnapshot(normalizedPath);
+            if (snapshot is null)
+            {
+                snapshot = new()
+                {
+                    WorktreePath = normalizedPath,
+                };
+
+                GitCommandResult metadataResult = RunGitSnapshot(normalizedPath, includeNumStat: true, untrackedFilesMode: "all");
+                if (!metadataResult.Ok)
+                {
+                    snapshot.Error = NormalizeGitError(metadataResult.Error);
+                    return snapshot;
+                }
+
+                ParseMetadataSnapshot(snapshot, metadataResult.Output);
+                snapshot.StatusSummary = BuildStatusSummary(snapshot.ChangedFiles);
+                StoreCachedSnapshot(normalizedPath, snapshot);
+            }
+            else if (string.IsNullOrWhiteSpace(snapshot.StatusSummary))
+            {
+                snapshot.StatusSummary = BuildStatusSummary(snapshot.ChangedFiles);
+            }
+
+            string resolvedSelectedPath = selectedPath;
+            bool selectedPathExists = !string.IsNullOrWhiteSpace(resolvedSelectedPath) &&
+                snapshot.ChangedFiles.Any(file => string.Equals(file.Path, resolvedSelectedPath, StringComparison.Ordinal));
+            if (!selectedPathExists)
+            {
+                resolvedSelectedPath = snapshot.ChangedFiles.FirstOrDefault()?.Path;
+            }
+
+            snapshot.SelectedPath = resolvedSelectedPath;
+            if (includeSelectedDiff && !string.IsNullOrWhiteSpace(resolvedSelectedPath))
+            {
+                GitChangedFile changedFile = snapshot.ChangedFiles.FirstOrDefault(file => string.Equals(file.Path, resolvedSelectedPath, StringComparison.Ordinal));
+                if (changedFile is not null && string.IsNullOrWhiteSpace(changedFile.DiffText))
+                {
+                    GitCommandResult diffResult = RunGitDiff(normalizedPath, resolvedSelectedPath, changedFile.Status);
+                    changedFile.DiffText = diffResult.Ok
+                        ? diffResult.Output
+                        : NormalizeGitError(diffResult.Error);
+                    UpdateCachedSnapshot(normalizedPath, cachedSnapshot =>
+                    {
+                        GitChangedFile cachedFile = cachedSnapshot.ChangedFiles.FirstOrDefault(file => string.Equals(file.Path, resolvedSelectedPath, StringComparison.Ordinal));
+                        if (cachedFile is null)
+                        {
+                            return;
+                        }
+
+                        cachedFile.DiffText = changedFile.DiffText;
+                        if (string.IsNullOrWhiteSpace(cachedFile.OriginalPath))
+                        {
+                            cachedFile.OriginalPath = changedFile.OriginalPath;
+                        }
+                    });
+                }
+
+                snapshot.SelectedDiff = changedFile?.DiffText;
+            }
+
+            return snapshot;
+        }
+
+        public static GitThreadSnapshot CaptureMetadata(string workingPath, string selectedPath = null)
+        {
+            return Capture(workingPath, selectedPath, includeSelectedDiff: false);
+        }
+
+        public static GitThreadSnapshot CaptureStatusOnly(string workingPath, string selectedPath = null)
+        {
+            string normalizedPath = ShellProfiles.NormalizeProjectPath(workingPath);
+            GitThreadSnapshot cachedSnapshot = TryGetCachedSnapshot(normalizedPath);
             GitThreadSnapshot snapshot = new()
             {
                 WorktreePath = normalizedPath,
+                RepositoryRootPath = string.IsNullOrWhiteSpace(cachedSnapshot?.RepositoryRootPath)
+                    ? normalizedPath
+                    : cachedSnapshot.RepositoryRootPath,
             };
 
-            GitCommandResult metadataResult = RunGitSnapshot(normalizedPath);
-            if (!metadataResult.Ok)
+            GitCommandResult statusResult = RunGitStatusOnly(normalizedPath);
+            if (!statusResult.Ok)
             {
-                snapshot.Error = NormalizeGitError(metadataResult.Error);
+                snapshot.Error = NormalizeGitError(statusResult.Error);
                 return snapshot;
             }
 
-            ParseMetadataSnapshot(snapshot, metadataResult.Output);
+            ParseStatus(snapshot, statusResult.Output);
             snapshot.StatusSummary = BuildStatusSummary(snapshot.ChangedFiles);
 
             string resolvedSelectedPath = selectedPath;
@@ -96,33 +183,18 @@ namespace SelfContainedDeployment.Git
             }
 
             snapshot.SelectedPath = resolvedSelectedPath;
-            if (!string.IsNullOrWhiteSpace(resolvedSelectedPath))
-            {
-                GitChangedFile changedFile = snapshot.ChangedFiles.FirstOrDefault(file => string.Equals(file.Path, resolvedSelectedPath, StringComparison.Ordinal));
-                GitCommandResult diffResult = RunGitDiff(normalizedPath, resolvedSelectedPath, changedFile?.Status);
-                string diffText = diffResult.Ok
-                    ? diffResult.Output
-                    : NormalizeGitError(diffResult.Error);
-                if (changedFile is not null)
-                {
-                    changedFile.DiffText = diffText;
-                }
-
-                snapshot.SelectedDiff = diffText;
-            }
-
             return snapshot;
         }
 
         public static GitThreadSnapshot CaptureComplete(string workingPath, string selectedPath = null)
         {
-            GitThreadSnapshot snapshot = Capture(workingPath, selectedPath);
+            string normalizedPath = ShellProfiles.NormalizeProjectPath(workingPath);
+            GitThreadSnapshot snapshot = Capture(normalizedPath, selectedPath, includeSelectedDiff: true);
             if (!string.IsNullOrWhiteSpace(snapshot.Error) || snapshot.ChangedFiles.Count == 0)
             {
                 return snapshot;
             }
 
-            string normalizedPath = ShellProfiles.NormalizeProjectPath(workingPath);
             foreach (GitChangedFile changedFile in snapshot.ChangedFiles.Where(file => !string.IsNullOrWhiteSpace(file.Path)))
             {
                 if (!string.IsNullOrWhiteSpace(changedFile.DiffText))
@@ -136,6 +208,7 @@ namespace SelfContainedDeployment.Git
                     : NormalizeGitError(diffResult.Error);
             }
 
+            StoreCachedSnapshot(normalizedPath, snapshot);
             SelectDiffPath(snapshot, string.IsNullOrWhiteSpace(selectedPath) ? snapshot.SelectedPath : selectedPath);
             return snapshot;
         }
@@ -216,6 +289,20 @@ namespace SelfContainedDeployment.Git
             changedFile.DiffText = diffResult.Ok
                 ? diffResult.Output
                 : NormalizeGitError(diffResult.Error);
+            UpdateCachedSnapshot(ShellProfiles.NormalizeProjectPath(workingPath), cachedSnapshot =>
+            {
+                GitChangedFile cachedFile = cachedSnapshot.ChangedFiles.FirstOrDefault(file => string.Equals(file.Path, changedFile.Path, StringComparison.Ordinal));
+                if (cachedFile is null)
+                {
+                    return;
+                }
+
+                cachedFile.DiffText = changedFile.DiffText;
+                if (string.IsNullOrWhiteSpace(cachedFile.OriginalPath))
+                {
+                    cachedFile.OriginalPath = changedFile.OriginalPath;
+                }
+            });
         }
 
         private static string NormalizeGitError(string error)
@@ -315,7 +402,6 @@ namespace SelfContainedDeployment.Git
         {
             StringBuilder rootOutput = new();
             StringBuilder statusOutput = new();
-            StringBuilder diffStatOutput = new();
             StringBuilder numStatOutput = new();
             StringBuilder activeOutput = null;
 
@@ -334,12 +420,6 @@ namespace SelfContainedDeployment.Git
                     continue;
                 }
 
-                if (string.Equals(line, DiffStatMarker, StringComparison.Ordinal))
-                {
-                    activeOutput = diffStatOutput;
-                    continue;
-                }
-
                 if (string.Equals(line, NumStatMarker, StringComparison.Ordinal))
                 {
                     activeOutput = numStatOutput;
@@ -351,7 +431,6 @@ namespace SelfContainedDeployment.Git
 
             snapshot.RepositoryRootPath = rootOutput.ToString().Trim();
             ParseStatus(snapshot, statusOutput.ToString());
-            snapshot.DiffSummary = diffStatOutput.ToString().Trim();
             ApplyNumStat(snapshot, numStatOutput.ToString());
         }
 
@@ -442,6 +521,20 @@ namespace SelfContainedDeployment.Git
             }
 
             string spec = $"HEAD:{NormalizeTrackedPath(path)}";
+            if (TryResolveLocalGitPath(workingPath, out string localPath))
+            {
+                GitBinaryCommandResult localResult = RunWindowsGitBinary(localPath, new[] { "show", spec });
+                if (localResult.Ok)
+                {
+                    return DecodeTextBytes(localResult.Output);
+                }
+
+                if (!IsWindowsGitUnavailable(localResult.Error))
+                {
+                    return string.Empty;
+                }
+            }
+
             string script = $"git --no-optional-locks show {QuoteShellArgument(spec)} | base64 -w0";
             GitCommandResult result = RunWslShell(workingPath, script);
             if (!result.Ok || string.IsNullOrWhiteSpace(result.Output))
@@ -509,27 +602,65 @@ namespace SelfContainedDeployment.Git
             return false;
         }
 
-        private static GitCommandResult RunGitSnapshot(string workingPath)
+        private static GitCommandResult RunGitSnapshot(string workingPath, bool includeNumStat, string untrackedFilesMode)
         {
+            if (TryResolveLocalGitPath(workingPath, out string localPath))
+            {
+                GitCommandResult localResult = RunWindowsGitSnapshot(localPath, includeNumStat, untrackedFilesMode);
+                if (localResult.Ok || !IsWindowsGitUnavailable(localResult.Error))
+                {
+                    return localResult;
+                }
+            }
+
+            string resolvedUntrackedFilesMode = string.Equals(untrackedFilesMode, "normal", StringComparison.OrdinalIgnoreCase)
+                ? "normal"
+                : "all";
+
             string script = string.Join(" && ", new[]
             {
                 $"printf '%s\\n' '{RootMarker}'",
                 "git --no-optional-locks rev-parse --show-toplevel",
                 $"printf '%s\\n' '{StatusMarker}'",
-                "git --no-optional-locks -c core.quotepath=false status --porcelain=v1 -b --untracked-files=all",
-                $"printf '%s\\n' '{DiffStatMarker}'",
-                "git --no-optional-locks -c core.quotepath=false diff --stat --compact-summary",
+                $"git --no-optional-locks -c core.quotepath=false status --porcelain=v1 -b --untracked-files={resolvedUntrackedFilesMode}",
                 $"printf '%s\\n' '{NumStatMarker}'",
-                "git --no-optional-locks -c core.quotepath=false diff --numstat",
+                includeNumStat
+                    ? "git --no-optional-locks -c core.quotepath=false diff --numstat"
+                    : "printf ''",
             });
 
             return RunWslShell(workingPath, script);
+        }
+
+        private static GitCommandResult RunGitStatusOnly(string workingPath)
+        {
+            if (TryResolveLocalGitPath(workingPath, out string localPath))
+            {
+                GitCommandResult localResult = RunWindowsGitStatusOnly(localPath);
+                if (localResult.Ok || !IsWindowsGitUnavailable(localResult.Error))
+                {
+                    return localResult;
+                }
+            }
+
+            return RunWslShell(
+                workingPath,
+                "git --no-optional-locks -c core.quotepath=false status --porcelain=v1 -b --untracked-files=normal --ignore-submodules=all --no-renames");
         }
 
         private static GitCommandResult RunGitDiff(string workingPath, string selectedPath, string status)
         {
             string normalizedStatus = status?.Trim() ?? string.Empty;
             selectedPath = NormalizeTrackedPath(selectedPath);
+            if (TryResolveLocalGitPath(workingPath, out string localPath))
+            {
+                GitCommandResult localResult = RunWindowsGitDiff(localPath, selectedPath, normalizedStatus);
+                if (localResult.Ok || !IsWindowsGitUnavailable(localResult.Error))
+                {
+                    return localResult;
+                }
+            }
+
             string quotedSelectedPath = QuoteShellArgument(selectedPath);
             if (string.Equals(normalizedStatus, "??", StringComparison.Ordinal))
             {
@@ -596,6 +727,373 @@ namespace SelfContainedDeployment.Git
             return $"'{normalized.Replace("'", "'\"'\"'", StringComparison.Ordinal)}'";
         }
 
+        private static bool TryResolveLocalGitPath(string workingPath, out string localPath)
+        {
+            if (ShellProfiles.TryResolveLocalStoragePath(workingPath, out localPath) &&
+                !string.IsNullOrWhiteSpace(localPath) &&
+                Directory.Exists(localPath))
+            {
+                return true;
+            }
+
+            localPath = null;
+            return false;
+        }
+
+        private static bool IsWindowsGitUnavailable(string error)
+        {
+            return !string.IsNullOrWhiteSpace(error) &&
+                error.StartsWith("Windows git unavailable:", StringComparison.Ordinal);
+        }
+
+        private static GitCommandResult RunWindowsGitSnapshot(string workingPath, bool includeNumStat, string untrackedFilesMode)
+        {
+            string resolvedUntrackedFilesMode = string.Equals(untrackedFilesMode, "normal", StringComparison.OrdinalIgnoreCase)
+                ? "normal"
+                : "all";
+            GitCommandResult rootResult = RunWindowsGit(
+                workingPath,
+                new[] { "--no-optional-locks", "rev-parse", "--show-toplevel" });
+            if (!rootResult.Ok)
+            {
+                return rootResult;
+            }
+
+            GitCommandResult statusResult = RunWindowsGit(
+                workingPath,
+                new[] { "--no-optional-locks", "-c", "core.quotepath=false", "status", "--porcelain=v1", "-b", $"--untracked-files={resolvedUntrackedFilesMode}" });
+            if (!statusResult.Ok)
+            {
+                return statusResult;
+            }
+
+            StringBuilder output = new();
+            AppendSnapshotSection(output, RootMarker, rootResult.Output);
+            AppendSnapshotSection(output, StatusMarker, statusResult.Output);
+            if (includeNumStat)
+            {
+                GitCommandResult numStatResult = RunWindowsGit(
+                    workingPath,
+                    new[] { "--no-optional-locks", "-c", "core.quotepath=false", "diff", "--numstat" });
+                if (!numStatResult.Ok)
+                {
+                    return numStatResult;
+                }
+
+                AppendSnapshotSection(output, NumStatMarker, numStatResult.Output);
+            }
+            else
+            {
+                AppendSnapshotSection(output, NumStatMarker, string.Empty);
+            }
+
+            return new GitCommandResult(true, output.ToString().TrimEnd(), string.Empty);
+        }
+
+        private static GitCommandResult RunWindowsGitStatusOnly(string workingPath)
+        {
+            return RunWindowsGit(
+                workingPath,
+                new[]
+                {
+                    "--no-optional-locks",
+                    "-c",
+                    "core.quotepath=false",
+                    "status",
+                    "--porcelain=v1",
+                    "-b",
+                    "--untracked-files=normal",
+                    "--ignore-submodules=all",
+                    "--no-renames",
+                });
+        }
+
+        private static GitThreadSnapshot TryGetCachedSnapshot(string normalizedPath)
+        {
+            if (string.IsNullOrWhiteSpace(normalizedPath))
+            {
+                return null;
+            }
+
+            lock (SnapshotCacheLock)
+            {
+                PruneSnapshotCache(DateTimeOffset.UtcNow);
+                if (!SnapshotCache.TryGetValue(normalizedPath, out CachedGitSnapshotEntry entry))
+                {
+                    return null;
+                }
+
+                return CloneSnapshot(entry.Snapshot);
+            }
+        }
+
+        private static void StoreCachedSnapshot(string normalizedPath, GitThreadSnapshot snapshot)
+        {
+            if (string.IsNullOrWhiteSpace(normalizedPath) ||
+                snapshot is null ||
+                !string.IsNullOrWhiteSpace(snapshot.Error))
+            {
+                return;
+            }
+
+            lock (SnapshotCacheLock)
+            {
+                DateTimeOffset capturedAt = DateTimeOffset.UtcNow;
+                PruneSnapshotCache(capturedAt);
+                SnapshotCache[normalizedPath] = new CachedGitSnapshotEntry
+                {
+                    CapturedAt = capturedAt,
+                    Snapshot = CloneSnapshot(snapshot),
+                };
+                PruneSnapshotCache(capturedAt);
+            }
+        }
+
+        private static void UpdateCachedSnapshot(string normalizedPath, Action<GitThreadSnapshot> applyUpdate)
+        {
+            if (string.IsNullOrWhiteSpace(normalizedPath) || applyUpdate is null)
+            {
+                return;
+            }
+
+            lock (SnapshotCacheLock)
+            {
+                DateTimeOffset capturedAt = DateTimeOffset.UtcNow;
+                PruneSnapshotCache(capturedAt);
+                if (!SnapshotCache.TryGetValue(normalizedPath, out CachedGitSnapshotEntry entry))
+                {
+                    return;
+                }
+
+                GitThreadSnapshot snapshot = entry.Snapshot;
+                applyUpdate(snapshot);
+                SnapshotCache[normalizedPath] = new CachedGitSnapshotEntry
+                {
+                    CapturedAt = capturedAt,
+                    Snapshot = snapshot,
+                };
+                PruneSnapshotCache(capturedAt);
+            }
+        }
+
+        private static void PruneSnapshotCache(DateTimeOffset now)
+        {
+            string[] expiredKeys = SnapshotCache
+                .Where(entry => now - entry.Value.CapturedAt > SnapshotCacheMaxAge)
+                .Select(entry => entry.Key)
+                .ToArray();
+            foreach (string expiredKey in expiredKeys)
+            {
+                SnapshotCache.Remove(expiredKey);
+            }
+
+            while (SnapshotCache.Count > MaxSnapshotCacheEntries)
+            {
+                string oldestKey = SnapshotCache
+                    .OrderBy(entry => entry.Value.CapturedAt)
+                    .Select(entry => entry.Key)
+                    .FirstOrDefault();
+                if (string.IsNullOrWhiteSpace(oldestKey))
+                {
+                    break;
+                }
+
+                SnapshotCache.Remove(oldestKey);
+            }
+        }
+
+        private static GitCommandResult RunWindowsGitDiff(string workingPath, string selectedPath, string normalizedStatus)
+        {
+            if (string.IsNullOrWhiteSpace(selectedPath))
+            {
+                return new GitCommandResult(true, string.Empty, string.Empty);
+            }
+
+            if (string.Equals(normalizedStatus, "??", StringComparison.Ordinal))
+            {
+                string fullPath = Path.Combine(workingPath, selectedPath.Replace('/', Path.DirectorySeparatorChar));
+                if (!File.Exists(fullPath))
+                {
+                    return new GitCommandResult(true, string.Empty, string.Empty);
+                }
+
+                GitCommandResult untrackedDiff = RunWindowsGit(
+                    workingPath,
+                    new[] { "--no-optional-locks", "-c", "core.quotepath=false", "diff", "--no-index", "--", "NUL", selectedPath },
+                    successExitCodes: new[] { 0, 1 });
+                return untrackedDiff.Ok
+                    ? new GitCommandResult(true, untrackedDiff.Output, untrackedDiff.Error)
+                    : untrackedDiff;
+            }
+
+            if (normalizedStatus.IndexOf('A') >= 0 ||
+                normalizedStatus.IndexOf('R') >= 0 ||
+                normalizedStatus.IndexOf('C') >= 0)
+            {
+                GitCommandResult stagedDiff = RunWindowsGit(
+                    workingPath,
+                    new[] { "--no-optional-locks", "-c", "core.quotepath=false", "diff", "--cached", "--", selectedPath });
+                if (stagedDiff.Ok && !string.IsNullOrWhiteSpace(stagedDiff.Output))
+                {
+                    return stagedDiff;
+                }
+            }
+
+            GitCommandResult headDiff = RunWindowsGit(
+                workingPath,
+                new[] { "--no-optional-locks", "-c", "core.quotepath=false", "diff", "HEAD", "--", selectedPath });
+            if (headDiff.Ok && !string.IsNullOrWhiteSpace(headDiff.Output))
+            {
+                return headDiff;
+            }
+
+            GitCommandResult cachedDiff = RunWindowsGit(
+                workingPath,
+                new[] { "--no-optional-locks", "-c", "core.quotepath=false", "diff", "--cached", "--", selectedPath });
+            if (cachedDiff.Ok && !string.IsNullOrWhiteSpace(cachedDiff.Output))
+            {
+                return cachedDiff;
+            }
+
+            GitCommandResult workingTreeDiff = RunWindowsGit(
+                workingPath,
+                new[] { "--no-optional-locks", "-c", "core.quotepath=false", "diff", "--", selectedPath });
+            if (workingTreeDiff.Ok || string.IsNullOrWhiteSpace(workingTreeDiff.Error))
+            {
+                return workingTreeDiff;
+            }
+
+            return new GitCommandResult(false, string.Empty, NormalizeGitError(workingTreeDiff.Error));
+        }
+
+        private static void AppendSnapshotSection(StringBuilder builder, string marker, string output)
+        {
+            builder.AppendLine(marker);
+            if (!string.IsNullOrWhiteSpace(output))
+            {
+                builder.AppendLine(output.TrimEnd());
+            }
+        }
+
+        private static GitCommandResult RunWindowsGit(
+            string workingPath,
+            IReadOnlyList<string> arguments,
+            IReadOnlyCollection<int> successExitCodes = null)
+        {
+            GitBinaryCommandResult result = RunWindowsGitBinary(workingPath, arguments, successExitCodes);
+            if (!result.Ok)
+            {
+                return new GitCommandResult(false, DecodeTextBytes(result.Output), result.Error);
+            }
+
+            return new GitCommandResult(true, DecodeTextBytes(result.Output).TrimEnd(), string.Empty);
+        }
+
+        private static GitBinaryCommandResult RunWindowsGitBinary(
+            string workingPath,
+            IReadOnlyList<string> arguments,
+            IReadOnlyCollection<int> successExitCodes = null)
+        {
+            ProcessStartInfo startInfo = new()
+            {
+                FileName = "git.exe",
+                WorkingDirectory = workingPath,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+
+            foreach (string argument in arguments)
+            {
+                startInfo.ArgumentList.Add(argument);
+            }
+
+            using Process process = StartProcess(startInfo, out string startError);
+            if (process is null)
+            {
+                return new GitBinaryCommandResult(false, Array.Empty<byte>(), startError);
+            }
+
+            Task<string> stderrTask = process.StandardError.ReadToEndAsync();
+            using MemoryStream stdoutStream = new();
+            Task stdoutTask = process.StandardOutput.BaseStream.CopyToAsync(stdoutStream);
+
+            if (!process.WaitForExit(4000))
+            {
+                try
+                {
+                    process.Kill(entireProcessTree: true);
+                }
+                catch
+                {
+                }
+
+                WaitForStreamTasks(stdoutTask, stderrTask);
+                return new GitBinaryCommandResult(false, stdoutStream.ToArray(), "Git command timed out.");
+            }
+
+            WaitForStreamTasks(stdoutTask, stderrTask);
+            string stderr = GetTaskResult(stderrTask)?.Trim() ?? string.Empty;
+            byte[] stdout = stdoutStream.ToArray();
+            IReadOnlyCollection<int> acceptedExitCodes = successExitCodes ?? new[] { 0 };
+            if (acceptedExitCodes.Contains(process.ExitCode))
+            {
+                return new GitBinaryCommandResult(true, stdout, stderr);
+            }
+
+            string stdoutText = DecodeTextBytes(stdout).Trim();
+            return new GitBinaryCommandResult(
+                false,
+                stdout,
+                string.IsNullOrWhiteSpace(stderr) ? stdoutText : stderr);
+        }
+
+        private static Process StartProcess(ProcessStartInfo startInfo, out string error)
+        {
+            try
+            {
+                error = null;
+                return Process.Start(startInfo);
+            }
+            catch (Exception ex)
+            {
+                error = $"Windows git unavailable: {ex.Message}";
+                return null;
+            }
+        }
+
+        private static void WaitForStreamTasks(Task stdoutTask, Task<string> stderrTask)
+        {
+            try
+            {
+                stdoutTask?.GetAwaiter().GetResult();
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                stderrTask?.GetAwaiter().GetResult();
+            }
+            catch
+            {
+            }
+        }
+
+        private static string GetTaskResult(Task<string> task)
+        {
+            try
+            {
+                return task?.GetAwaiter().GetResult();
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+
         private static GitCommandResult RunWslShell(string workingPath, string shellScript)
         {
             string linuxPath = ShellProfiles.ResolveDisplayPath(workingPath, ShellProfileIds.Wsl);
@@ -640,5 +1138,6 @@ namespace SelfContainedDeployment.Git
         }
 
         private readonly record struct GitCommandResult(bool Ok, string Output, string Error);
+        private readonly record struct GitBinaryCommandResult(bool Ok, byte[] Output, string Error);
     }
 }

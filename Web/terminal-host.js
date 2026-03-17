@@ -1,6 +1,7 @@
 (function () {
     const bridge = window.chrome && window.chrome.webview ? window.chrome.webview : null;
     const termRoot = document.getElementById("terminal-root");
+    const termStage = document.getElementById("terminal-stage");
     const contextMenu = document.getElementById("terminal-menu");
     const copyMenuItem = document.getElementById("terminal-menu-copy");
     const pasteMenuItem = document.getElementById("terminal-menu-paste");
@@ -14,13 +15,15 @@
     let lastPostedCols = 0;
     let lastPostedRows = 0;
     let readyPosted = false;
+    let activeToolSession = null;
+    let appliedToolSession = "none";
     const darkTheme = {
-        background: "#09090b",
-        foreground: "#f4f4f5",
-        cursor: "#f4f4f5",
-        cursorAccent: "#09090b",
-        selectionBackground: "rgba(244, 244, 245, 0.14)",
-        black: "#050506",
+        background: "#101216",
+        foreground: "#f3f4f6",
+        cursor: "#f3f4f6",
+        cursorAccent: "#101216",
+        selectionBackground: "rgba(243, 244, 246, 0.14)",
+        black: "#0c0d10",
         red: "#f87171",
         green: "#4ade80",
         yellow: "#fbbf24",
@@ -38,20 +41,20 @@
         brightWhite: "#ffffff",
     };
     const lightTheme = {
-        background: "#ffffff",
-        foreground: "#18181b",
-        cursor: "#18181b",
-        cursorAccent: "#ffffff",
-        selectionBackground: "rgba(24, 24, 27, 0.12)",
-        black: "#18181b",
-        red: "#be123c",
-        green: "#15803d",
-        yellow: "#a16207",
-        blue: "#1d4ed8",
+        background: "#fbfcfd",
+        foreground: "#1b1f24",
+        cursor: "#1b1f24",
+        cursorAccent: "#fbfcfd",
+        selectionBackground: "rgba(27, 31, 36, 0.12)",
+        black: "#1b1f24",
+        red: "#dc2626",
+        green: "#16a34a",
+        yellow: "#ca8a04",
+        blue: "#2563eb",
         magenta: "#9333ea",
         cyan: "#0f766e",
-        white: "#e4e4e7",
-        brightBlack: "#71717a",
+        white: "#eef1f4",
+        brightBlack: "#59606a",
         brightRed: "#e11d48",
         brightGreen: "#16a34a",
         brightYellow: "#ca8a04",
@@ -66,7 +69,8 @@
         convertEol: false,
         cursorBlink: true,
         cursorStyle: "bar",
-        fontFamily: '"Cascadia Mono", Consolas, "Courier New", monospace',
+        customGlyphs: true,
+        fontFamily: '"Cascadia Mono", "Cascadia Code", Consolas, "Courier New", monospace',
         fontSize: 13,
         letterSpacing: 0,
         lineHeight: 1,
@@ -80,7 +84,7 @@
 
     const fitAddon = new FitAddon.FitAddon();
     term.loadAddon(fitAddon);
-    term.open(termRoot);
+    term.open(termStage);
 
     const demoState = {
         cwd: "C:\\Users\\lqassem\\native-terminal-starter",
@@ -92,6 +96,37 @@
         const resolvedTheme = themeName === "light" ? "light" : "dark";
         document.body.dataset.theme = resolvedTheme;
         term.options.theme = resolvedTheme === "light" ? lightTheme : darkTheme;
+    }
+
+    function normalizeToolSession(toolSession) {
+        if (!toolSession || typeof toolSession !== "string") {
+            return null;
+        }
+
+        const normalized = toolSession.trim().toLowerCase();
+        return normalized || null;
+    }
+
+    function inferCodexToolSession() {
+        const sample = `${getBufferTail()}\n${getVisibleText()}`;
+        return /(?:context left|\/status\b|weekly limit left|mcp startup incomplete|run \/[a-z]|gpt-[\w.]+|xhigh|xsmall|fast\b)/i.test(sample);
+    }
+
+    function syncToolSession(forceFit = false) {
+        const inferredToolSession = activeToolSession ?? (inferCodexToolSession() ? "codex" : null);
+        const nextToolSession = inferredToolSession === "codex" ? "codex" : "none";
+        if (appliedToolSession === nextToolSession) {
+            return;
+        }
+
+        appliedToolSession = nextToolSession;
+        document.body.dataset.toolSession = nextToolSession;
+        scheduleFit(forceFit);
+    }
+
+    function setToolSession(toolSession) {
+        activeToolSession = normalizeToolSession(toolSession);
+        syncToolSession(true);
     }
 
     function setTitle(title) {
@@ -135,7 +170,7 @@
     }
 
     function fitTerminal(force = false) {
-        const rect = termRoot.getBoundingClientRect();
+        const rect = termStage.getBoundingClientRect();
         const width = Math.round(rect.width);
         const height = Math.round(rect.height);
         if (width <= 2 || height <= 2) {
@@ -301,11 +336,13 @@
             case "output":
                 term.write(message.data || "");
                 setStatus("", false);
+                syncToolSession(true);
                 break;
             case "system":
                 if (message.text) {
                     term.writeln(`\r\n${message.text}\r\n`);
                     setStatus(message.text, true);
+                    syncToolSession(true);
                 }
                 break;
             case "exit":
@@ -313,6 +350,7 @@
                 term.writeln("");
                 term.writeln("[session ended]");
                 setStatus(message.text || "Shell exited", true);
+                syncToolSession(true);
                 break;
             case "focus":
                 window.setTimeout(() => term.focus(), 0);
@@ -334,6 +372,7 @@
                     visibleText: getVisibleText(),
                     bufferTail: getBufferTail(),
                     title: document.title,
+                    toolSession: activeToolSession,
                 });
                 break;
             case "setTitle":
@@ -341,6 +380,9 @@
                 break;
             case "setTheme":
                 setTheme(message.theme);
+                break;
+            case "setToolSession":
+                setToolSession(message.toolSession);
                 break;
             default:
                 break;
@@ -351,8 +393,14 @@
         forceReady() {
             return postReady();
         },
+        setToolSession(toolSession) {
+            setToolSession(toolSession);
+        },
         get readyPosted() {
             return readyPosted;
+        },
+        get activeToolSession() {
+            return activeToolSession;
         },
     };
 
@@ -451,6 +499,10 @@
         post({ type: "title", title });
     });
 
+    term.onRender(() => {
+        syncToolSession(false);
+    });
+
     window.addEventListener("keydown", (event) => {
         const wantsCopy = (event.ctrlKey || event.metaKey) && ((event.shiftKey && event.key.toLowerCase() === "c") || event.key === "Insert");
         const wantsPaste = (event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === "v"
@@ -506,11 +558,19 @@
     window.addEventListener("resize", () => {
         hideContextMenu();
     });
-    new ResizeObserver(() => scheduleFit()).observe(termRoot);
+    new ResizeObserver(() => scheduleFit()).observe(termStage);
+    if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+        document.fonts.ready.then(() => scheduleFit(true));
+    }
+    if (document.fonts && typeof document.fonts.addEventListener === "function") {
+        document.fonts.addEventListener("loadingdone", () => scheduleFit(true));
+    }
 
     requestAnimationFrame(() => {
         setTheme("dark");
-        scheduleFit();
+        setToolSession(null);
+        syncToolSession(true);
+        scheduleFit(true);
         term.focus();
 
         if (bridge) {

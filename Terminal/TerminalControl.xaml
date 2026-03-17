@@ -18,12 +18,12 @@
                 Background="{ThemeResource ShellSurfaceBackgroundBrush}"
                 BorderBrush="{ThemeResource ShellBorderBrush}"
                 BorderThickness="0,0,0,1"
-                Padding="10,5,40,5">
+                Padding="8,4,36,4">
             <Grid ColumnDefinitions="*,Auto"
-                  ColumnSpacing="10">
+                  ColumnSpacing="8">
                 <TextBlock x:Name="TerminalHeaderTitleText"
                            AutomationProperties.AutomationId="terminal-header-title"
-                           FontSize="10.5"
+                           FontSize="10.25"
                            FontWeight="SemiBold"
                            Foreground="{ThemeResource ShellTextPrimaryBrush}"
                            Text="Terminal"
@@ -31,7 +31,7 @@
                 <TextBlock x:Name="TerminalHeaderMetaText"
                            Grid.Column="1"
                            AutomationProperties.AutomationId="terminal-header-meta"
-                           FontSize="10.5"
+                           FontSize="10"
                            Foreground="{ThemeResource ShellTextSecondaryBrush}"
                            Text="Preparing shell"
                            TextTrimming="CharacterEllipsis" />
@@ -46,27 +46,48 @@
                     AutomationProperties.AutomationId="terminal-startup-mask"
                     Background="{ThemeResource ShellSurfaceBackgroundBrush}">
                 <Grid>
-                    <Border MaxWidth="360"
-                            Padding="18,16"
-                            HorizontalAlignment="Center"
-                            VerticalAlignment="Center"
-                            Background="{ThemeResource ShellMutedSurfaceBrush}"
+                    <Border MaxWidth="380"
+                            Margin="18,18,18,0"
+                            Padding="14,13,14,12"
+                            HorizontalAlignment="Left"
+                            VerticalAlignment="Top"
+                            Background="{ThemeResource ShellPageBackgroundBrush}"
                             BorderBrush="{ThemeResource ShellBorderBrush}"
                             BorderThickness="1"
-                            CornerRadius="6">
+                            CornerRadius="4">
                         <StackPanel Spacing="10">
-                            <ProgressRing x:Name="StartupProgressRing"
-                                          Width="24"
-                                          Height="24"
-                                          HorizontalAlignment="Left"
-                                          IsActive="True" />
-                            <TextBlock x:Name="StartupTitleText"
-                                       Style="{StaticResource ShellSectionTextStyle}"
-                                       Text="Starting terminal" />
-                            <TextBlock x:Name="StartupDetailText"
-                                       Style="{StaticResource ShellHintTextStyle}"
-                                       TextWrapping="WrapWholeWords"
-                                       Text="/mnt/c/Users/lqassem/native-terminal-starter" />
+                            <Grid ColumnDefinitions="Auto,*"
+                                  ColumnSpacing="10">
+                                <Border VerticalAlignment="Top"
+                                        Background="{ThemeResource ShellMutedSurfaceBrush}"
+                                        Style="{StaticResource ShellMarkBorderStyle}">
+                                    <TextBlock Style="{StaticResource ShellMarkTextStyle}" />
+                                </Border>
+
+                                <StackPanel Grid.Column="1"
+                                            Spacing="3">
+                                    <TextBlock x:Name="StartupKickerText"
+                                               Style="{StaticResource ShellInspectorLabelTextStyle}"
+                                               Text="Terminal workspace" />
+                                    <TextBlock x:Name="StartupTitleText"
+                                               Style="{StaticResource ShellSectionTextStyle}"
+                                               Text="Starting terminal" />
+                                    <TextBlock x:Name="StartupDetailText"
+                                               Style="{StaticResource ShellHintTextStyle}"
+                                               TextWrapping="WrapWholeWords"
+                                               Text="/mnt/c/Users/lqassem/native-terminal-starter" />
+                                </StackPanel>
+                            </Grid>
+
+                            <StackPanel Spacing="6">
+                                <ProgressBar x:Name="StartupProgressBar"
+                                             IsIndeterminate="True"
+                                             Height="2"
+                                             HorizontalAlignment="Stretch" />
+                                <TextBlock x:Name="StartupMetaText"
+                                           Style="{StaticResource ShellInteractiveHintTextStyle}"
+                                           Text="Preparing terminal host, shell bridge, and replay state." />
+                            </StackPanel>
                         </StackPanel>
                     </Border>
                 </Grid>
@@ -74,11 +95,11 @@
 
             <Border x:Name="StatusBadge"
                     AutomationProperties.AutomationId="terminal-status-badge"
-                    Margin="16"
-                    Padding="10,6"
+                    Margin="12"
+                    Padding="8,5"
                     HorizontalAlignment="Right"
                     VerticalAlignment="Top"
-                    Background="{ThemeResource ShellMutedSurfaceBrush}"
+                    Background="{ThemeResource ShellSurfaceBackgroundBrush}"
                     BorderBrush="{ThemeResource ShellBorderBrush}"
                     BorderThickness="1"
                     CornerRadius="4"

@@ -1,1 +1,33 @@
 command_timeout = 2000
+
+format = "$directory$git_branch$git_status$bun$dotnet$line_break$character"
+
+[git_branch]
+symbol = "git:"
+format = " on [$symbol$branch]($style)"
+
+[git_status]
+format = " [$all_status$ahead_behind]($style)"
+ahead = ">"
+behind = "<"
+diverged = "<>"
+up_to_date = "="
+untracked = "?"
+stashed = "$"
+modified = "!"
+staged = "+"
+renamed = ">"
+deleted = "x"
+
+[bun]
+symbol = ""
+format = " via [bun $version]($style)"
+
+[dotnet]
+symbol = ""
+format = " via [.NET $tfm]($style)"
+
+[character]
+success_symbol = "[>](bold green) "
+error_symbol = "[!](bold red) "
+vimcmd_symbol = "[<](bold yellow) "

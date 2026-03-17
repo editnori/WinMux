@@ -1,0 +1,33 @@
+vars:
+  WINDOWS_PROJECT: ""
+  WSL_PROJECT: ""
+
+defaults:
+  capture: true
+  annotated: false
+  events: 40
+  retries: 1
+  retryDelayMs: 250
+
+steps:
+  - name: select-windows-project
+    type: semanticAction
+    action: selectProjectByName
+    value: "${WINDOWS_PROJECT}"
+    wait:
+      projectName: "${WINDOWS_PROJECT}"
+
+  - name: inspect-windows-project
+    type: inspect
+    includeUiTree: false
+
+  - name: select-wsl-project
+    type: semanticAction
+    action: selectProjectByName
+    value: "${WSL_PROJECT}"
+    wait:
+      projectName: "${WSL_PROJECT}"
+
+  - name: inspect-wsl-project
+    type: inspect
+    includeUiTree: false

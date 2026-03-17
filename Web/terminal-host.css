@@ -1,27 +1,31 @@
 :root {
-    --app-bg: #09090b;
+    --app-bg: #101216;
     --border: rgba(255, 255, 255, 0.08);
     --overlay-bg: rgba(15, 16, 19, 0.94);
-    --text-primary: #f4f4f5;
-    --text-muted: #8f949c;
+    --text-primary: #f3f4f6;
+    --text-muted: #a7adb7;
+    --terminal-gutter-top: 0px;
+    --terminal-gutter-right: 6px;
+    --terminal-gutter-bottom: 0px;
+    --terminal-gutter-left: 8px;
 }
 
 body[data-theme="dark"] {
     color-scheme: dark;
-    --app-bg: #09090b;
+    --app-bg: #101216;
     --border: rgba(255, 255, 255, 0.08);
     --overlay-bg: rgba(15, 16, 19, 0.94);
-    --text-primary: #f4f4f5;
-    --text-muted: #8f949c;
+    --text-primary: #f3f4f6;
+    --text-muted: #a7adb7;
 }
 
 body[data-theme="light"] {
     color-scheme: light;
-    --app-bg: #ffffff;
+    --app-bg: #fbfcfd;
     --border: rgba(24, 24, 27, 0.12);
     --overlay-bg: rgba(255, 255, 255, 0.96);
-    --text-primary: #18181b;
-    --text-muted: #71717a;
+    --text-primary: #1b1f24;
+    --text-muted: #59606a;
 }
 
 html,
@@ -31,7 +35,7 @@ body {
     margin: 0;
     overflow: hidden;
     background: var(--app-bg);
-    font-family: "Segoe UI", sans-serif;
+    font-family: "Segoe UI Variable Text", "Segoe UI", sans-serif;
 }
 
 body {
@@ -41,9 +45,26 @@ body {
 }
 
 #terminal-root {
+    display: flex;
+    justify-content: center;
+    align-items: stretch;
     width: 100%;
     height: 100%;
     box-sizing: border-box;
+    padding: var(--terminal-gutter-top) var(--terminal-gutter-right) var(--terminal-gutter-bottom) var(--terminal-gutter-left);
+}
+
+.terminal-stage {
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    overflow: hidden;
+    font-family: "Cascadia Mono", "Cascadia Code", Consolas, "Courier New", monospace;
+    font-size: 13px;
+}
+
+body[data-tool-session="codex"] .terminal-stage {
+    max-width: min(100%, 92ch);
 }
 
 #terminal-root .xterm {

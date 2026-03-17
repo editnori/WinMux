@@ -13,139 +13,300 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <ScrollViewer Grid.Row="0">
-            <StackPanel Margin="24,24,24,24" Spacing="28">
-                <StackPanel Spacing="6">
-                    <TextBlock Style="{StaticResource ShellSectionTextStyle}" Text="Appearance" />
-                    <TextBlock Style="{StaticResource ShellHintTextStyle}"
-                               Text="Keep the shell monochrome and quiet. Theme changes apply to the native chrome and the terminal host." />
-                </StackPanel>
+        <VisualStateManager.VisualStateGroups>
+            <VisualStateGroup>
+                <VisualState x:Name="SettingsNarrowState">
+                    <VisualState.StateTriggers>
+                        <AdaptiveTrigger MinWindowWidth="0" />
+                    </VisualState.StateTriggers>
+                </VisualState>
 
-                <StackPanel x:Name="themePanel" Spacing="8">
-                    <RadioButton AutomationProperties.AutomationId="settings-theme-light"
-                                 Checked="OnThemeRadioButtonChecked"
-                                 Content="Light">
-                        <RadioButton.Tag>
-                            <ElementTheme>Light</ElementTheme>
-                        </RadioButton.Tag>
-                    </RadioButton>
-                    <RadioButton AutomationProperties.AutomationId="settings-theme-dark"
-                                 Checked="OnThemeRadioButtonChecked"
-                                 Content="Dark">
-                        <RadioButton.Tag>
-                            <ElementTheme>Dark</ElementTheme>
-                        </RadioButton.Tag>
-                    </RadioButton>
-                    <RadioButton AutomationProperties.AutomationId="settings-theme-default"
-                                 Checked="OnThemeRadioButtonChecked"
-                                 Content="System default">
-                        <RadioButton.Tag>
-                            <ElementTheme>Default</ElementTheme>
-                        </RadioButton.Tag>
-                    </RadioButton>
-                </StackPanel>
+                <VisualState x:Name="SettingsWideState">
+                    <VisualState.StateTriggers>
+                        <AdaptiveTrigger MinWindowWidth="920" />
+                    </VisualState.StateTriggers>
+                    <VisualState.Setters>
+                        <Setter Target="AppearanceSectionLabelColumn.Width" Value="156" />
+                        <Setter Target="AppearanceSectionContentColumn.Width" Value="*" />
+                        <Setter Target="AppearanceSectionContent.(Grid.Row)" Value="0" />
+                        <Setter Target="AppearanceSectionContent.(Grid.Column)" Value="1" />
 
-                <StackPanel Spacing="6">
-                    <TextBlock Style="{StaticResource ShellSectionTextStyle}" Text="Default shell" />
-                    <TextBlock Style="{StaticResource ShellHintTextStyle}"
-                               Text="New projects and new tabs use this profile. WSL projects start in the translated Linux path so `/mnt/...` sessions land where you expect." />
-                </StackPanel>
+                        <Setter Target="ShellSectionLabelColumn.Width" Value="156" />
+                        <Setter Target="ShellSectionContentColumn.Width" Value="*" />
+                        <Setter Target="ShellSectionContent.(Grid.Row)" Value="0" />
+                        <Setter Target="ShellSectionContent.(Grid.Column)" Value="1" />
 
-                <StackPanel x:Name="shellProfilePanel" Spacing="8">
-                    <RadioButton x:Name="CommandPromptShellRadio"
-                                 AutomationProperties.AutomationId="settings-shell-cmd"
-                                 Checked="OnShellProfileRadioButtonChecked"
-                                 Content="Command Prompt"
-                                 Tag="cmd" />
-                    <RadioButton x:Name="PowerShellRadio"
-                                 AutomationProperties.AutomationId="settings-shell-powershell"
-                                 Checked="OnShellProfileRadioButtonChecked"
-                                 Content="PowerShell"
-                                 Tag="powershell" />
-                    <RadioButton x:Name="WslShellRadio"
-                                 AutomationProperties.AutomationId="settings-shell-wsl"
-                                 Checked="OnShellProfileRadioButtonChecked"
-                                 Content="WSL"
-                                 Tag="wsl" />
-                </StackPanel>
+                        <Setter Target="PaneLimitSectionLabelColumn.Width" Value="156" />
+                        <Setter Target="PaneLimitSectionContentColumn.Width" Value="*" />
+                        <Setter Target="PaneLimitSectionContent.(Grid.Row)" Value="0" />
+                        <Setter Target="PaneLimitSectionContent.(Grid.Column)" Value="1" />
 
-                <StackPanel Spacing="6">
-                    <TextBlock Style="{StaticResource ShellSectionTextStyle}" Text="Thread pane limit" />
-                    <TextBlock Style="{StaticResource ShellHintTextStyle}"
-                               Text="When a thread reaches this pane count, new panes spill into a new thread instead of shrinking the current workspace further." />
-                </StackPanel>
+                        <Setter Target="VaultSectionLabelColumn.Width" Value="156" />
+                        <Setter Target="VaultSectionContentColumn.Width" Value="*" />
+                        <Setter Target="VaultSectionContent.(Grid.Row)" Value="0" />
+                        <Setter Target="VaultSectionContent.(Grid.Column)" Value="1" />
+                    </VisualState.Setters>
+                </VisualState>
+            </VisualStateGroup>
+        </VisualStateManager.VisualStateGroups>
 
-                <ComboBox x:Name="paneLimitBox"
-                          AutomationProperties.AutomationId="settings-pane-limit"
-                          HorizontalAlignment="Left"
-                          MinWidth="160"
-                          SelectedIndex="2"
-                          SelectionChanged="OnPaneLimitSelectionChanged">
-                    <ComboBoxItem Content="2 panes" Tag="2" />
-                    <ComboBoxItem Content="3 panes" Tag="3" />
-                    <ComboBoxItem Content="4 panes" Tag="4" />
-                </ComboBox>
+        <ScrollViewer Grid.Row="0"
+                      VerticalScrollBarVisibility="Auto"
+                      VerticalScrollMode="Auto">
+            <StackPanel Margin="24,18,24,24"
+                        MaxWidth="940"
+                        Spacing="20"
+                        HorizontalAlignment="Center">
+                <Grid ColumnDefinitions="Auto,*"
+                      ColumnSpacing="12">
+                    <Border VerticalAlignment="Top"
+                            Style="{StaticResource ShellMarkBorderStyle}">
+                        <TextBlock Style="{StaticResource ShellMarkTextStyle}" />
+                    </Border>
 
-                <StackPanel Spacing="6">
-                    <TextBlock Style="{StaticResource ShellSectionTextStyle}" Text="Browser credentials" />
-                    <TextBlock Style="{StaticResource ShellHintTextStyle}"
-                               Text="WinMux keeps imported browser credentials in an encrypted app vault. This is separate from WebView2's native password manager and separate from Chrome Sync." />
-                </StackPanel>
-
-                <Grid ColumnDefinitions="*,*,*" ColumnSpacing="8">
-                    <Button x:Name="ImportBrowserCredentialsButton"
-                            AutomationProperties.AutomationId="settings-browser-import"
-                            Style="{StaticResource ShellNavButtonStyle}"
-                            Background="{ThemeResource ShellMutedSurfaceBrush}"
-                            BorderBrush="{ThemeResource ShellBorderBrush}"
-                            Click="OnImportBrowserCredentialsClicked"
-                            Content="Import CSV" />
-
-                    <Button x:Name="AutofillCurrentBrowserButton"
-                            Grid.Column="1"
-                            AutomationProperties.AutomationId="settings-browser-autofill"
-                            Style="{StaticResource ShellNavButtonStyle}"
-                            Background="{ThemeResource ShellMutedSurfaceBrush}"
-                            BorderBrush="{ThemeResource ShellBorderBrush}"
-                            Click="OnAutofillCurrentBrowserClicked"
-                            Content="Autofill current page" />
-
-                    <Button x:Name="ClearBrowserCredentialsButton"
-                            Grid.Column="2"
-                            AutomationProperties.AutomationId="settings-browser-clear"
-                            Style="{StaticResource ShellNavButtonStyle}"
-                            Background="{ThemeResource ShellMutedSurfaceBrush}"
-                            BorderBrush="{ThemeResource ShellBorderBrush}"
-                            Click="OnClearBrowserCredentialsClicked"
-                            Content="Clear vault" />
+                    <StackPanel Grid.Column="1"
+                                Spacing="4">
+                        <TextBlock Style="{StaticResource ShellSectionTextStyle}" Text="Preferences" />
+                        <TextBlock Style="{StaticResource ShellHintTextStyle}"
+                                   Text="Theme, shell defaults, pane density, and browser vault." />
+                    </StackPanel>
                 </Grid>
 
-                <TextBlock x:Name="browserCredentialStatusText"
-                           AutomationProperties.AutomationId="settings-browser-credential-status"
-                           Style="{StaticResource ShellHintTextStyle}"
-                           Text="No imported browser credentials yet." />
+                <StackPanel Spacing="18">
+                    <Grid x:Name="AppearanceSectionGrid"
+                          RowSpacing="6"
+                          ColumnSpacing="20">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition x:Name="AppearanceSectionLabelColumn" Width="*" />
+                            <ColumnDefinition x:Name="AppearanceSectionContentColumn" Width="0" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
 
-                <Border BorderBrush="{ThemeResource ShellBorderBrush}"
-                        BorderThickness="1"
-                        CornerRadius="6"
-                        Padding="10">
-                    <ScrollViewer MaxHeight="260"
-                                  VerticalScrollBarVisibility="Auto"
-                                  VerticalScrollMode="Auto">
-                        <StackPanel x:Name="browserCredentialListPanel"
-                                    AutomationProperties.AutomationId="settings-browser-credential-list"
-                                    Spacing="8" />
-                    </ScrollViewer>
-                </Border>
+                        <StackPanel Grid.Row="0"
+                                    x:Name="AppearanceSectionLabel"
+                                    Spacing="2">
+                            <TextBlock Style="{StaticResource ShellPreferenceGroupLabelTextStyle}" Text="Appearance" />
+                            <TextBlock Style="{StaticResource ShellPreferenceGroupMetaTextStyle}" Text="Chrome + terminal" />
+                        </StackPanel>
+
+                        <StackPanel x:Name="AppearanceSectionContent"
+                                    Grid.Row="1"
+                                    Spacing="4">
+                            <StackPanel x:Name="themePanel"
+                                        Spacing="4">
+                                <RadioButton AutomationProperties.AutomationId="settings-theme-light"
+                                             Style="{StaticResource ShellPreferenceRadioButtonStyle}"
+                                             Checked="OnThemeRadioButtonChecked">
+                                    <StackPanel Spacing="2">
+                                        <TextBlock Style="{StaticResource ShellPreferenceOptionTitleTextStyle}" Text="Light" />
+                                        <TextBlock Style="{StaticResource ShellPreferenceOptionHintTextStyle}"
+                                                   Text="Cool, flat surfaces." />
+                                    </StackPanel>
+                                    <RadioButton.Tag>
+                                        <ElementTheme>Light</ElementTheme>
+                                    </RadioButton.Tag>
+                                </RadioButton>
+
+                                <RadioButton AutomationProperties.AutomationId="settings-theme-dark"
+                                             Style="{StaticResource ShellPreferenceRadioButtonStyle}"
+                                             Checked="OnThemeRadioButtonChecked">
+                                    <StackPanel Spacing="2">
+                                        <TextBlock Style="{StaticResource ShellPreferenceOptionTitleTextStyle}" Text="Dark" />
+                                        <TextBlock Style="{StaticResource ShellPreferenceOptionHintTextStyle}"
+                                                   Text="Low glare for terminal-heavy work." />
+                                    </StackPanel>
+                                    <RadioButton.Tag>
+                                        <ElementTheme>Dark</ElementTheme>
+                                    </RadioButton.Tag>
+                                </RadioButton>
+
+                                <RadioButton AutomationProperties.AutomationId="settings-theme-default"
+                                             Style="{StaticResource ShellPreferenceRadioButtonStyle}"
+                                             Checked="OnThemeRadioButtonChecked">
+                                    <StackPanel Spacing="2">
+                                        <TextBlock Style="{StaticResource ShellPreferenceOptionTitleTextStyle}" Text="System default" />
+                                        <TextBlock Style="{StaticResource ShellPreferenceOptionHintTextStyle}"
+                                                   Text="Follow Windows automatically." />
+                                    </StackPanel>
+                                    <RadioButton.Tag>
+                                        <ElementTheme>Default</ElementTheme>
+                                    </RadioButton.Tag>
+                                </RadioButton>
+                            </StackPanel>
+                        </StackPanel>
+                    </Grid>
+
+                    <Grid x:Name="ShellSectionGrid"
+                          RowSpacing="6"
+                          ColumnSpacing="20">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition x:Name="ShellSectionLabelColumn" Width="*" />
+                            <ColumnDefinition x:Name="ShellSectionContentColumn" Width="0" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <StackPanel Grid.Row="0"
+                                    x:Name="ShellSectionLabel"
+                                    Spacing="2">
+                            <TextBlock Style="{StaticResource ShellPreferenceGroupLabelTextStyle}" Text="Default shell" />
+                            <TextBlock Style="{StaticResource ShellPreferenceGroupMetaTextStyle}" Text="New projects + tabs" />
+                        </StackPanel>
+
+                        <StackPanel x:Name="ShellSectionContent"
+                                    Grid.Row="1"
+                                    Spacing="4">
+                            <StackPanel x:Name="shellProfilePanel"
+                                        Spacing="4">
+                                <RadioButton x:Name="CommandPromptShellRadio"
+                                             AutomationProperties.AutomationId="settings-shell-cmd"
+                                             Style="{StaticResource ShellPreferenceRadioButtonStyle}"
+                                             Checked="OnShellProfileRadioButtonChecked"
+                                             Tag="cmd">
+                                    <StackPanel Spacing="2">
+                                        <TextBlock Style="{StaticResource ShellPreferenceOptionTitleTextStyle}" Text="Command Prompt" />
+                                        <TextBlock Style="{StaticResource ShellPreferenceOptionHintTextStyle}"
+                                                   Text="Classic Windows shell." />
+                                    </StackPanel>
+                                </RadioButton>
+
+                                <RadioButton x:Name="PowerShellRadio"
+                                             AutomationProperties.AutomationId="settings-shell-powershell"
+                                             Style="{StaticResource ShellPreferenceRadioButtonStyle}"
+                                             Checked="OnShellProfileRadioButtonChecked"
+                                             Tag="powershell">
+                                    <StackPanel Spacing="2">
+                                        <TextBlock Style="{StaticResource ShellPreferenceOptionTitleTextStyle}" Text="PowerShell" />
+                                        <TextBlock Style="{StaticResource ShellPreferenceOptionHintTextStyle}"
+                                                   Text="Windows scripting with WinMux chrome." />
+                                    </StackPanel>
+                                </RadioButton>
+
+                                <RadioButton x:Name="WslShellRadio"
+                                             AutomationProperties.AutomationId="settings-shell-wsl"
+                                             Style="{StaticResource ShellPreferenceRadioButtonStyle}"
+                                             Checked="OnShellProfileRadioButtonChecked"
+                                             Tag="wsl">
+                                    <StackPanel Spacing="2">
+                                        <TextBlock Style="{StaticResource ShellPreferenceOptionTitleTextStyle}" Text="WSL" />
+                                        <TextBlock Style="{StaticResource ShellPreferenceOptionHintTextStyle}"
+                                                   Text="Start inside translated Linux paths." />
+                                    </StackPanel>
+                                </RadioButton>
+                            </StackPanel>
+                        </StackPanel>
+                    </Grid>
+
+                    <Grid x:Name="PaneLimitSectionGrid"
+                          RowSpacing="6"
+                          ColumnSpacing="20">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition x:Name="PaneLimitSectionLabelColumn" Width="*" />
+                            <ColumnDefinition x:Name="PaneLimitSectionContentColumn" Width="0" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <StackPanel Grid.Row="0"
+                                    x:Name="PaneLimitSectionLabel"
+                                    Spacing="2">
+                            <TextBlock Style="{StaticResource ShellPreferenceGroupLabelTextStyle}" Text="Pane limit" />
+                            <TextBlock Style="{StaticResource ShellPreferenceGroupMetaTextStyle}" Text="Thread density" />
+                        </StackPanel>
+
+                        <StackPanel x:Name="PaneLimitSectionContent"
+                                    Grid.Row="1"
+                                    Spacing="6">
+                            <ComboBox x:Name="paneLimitBox"
+                                      AutomationProperties.AutomationId="settings-pane-limit"
+                                      HorizontalAlignment="Left"
+                                      Style="{StaticResource ShellPreferenceComboBoxStyle}"
+                                      SelectedIndex="2"
+                                      SelectionChanged="OnPaneLimitSelectionChanged">
+                                <ComboBoxItem Content="2 panes" Tag="2" />
+                                <ComboBoxItem Content="3 panes" Tag="3" />
+                                <ComboBoxItem Content="4 panes" Tag="4" />
+                            </ComboBox>
+
+                            <TextBlock Style="{StaticResource ShellPreferenceOptionHintTextStyle}"
+                                       Text="Open a new thread instead of crushing the current workspace." />
+                        </StackPanel>
+                    </Grid>
+
+                    <Grid x:Name="VaultSectionGrid"
+                          RowSpacing="6"
+                          ColumnSpacing="20">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition x:Name="VaultSectionLabelColumn" Width="*" />
+                            <ColumnDefinition x:Name="VaultSectionContentColumn" Width="0" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <StackPanel Grid.Row="0"
+                                    x:Name="VaultSectionLabel"
+                                    Spacing="2">
+                            <TextBlock Style="{StaticResource ShellPreferenceGroupLabelTextStyle}" Text="Browser vault" />
+                            <TextBlock Style="{StaticResource ShellPreferenceGroupMetaTextStyle}" Text="Imported logins" />
+                        </StackPanel>
+
+                        <StackPanel x:Name="VaultSectionContent"
+                                    Grid.Row="1"
+                                    Spacing="8">
+                            <TextBlock Style="{StaticResource ShellPreferenceOptionHintTextStyle}"
+                                       Text="Separate from WebView2 passwords and Chrome Sync." />
+
+                            <StackPanel Orientation="Horizontal"
+                                        Spacing="10">
+                                <Button x:Name="ImportBrowserCredentialsButton"
+                                        AutomationProperties.AutomationId="settings-browser-import"
+                                        Style="{StaticResource ShellInlineActionButtonStyle}"
+                                        Click="OnImportBrowserCredentialsClicked"
+                                        Content="Import CSV" />
+
+                                <Button x:Name="AutofillCurrentBrowserButton"
+                                        AutomationProperties.AutomationId="settings-browser-autofill"
+                                        Style="{StaticResource ShellInlineActionButtonStyle}"
+                                        Click="OnAutofillCurrentBrowserClicked"
+                                        Content="Autofill page" />
+
+                                <Button x:Name="ClearBrowserCredentialsButton"
+                                        AutomationProperties.AutomationId="settings-browser-clear"
+                                        Style="{StaticResource ShellInlineActionButtonStyle}"
+                                        Click="OnClearBrowserCredentialsClicked"
+                                        Content="Clear vault" />
+                            </StackPanel>
+
+                            <TextBlock x:Name="browserCredentialStatusText"
+                                       AutomationProperties.AutomationId="settings-browser-credential-status"
+                                       Style="{StaticResource ShellPreferenceStatusTextStyle}"
+                                       Text="No imported browser credentials yet." />
+
+                            <ScrollViewer MaxHeight="320"
+                                          VerticalScrollBarVisibility="Auto"
+                                          VerticalScrollMode="Auto">
+                                <StackPanel x:Name="browserCredentialListPanel"
+                                            AutomationProperties.AutomationId="settings-browser-credential-list"
+                                            Spacing="4" />
+                            </ScrollViewer>
+                        </StackPanel>
+                    </Grid>
+                </StackPanel>
             </StackPanel>
         </ScrollViewer>
 
-        <Border Grid.Row="1"
-                Padding="24,12"
-                BorderBrush="{ThemeResource ShellBorderBrush}"
-                BorderThickness="0,1,0,0">
-            <TextBlock Style="{StaticResource ShellHintTextStyle}"
-                       Text="Existing tabs keep their current shell. New tabs follow the selected profile." />
-        </Border>
+        <TextBlock Grid.Row="1"
+                   Margin="24,0,24,14"
+                   Style="{StaticResource ShellHintTextStyle}"
+                   Text="Existing tabs keep their shell. New tabs use this default." />
     </Grid>
 </Page>

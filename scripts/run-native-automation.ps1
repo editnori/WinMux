@@ -38,6 +38,14 @@ switch ($Tool) {
         Invoke-RestMethod -Uri "$baseUrl/events" | ConvertTo-Json -Depth 20
         break
     }
+    "perf-snapshot" {
+        Invoke-RestMethod -Uri "$baseUrl/perf-snapshot" | ConvertTo-Json -Depth 30
+        break
+    }
+    "doctor" {
+        Invoke-RestMethod -Uri "$baseUrl/doctor" | ConvertTo-Json -Depth 40
+        break
+    }
     "recording-status" {
         Invoke-RestMethod -Uri "$baseUrl/recording-status" | ConvertTo-Json -Depth 20
         break
@@ -162,6 +170,6 @@ switch ($Tool) {
         break
     }
     default {
-        throw "Unknown automation tool '$Tool'. Expected one of: health, state, ui-tree, ui-refs, desktop-windows, desktop-uia-tree, events, events-clear, recording-status, action, ui-action, desktop-action, desktop-uia-action, terminal-state, browser-state, diff-state, editor-state, browser-eval, browser-screenshot, recording-start, recording-stop, render-trace, screenshot"
+        throw "Unknown automation tool '$Tool'. Expected one of: health, state, ui-tree, ui-refs, desktop-windows, desktop-uia-tree, events, perf-snapshot, doctor, events-clear, recording-status, action, ui-action, desktop-action, desktop-uia-action, terminal-state, browser-state, diff-state, editor-state, browser-eval, browser-screenshot, recording-start, recording-stop, render-trace, screenshot"
     }
 }

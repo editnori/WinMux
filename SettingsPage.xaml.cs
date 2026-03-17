@@ -1,7 +1,6 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Navigation;
 using Microsoft.UI.Text;
 using SelfContainedDeployment.Browser;
@@ -15,42 +14,93 @@ namespace SelfContainedDeployment
 {
     public partial class SettingsPage : Page
     {
+        private bool _syncingControls;
+
         public SettingsPage()
         {
             InitializeComponent();
+            NavigationCacheMode = NavigationCacheMode.Required;
         }
 
         protected override void OnNavigatedTo(NavigationEventArgs e)
         {
-            themePanel.Children.Cast<RadioButton>()
-                .First(button => (ElementTheme)button.Tag == SampleConfig.CurrentTheme)
-                .IsChecked = true;
-
-            shellProfilePanel.Children.Cast<RadioButton>()
-                .First(button => string.Equals((string)button.Tag, SampleConfig.DefaultShellProfileId, System.StringComparison.OrdinalIgnoreCase))
-                .IsChecked = true;
-
-            paneLimitBox.SelectedIndex = Math.Clamp(SampleConfig.MaxPaneCountPerThread, 2, 4) - 2;
-
-            RefreshBrowserCredentialVault();
-
+            bool preloadOnly = e.Parameter is bool value && value;
+            RefreshFromCurrentState(refreshCredentialVault: !preloadOnly);
             base.OnNavigatedTo(e);
+        }
+
+        internal void RefreshFromCurrentState(bool refreshCredentialVault)
+        {
+            _syncingControls = true;
+            try
+            {
+                RadioButton themeButton = themePanel.Children.OfType<RadioButton>()
+                    .First(button => (ElementTheme)button.Tag == SampleConfig.CurrentTheme);
+                if (themeButton.IsChecked != true)
+                {
+                    themeButton.IsChecked = true;
+                }
+
+                RadioButton shellProfileButton = shellProfilePanel.Children.OfType<RadioButton>()
+                    .First(button => string.Equals((string)button.Tag, SampleConfig.DefaultShellProfileId, System.StringComparison.OrdinalIgnoreCase));
+                if (shellProfileButton.IsChecked != true)
+                {
+                    shellProfileButton.IsChecked = true;
+                }
+
+                int selectedPaneLimitIndex = Math.Clamp(SampleConfig.MaxPaneCountPerThread, 2, 4) - 2;
+                if (paneLimitBox.SelectedIndex != selectedPaneLimitIndex)
+                {
+                    paneLimitBox.SelectedIndex = selectedPaneLimitIndex;
+                }
+            }
+            finally
+            {
+                _syncingControls = false;
+            }
+
+            if (refreshCredentialVault)
+            {
+                QueueBrowserCredentialVaultRefresh();
+            }
+        }
+
+        internal void QueueBrowserCredentialVaultRefresh()
+        {
+            browserCredentialStatusText.Text = "Loading encrypted browser credentials...";
+            browserCredentialListPanel.Children.Clear();
+            DispatcherQueue.TryEnqueue(() => RefreshBrowserCredentialVault());
         }
 
         private void OnThemeRadioButtonChecked(object sender, RoutedEventArgs e)
         {
+            if (_syncingControls)
+            {
+                return;
+            }
+
             ElementTheme selectedTheme = (ElementTheme)((RadioButton)sender).Tag;
             MainPage.Current?.ApplyTheme(selectedTheme);
         }
 
         private void OnShellProfileRadioButtonChecked(object sender, RoutedEventArgs e)
         {
+            if (_syncingControls)
+            {
+                return;
+            }
+
             string shellProfileId = (string)((RadioButton)sender).Tag;
             MainPage.Current?.ApplyShellProfile(shellProfileId);
         }
 
         private void OnPaneLimitSelectionChanged(object sender, SelectionChangedEventArgs e)
         {
+            if (_syncingControls)
+            {
+                return;
+            }
+
             if (paneLimitBox.SelectedItem is not ComboBoxItem item || !int.TryParse((string)item.Tag, out int paneLimit))
             {
                 return;
@@ -81,11 +131,13 @@ namespace SelfContainedDeployment
                 return;
             }
 
-            foreach (BrowserCredentialSummary summary in summaries)
+            for (int index = 0; index < summaries.Count; index++)
             {
+                BrowserCredentialSummary summary = summaries[index];
                 Grid row = new()
                 {
-                    ColumnSpacing = 10,
+                    ColumnSpacing = 12,
+                    VerticalAlignment = VerticalAlignment.Center,
                     ColumnDefinitions =
                     {
                         new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) },
@@ -99,22 +151,22 @@ namespace SelfContainedDeployment
                 };
                 textBlock.Children.Add(new TextBlock
                 {
-                    Text = string.IsNullOrWhiteSpace(summary.Name) ? summary.Host : $"{summary.Name}  ({summary.Host})",
-                    FontWeight = FontWeights.SemiBold,
+                    Text = string.IsNullOrWhiteSpace(summary.Name) ? summary.Host : $"{summary.Name} · {summary.Host}",
+                    Style = (Style)Application.Current.Resources["ShellPreferenceOptionTitleTextStyle"],
                     TextTrimming = TextTrimming.CharacterEllipsis,
                 });
                 textBlock.Children.Add(new TextBlock
                 {
-                    Style = (Style)Application.Current.Resources["ShellHintTextStyle"],
-                    Text = string.IsNullOrWhiteSpace(summary.Username) ? summary.Url : $"{summary.Username}  •  {summary.Url}",
+                    Style = (Style)Application.Current.Resources["ShellPreferenceGroupMetaTextStyle"],
+                    Text = string.IsNullOrWhiteSpace(summary.Username) ? summary.Url : $"{summary.Username} · {summary.Url}",
                     TextTrimming = TextTrimming.CharacterEllipsis,
                 });
                 row.Children.Add(textBlock);
 
                 Button deleteButton = new()
                 {
-                    Content = "Delete",
-                    Style = (Style)Application.Current.Resources["ShellChromeButtonStyle"],
+                    Content = "Remove",
+                    Style = (Style)Application.Current.Resources["ShellInlineActionButtonStyle"],
                     Tag = summary.Id,
                     HorizontalAlignment = HorizontalAlignment.Right,
                 };
@@ -125,10 +177,7 @@ namespace SelfContainedDeployment
 
                 Border container = new()
                 {
-                    BorderBrush = (Brush)Application.Current.Resources["ShellBorderBrush"],
-                    BorderThickness = new Thickness(1),
-                    CornerRadius = new CornerRadius(6),
-                    Padding = new Thickness(10, 8, 10, 8),
+                    Padding = new Thickness(0, 4, 0, 4),
                     Child = row,
                 };
                 AutomationProperties.SetAutomationId(container, $"settings-browser-entry-{summary.Id}");

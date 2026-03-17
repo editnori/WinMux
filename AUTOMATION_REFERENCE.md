@@ -12,12 +12,15 @@ Native automation server:
 - `GET /desktop-windows`
 - `GET /recording-status`
 - `GET /events`
+- `GET /perf-snapshot`
+- `GET /doctor`
 - `POST /action`
 - `POST /ui-action`
 - `POST /desktop-action`
 - `POST /terminal-state`
 - `POST /browser-state`
 - `POST /diff-state`
+- `POST /editor-state`
 - `POST /browser-eval`
 - `POST /browser-screenshot`
 - `POST /recording/start`
@@ -42,17 +45,37 @@ bun run native:desktop-windows
 bun run native:desktop-uia-tree
 bun run native:events
 bun run native:events:clear
+bun run native:perf-snapshot
+bun run native:doctor
 bun run native:recording-status
 bun run native:action -- '{"action":"newThread"}'
 bun run native:action -- '{"action":"newBrowserPane"}'
 bun run native:action -- '{"action":"newEditorPane"}'
 bun run native:action -- '{"action":"setLayout","value":"3"}'
+bun run native:action -- '{"action":"setThreadNote","value":"Waiting on Julia. Resume the repo standardization pass next."}'
+bun run native:action -- '{"action":"addThreadNote","title":"blocked-on-julia","value":"Waiting on Julia before landing the repo pass."}'
+bun run native:action -- '{"action":"addThreadNote","title":"diff follow-up","value":"Re-run the patch review on this pane.","tabId":"<pane-id>"}'
+bun run native:action -- '{"action":"updateThreadNote","threadId":"<thread-id>","noteId":"<note-id>","value":"Julia replied. Resume the cleanup pass."}'
+bun run native:action -- '{"action":"selectThreadNote","threadId":"<thread-id>","noteId":"<note-id>"}'
+bun run native:action -- '{"action":"deleteThreadNote","threadId":"<thread-id>","noteId":"<note-id>"}'
+bun run native:action -- '{"action":"showThreadNotes"}'
+bun run native:action -- '{"action":"showProjectNotes"}'
 bun run native:ui-action -- '{"action":"click","automationId":"shell-nav-settings"}'
 bun run native:desktop-action -- '{"action":"focusWindow","titleContains":"WinMux"}'
 bun run native:desktop-uia-action -- '{"action":"invoke","titleContains":"Browse for Folder","name":"OK"}'
 bun run native:terminal-state
 bun run native:browser-state
 bun run native:diff-state
+bun run native:editor-state
+bun run native:inspect
+bun run native:wait -- --condition '{"projectName":"native-terminal-starter"}'
+bun run native:profile-action -- --request '{"action":"toggleInspector"}'
+bun run native:click-and-capture -- --ref-label e2
+bun run native:state-diff -- --before tmp/a.json --after tmp/b.json
+bun run native:ui-watch -- --duration 3000
+bun run native:scenario -- scenarios/native/rapid-project-switch.yaml --vars '{"PROJECT_A":"native-terminal-starter","PROJECT_B":"original_performance_takehome-main"}'
+bun run native:benchmark -- scenarios/native/rapid-project-switch.yaml --vars '{"PROJECT_A":"native-terminal-starter","PROJECT_B":"original_performance_takehome-main"}' --iterations 3
+bun run native:crash-report
 bun run native:browser-eval -- "<pane-id>" "document.title"
 bun run native:browser-screenshot -- "<pane-id>"
 bun run native:agent-browser-smoke
@@ -79,7 +102,6 @@ Supported `action` values:
 - `togglePane`
 - `toggleInspector`
 - `showTerminal`
-- `showOverview`
 - `showSettings`
 - `newProject`
 - `newThread`
@@ -99,6 +121,14 @@ Supported `action` values:
 - `setLayout`
 - `fitPanes`
 - `setThreadWorktree`
+- `setThreadNote`
+- `addThreadNote`
+- `updateThreadNote`
+- `deleteThreadNote`
+- `selectThreadNote`
+- `editThreadNote`
+- `showThreadNotes`
+- `showProjectNotes`
 - `refreshDiff`
 - `selectDiffFile`
 - `navigateBrowser`
@@ -119,13 +149,14 @@ Relevant payload fields:
 - `threadId`
 - `tabId`
 - `targetTabId`
+- `noteId`
+- `title`
 - `value`
 
 Notes:
 
 - `newProject` on the semantic route creates a project directly from `value` without opening the dialog.
 - `toggleInspector` collapses or reopens the right-side inspector rail without changing the active thread.
-- `showOverview` swaps the active project into the shell's vertical thread overview surface.
 - `newBrowserPane` adds a preview pane to the active thread backed by the shared WinMux browser profile.
 - `newBrowserTab` opens a lightweight in-pane browser tab session on the selected browser pane.
 - `newEditorPane` adds a terminal-backed editor pane that launches `nvim .`.
@@ -135,6 +166,12 @@ Notes:
 - `autofillBrowser` triggers a manual autofill attempt on the selected browser pane.
 - `setLayout` accepts `1|2|3|4` or `solo|dual|triple|quad`.
 - `setThreadWorktree` binds a thread to a different repo/worktree path for new panes, diff state, header text, and session replay.
+- `setThreadNote` is the legacy alias for updating the selected note on a thread; if no note exists, WinMux creates one.
+- `addThreadNote` creates a new note on the target thread. Pass `tabId` to attach it to a specific pane; omit `tabId` for a thread-level note.
+- `updateThreadNote` updates one existing note by `noteId`.
+- `deleteThreadNote` removes one note by `noteId`.
+- `selectThreadNote` activates the note, navigates to its thread, and switches to its attached pane when one exists.
+- `editThreadNote`, `showThreadNotes`, and `showProjectNotes` open the project-wide note index in the inspector, anchored to the target thread.
 - `refreshDiff` refreshes the active thread's git snapshot.
 - `selectDiffFile` refreshes the active thread's git snapshot, selects one changed file by relative path, and opens or updates the thread's diff pane in a dual-pane view.
 - `clearProjectThreads` removes all threads from the target project while keeping the project shell open.
@@ -161,6 +198,30 @@ Each thread entry also includes:
 - `branchName`
 - `selectedDiffPath`
 - `changedFileCount`
+- `hasNotes`
+- `noteCount`
+- `selectedNoteId`
+- `notePreview`
+- `notes`
+
+Each project entry also includes:
+
+- `notes`
+
+Each note entry includes:
+
+- `id`
+- `title`
+- `text`
+- `preview`
+- `projectId`
+- `projectName`
+- `threadId`
+- `threadName`
+- `paneId`
+- `paneTitle`
+- `selected`
+- `updatedAt`
 
 Notes:
 
@@ -212,6 +273,146 @@ Notes:
 - this means browser inspection no longer depends on the shared CDP target list
 - the preferred extension set is currently Claude plus uBlock Origin when found in the local Chromium profile
 - the profile is seeded from the most relevant detected Chromium profile and still does not imply live Chrome-profile reuse or Google Sync parity
+
+### Editor inspection
+
+`POST /editor-state` returns structured editor-pane state directly from the native app.
+
+Returned fields per pane:
+
+- `paneId`
+- `threadId`
+- `projectId`
+- `title`
+- `selectedPath`
+- `status`
+- `dirty`
+- `readOnly`
+- `fileCount`
+- `files`
+- `text`
+
+Request fields:
+
+- `paneId`
+- `maxChars`
+- `maxFiles`
+
+Notes:
+
+- `bun run native:editor-state` is the direct wrapper for this route
+- editor panes report both the active file path and the in-pane status line, which is useful when the WebView is still initializing
+- `files` is a lightweight browser-side listing of the editor workspace, while `text` is the selected file content capped by `maxChars`
+
+### Performance snapshot
+
+`GET /perf-snapshot` returns the live native automation metrics snapshot.
+
+Returned fields:
+
+- `timestamp`
+- `lastUiHeartbeat`
+- `uiResponsive`
+- `activeCorrelationId`
+- `activeAction`
+- `counters`
+- `lastDurationsMs`
+- `lastAction`
+- `recentOperations`
+
+Notes:
+
+- `bun run native:perf-snapshot` is the direct wrapper for this route
+- `lastAction` includes high-level action timings such as `totalMs`, `asyncBackgroundMs`, `firstRenderCompleteMs`, `paneLayoutMs`, `projectRailRefreshMs`, `inspectorRebuildMs`, and `gitRefreshMs`
+- `recentOperations` is the event-style timing ledger for deeper debugging and correlation-id tracing
+
+### Doctor snapshot
+
+`GET /doctor` returns the highest-fidelity native health bundle that is safe to request from automation.
+
+Returned fields:
+
+- `timestamp`
+- `processId`
+- `windowTitle`
+- `automationLogPath`
+- `automationLogTail`
+- `startupErrorLogPath`
+- `startupErrorLogTail`
+- `lastUnhandledExceptionMessage`
+- `lastUnhandledExceptionDetails`
+- `uiResponsive`
+- `state`
+- `perf`
+- `events`
+- `recordingStatus`
+- `lastHangDump`
+
+Notes:
+
+- `bun run native:doctor` is the direct wrapper for this route
+- when the UI heartbeat is stalled, doctor falls back to the last cached shell state plus the latest watchdog hang dump instead of blocking forever on the UI thread
+- `lastHangDump` points at the watchdog screenshot and event artifact captured during a detected UI stall
+
+### Debugger-grade automation CLI
+
+`tools/native-debugger.mjs` is the Bun orchestration layer on top of the raw native routes.
+
+Primary commands:
+
+- `inspect`
+- `wait`
+- `profile-action`
+- `click-and-capture`
+- `state-diff`
+- `scenario`
+- `benchmark`
+- `ui-watch`
+- `crash-report`
+
+Artifact model:
+
+- artifacts default to `tmp/automation-debugger/<prefix>-<timestamp>`
+- `inspect` bundles shell state, perf snapshot, event tail, UI refs, pane snapshots, and screenshots
+- `profile-action` captures before/after state, event diff, action timing, and optional screenshots
+- `crash-report` bundles doctor output plus a live inspect snapshot when the UI is still responsive
+
+Scenario step types:
+
+- `action`
+- `uiAction`
+- `semanticAction`
+- `wait`
+- `inspect`
+- `assert`
+- `sleep`
+- `command`
+
+Notes:
+
+- scenario files can be JSON or YAML and support `${VAR_NAME}` interpolation from `--vars` plus environment variables
+- packaged scenario packs live under `scenarios/native/`
+- `scenarios/native/benchmark-*.yaml` disables screenshot capture so benchmark numbers reflect action and wait costs instead of artifact overhead
+- benchmark summaries report `min`, `max`, `avg`, `median`, and `p95` across total runs and per-step timings
+
+### Performance contract
+
+`tools/native-perf-governor.mjs` is the feature-budget runner for WinMux.
+
+Primary commands:
+
+- `bun run native:perf:list`
+- `bun run native:perf:check`
+- `bun run native:perf:run`
+- `bun run native:perf:run -- --include-mutating`
+
+Notes:
+
+- the feature catalog lives in `perf/feature-catalog.json`
+- the target-budget policy lives in `PERFORMANCE_BUDGETS.md`
+- `native:perf:check` verifies every automation action in `MainPage.PerformAutomationAction(...)` has catalog coverage
+- `native:perf:run` executes the automated subset and restores the baseline shell state between safe feature runs so one measurement does not contaminate the next
+- pane-creation runners already close extra tabs during baseline restore; broader destructive workspace mutations still stay opt-in until they have full fixture cleanup
 
 ### Diff-pane inspection
 
@@ -544,6 +745,8 @@ Each returned frame can include:
 
 - timestamp
 - shell state
+- state change paths
+- interactive change refs
 - interactive nodes
 - optional screenshot path
 

@@ -138,15 +138,21 @@ namespace SelfContainedDeployment.Panes
         private string _credentialAutofillStatus = "No imported WinMux credentials.";
         private readonly List<BrowserTabSession> _browserTabs = new();
         private readonly Dictionary<string, Button> _browserTabButtonsById = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, Border> _browserTabDotsById = new(StringComparer.Ordinal);
         private readonly Dictionary<string, TextBlock> _browserTabTitlesById = new(StringComparer.Ordinal);
         private readonly List<BrowserExtensionSnapshot> _installedExtensions = new();
         private readonly Dictionary<int, BrowserCredentialMatch> _credentialContextMenuMatches = new();
         private bool _credentialCaptureScriptInjected;
+        private Task _deferredSetupTask;
         private string _selectedBrowserTabId;
         private ChromiumProfileSeedSource _profileSeedSource;
         private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer _layoutTimer;
         private bool _lastCompactLayout;
         private double _lastBrowserTabTitleWidth = -1;
+        private string _lastBrowserTabStripStructureSignature;
+        private string _lastStateChangeSignature;
+        private double _lastQueuedLayoutWidth = -1;
+        private double _lastQueuedLayoutHeight = -1;
         private int _lastResizeNotificationWidth;
         private int _lastResizeNotificationHeight;
         private double _lastAppliedZoomFactor = double.NaN;
@@ -192,6 +198,34 @@ namespace SelfContainedDeployment.Panes
             RefreshBrowserTabStrip();
             UpdateNavigationButtons();
             UpdateAdaptiveChromeLayout();
+        }
+
+        internal static void PreloadSharedEnvironmentIfAvailable()
+        {
+            string key = GetSharedBrowserProfileRootPath();
+            try
+            {
+                if (!Directory.Exists(key) || !Directory.EnumerateFileSystemEntries(key).Any())
+                {
+                    return;
+                }
+            }
+            catch
+            {
+                return;
+            }
+
+            Task<CoreWebView2Environment> environmentTask;
+            lock (EnvironmentSync)
+            {
+                if (!EnvironmentTasks.TryGetValue(key, out environmentTask))
+                {
+                    environmentTask = CreateEnvironmentAsync(key);
+                    EnvironmentTasks[key] = environmentTask;
+                }
+            }
+
+            _ = environmentTask.ContinueWith(_ => { }, TaskScheduler.Default);
         }
 
         public event EventHandler<string> TitleChanged;
@@ -293,6 +327,11 @@ namespace SelfContainedDeployment.Panes
 
             _disposed = true;
             _layoutTimer.Stop();
+            ActualThemeChanged -= OnActualThemeChanged;
+            GotFocus -= OnInteractionRequested;
+            SizeChanged -= OnBrowserPaneSizeChanged;
+            AddressBox.GotFocus -= OnAddressBoxGotFocus;
+            BrowserView.GotFocus -= OnInteractionRequested;
             if (BrowserView.CoreWebView2 is not null)
             {
                 BrowserView.CoreWebView2.NavigationCompleted -= OnNavigationCompleted;
@@ -302,6 +341,15 @@ namespace SelfContainedDeployment.Panes
                 BrowserView.CoreWebView2.WebMessageReceived -= OnWebMessageReceived;
                 BrowserView.CoreWebView2.NewWindowRequested -= OnNewWindowRequested;
             }
+
+            _browserTabs.Clear();
+            _browserTabButtonsById.Clear();
+            _browserTabDotsById.Clear();
+            _browserTabTitlesById.Clear();
+            _installedExtensions.Clear();
+            _credentialContextMenuMatches.Clear();
+            _deferredSetupTask = null;
+            BrowserTabStripPanel?.Children.Clear();
         }
 
         public void Navigate(string target)
@@ -339,7 +387,7 @@ namespace SelfContainedDeployment.Panes
                 }
 
                 RefreshBrowserTabStrip();
-                StateChanged?.Invoke(this, EventArgs.Empty);
+                RaiseStateChangedIfNeeded();
             }
         }
 
@@ -376,6 +424,7 @@ namespace SelfContainedDeployment.Panes
 
             RefreshBrowserTabStrip();
             UpdateNavigationButtons();
+            RaiseStateChangedIfNeeded();
         }
 
         public async Task EnsureInitializedAsync()
@@ -407,12 +456,56 @@ namespace SelfContainedDeployment.Panes
             }
         }
 
-        private async Task InitializeBrowserAsync()
+        internal void PreloadEnvironment()
+        {
+            if (_disposed || _initialized)
+            {
+                return;
+            }
+
+            _ = PreloadEnvironmentAsync();
+        }
+
+        private async Task PreloadEnvironmentAsync()
         {
             try
             {
-                CoreWebView2Environment environment = await GetEnvironmentAsync();
-                await BrowserView.EnsureCoreWebView2Async(environment);
+                await GetEnvironmentAsync().ConfigureAwait(true);
+            }
+            catch (Exception ex)
+            {
+                LogBrowserEvent("webview.preload_failed", $"Browser environment preload failed: {ex.Message}", new Dictionary<string, string>
+                {
+                    ["error"] = ex.Message,
+                });
+            }
+        }
+
+        private async Task InitializeBrowserAsync()
+        {
+            using var perfScope = NativeAutomationDiagnostics.TrackOperation("browser.webview.init");
+            NativeAutomationDiagnostics.IncrementCounter("browserWebViewInit.count");
+            try
+            {
+                CoreWebView2Environment environment;
+                using (NativeAutomationDiagnostics.TrackOperation("browser.environment.get"))
+                {
+                    environment = await GetEnvironmentAsync();
+                }
+                if (_disposed)
+                {
+                    return;
+                }
+
+                using (NativeAutomationDiagnostics.TrackOperation("browser.core.ensure"))
+                {
+                    await BrowserView.EnsureCoreWebView2Async(environment);
+                }
+                if (_disposed)
+                {
+                    return;
+                }
+
                 LogBrowserEvent("webview.ready", "Browser WebView2 initialized with shared browser profile");
             }
             catch (Exception ex)
@@ -423,17 +516,36 @@ namespace SelfContainedDeployment.Panes
                 });
 
                 await BrowserView.EnsureCoreWebView2Async();
+                if (_disposed)
+                {
+                    return;
+                }
+
                 _profileSeedStatus = "Fell back to default WebView2 profile";
                 LogBrowserEvent("webview.ready", "Browser WebView2 initialized with default profile");
             }
 
-            await ConfigureInitializedBrowserAsync(await WaitForCoreWebView2Async().ConfigureAwait(true));
+            CoreWebView2 core = await WaitForCoreWebView2Async().ConfigureAwait(true);
+            if (_disposed)
+            {
+                return;
+            }
+
+            using (NativeAutomationDiagnostics.TrackOperation("browser.configure"))
+            {
+                await ConfigureInitializedBrowserAsync(core).ConfigureAwait(true);
+            }
         }
 
         private async Task ConfigureInitializedBrowserAsync(CoreWebView2 core)
         {
             try
             {
+                if (_disposed)
+                {
+                    return;
+                }
+
                 if (core is null)
                 {
                     throw new InvalidOperationException("Browser CoreWebView2 was null after initialization.");
@@ -481,9 +593,12 @@ namespace SelfContainedDeployment.Panes
                     ["step"] = "theme.applied",
                 });
 
-                await ImportSeededExtensionsAsync(core).ConfigureAwait(true);
-                await RefreshInstalledExtensionsAsync(core).ConfigureAwait(true);
                 await EnsureCredentialCaptureScriptAsync(core).ConfigureAwait(true);
+                if (_disposed)
+                {
+                    return;
+                }
+
                 UpdateCredentialAutofillStatus();
                 EnsureBrowserTabExists(!string.IsNullOrWhiteSpace(InitialUri) ? NormalizeUri(InitialUri) : null);
                 BrowserTabSession selectedTab = GetSelectedBrowserTab();
@@ -551,6 +666,7 @@ namespace SelfContainedDeployment.Panes
 
                 RefreshBrowserTabStrip();
                 UpdateNavigationButtons();
+                StartDeferredSetup(core);
             }
             catch (Exception ex)
             {
@@ -613,9 +729,12 @@ namespace SelfContainedDeployment.Panes
         {
             BrowserTabSession tab = GetSelectedBrowserTab();
             bool titleChanged = false;
+            bool uriChanged = false;
             if (!string.IsNullOrWhiteSpace(uri))
             {
-                tab.Uri = uri.Trim();
+                string normalizedUri = uri.Trim();
+                uriChanged = !string.Equals(tab.Uri, normalizedUri, StringComparison.Ordinal);
+                tab.Uri = normalizedUri;
                 _currentUri = tab.Uri;
             }
 
@@ -633,6 +752,10 @@ namespace SelfContainedDeployment.Panes
             }
 
             UpdateBrowserTabSelectionVisuals();
+            if (titleChanged || uriChanged)
+            {
+                _lastStateChangeSignature = null;
+            }
         }
 
         private async Task SelectBrowserTabAsync(string tabId)
@@ -647,9 +770,10 @@ namespace SelfContainedDeployment.Panes
             _currentTitle = string.IsNullOrWhiteSpace(nextTab.Title) ? "Preview" : nextTab.Title;
             _currentUri = string.IsNullOrWhiteSpace(nextTab.Uri) ? "winmux://start" : nextTab.Uri;
             AddressBox.Text = string.Equals(_currentUri, "winmux://start", StringComparison.OrdinalIgnoreCase) ? string.Empty : _currentUri;
+            _lastStateChangeSignature = null;
             UpdateBrowserTabSelectionVisuals();
             UpdateNavigationButtons();
-            StateChanged?.Invoke(this, EventArgs.Empty);
+            RaiseStateChangedIfNeeded();
 
             if (!_initialized || BrowserView.CoreWebView2 is null)
             {
@@ -722,14 +846,27 @@ namespace SelfContainedDeployment.Panes
                 return;
             }
 
-            BrowserTabStripPanel.Children.Clear();
-            _browserTabButtonsById.Clear();
-            _browserTabTitlesById.Clear();
             double targetTitleWidth = ResolveBrowserTabTitleWidth();
             bool compact = IsCompactPaneLayout();
             bool showInlineCloseButtons = !compact || _browserTabs.Count <= 2;
+            string structureSignature = BuildBrowserTabStripStructureSignature(targetTitleWidth, compact, showInlineCloseButtons);
+            if (string.Equals(structureSignature, _lastBrowserTabStripStructureSignature, StringComparison.Ordinal) &&
+                _browserTabButtonsById.Count == _browserTabs.Count &&
+                _browserTabDotsById.Count == _browserTabs.Count &&
+                _browserTabTitlesById.Count == _browserTabs.Count)
+            {
+                UpdateBrowserTabStripTitles();
+                UpdateBrowserTabSelectionVisuals();
+                return;
+            }
+
+            BrowserTabStripPanel.Children.Clear();
+            _browserTabButtonsById.Clear();
+            _browserTabDotsById.Clear();
+            _browserTabTitlesById.Clear();
             foreach (BrowserTabSession tab in _browserTabs)
             {
+                bool isActive = string.Equals(tab.Id, _selectedBrowserTabId, StringComparison.Ordinal);
                 Grid tabLayout = new()
                 {
                     ColumnSpacing = showInlineCloseButtons ? 4 : 0,
@@ -746,10 +883,10 @@ namespace SelfContainedDeployment.Panes
                     Style = (Style)Application.Current.Resources["ShellBrowserTabButtonStyle"],
                     Tag = tab.Id,
                     Width = targetTitleWidth,
-                    MinWidth = compact ? 72 : 96,
-                    MaxWidth = compact ? 152 : 192,
+                    MinWidth = compact ? 68 : 90,
+                    MaxWidth = compact ? 164 : 208,
                     HorizontalAlignment = HorizontalAlignment.Stretch,
-                    Padding = compact ? new Thickness(6, 1, 6, 1) : new Thickness(8, 2, 8, 2),
+                    Padding = compact ? new Thickness(6, 1, 6, 1) : new Thickness(8, 1, 8, 1),
                 };
                 AutomationProperties.SetAutomationId(tabButton, $"browser-pane-tab-{tab.Id}");
                 AutomationProperties.SetName(tabButton, string.IsNullOrWhiteSpace(tab.Title) ? "Browser tab" : tab.Title);
@@ -758,15 +895,38 @@ namespace SelfContainedDeployment.Panes
                 TextBlock tabTitle = new()
                 {
                     Text = string.IsNullOrWhiteSpace(tab.Title) ? "New tab" : tab.Title,
+                    FontSize = compact ? 10.4 : 10.8,
+                    Opacity = isActive ? 1.0 : 0.82,
+                    VerticalAlignment = VerticalAlignment.Center,
                     TextTrimming = TextTrimming.CharacterEllipsis,
-                    FontWeight = string.Equals(tab.Id, _selectedBrowserTabId, StringComparison.Ordinal)
+                    FontWeight = isActive
                         ? Microsoft.UI.Text.FontWeights.SemiBold
                         : Microsoft.UI.Text.FontWeights.Normal,
                 };
                 AutomationProperties.SetAutomationId(tabTitle, $"browser-pane-tab-title-{tab.Id}");
-                tabButton.Content = tabTitle;
-                ApplyBrowserTabButtonState(tabButton, string.Equals(tab.Id, _selectedBrowserTabId, StringComparison.Ordinal));
+
+                Border dot = new()
+                {
+                    Width = 6,
+                    Height = 6,
+                    CornerRadius = new CornerRadius(3),
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Background = ResolveBrowserTabDotBrush(tab, isActive),
+                };
+
+                StackPanel tabContent = new()
+                {
+                    Orientation = Orientation.Horizontal,
+                    Spacing = 6,
+                    VerticalAlignment = VerticalAlignment.Center,
+                };
+                tabContent.Children.Add(dot);
+                tabContent.Children.Add(tabTitle);
+
+                tabButton.Content = tabContent;
+                ApplyBrowserTabButtonState(tabButton, isActive);
                 _browserTabButtonsById[tab.Id] = tabButton;
+                _browserTabDotsById[tab.Id] = dot;
                 _browserTabTitlesById[tab.Id] = tabTitle;
                 tabLayout.Children.Add(tabButton);
 
@@ -774,14 +934,15 @@ namespace SelfContainedDeployment.Panes
                 {
                     Button closeButton = new()
                     {
-                        Style = (Style)Application.Current.Resources["ShellChromeButtonStyle"],
+                        Style = (Style)Application.Current.Resources["ShellGhostToolbarButtonStyle"],
                         Tag = tab.Id,
                         Width = compact ? 20 : 22,
                         Height = compact ? 20 : 22,
                         HorizontalAlignment = HorizontalAlignment.Right,
+                        Opacity = 0.74,
                         Content = new FontIcon
                         {
-                            FontSize = 9,
+                            FontSize = compact ? 8.5 : 9,
                             Glyph = "\uE711",
                         },
                     };
@@ -793,11 +954,12 @@ namespace SelfContainedDeployment.Panes
 
                 BrowserTabStripPanel.Children.Add(tabLayout);
             }
-        }
 
+            _lastBrowserTabStripStructureSignature = structureSignature;
+        }
         private void UpdateBrowserTabStripTitles()
         {
-            if (_browserTabTitlesById.Count != _browserTabs.Count)
+            if (_browserTabTitlesById.Count != _browserTabs.Count || _browserTabDotsById.Count != _browserTabs.Count)
             {
                 RefreshBrowserTabStrip();
                 return;
@@ -807,14 +969,30 @@ namespace SelfContainedDeployment.Panes
             {
                 if (_browserTabTitlesById.TryGetValue(tab.Id, out TextBlock title))
                 {
-                    title.Text = string.IsNullOrWhiteSpace(tab.Title) ? "New tab" : tab.Title;
+                    string nextTitle = string.IsNullOrWhiteSpace(tab.Title) ? "New tab" : tab.Title;
+                    if (!string.Equals(title.Text, nextTitle, StringComparison.Ordinal))
+                    {
+                        title.Text = nextTitle;
+                    }
+                }
+
+                if (_browserTabButtonsById.TryGetValue(tab.Id, out Button button))
+                {
+                    AutomationProperties.SetName(button, string.IsNullOrWhiteSpace(tab.Title) ? "Browser tab" : tab.Title);
+                }
+
+                if (_browserTabDotsById.TryGetValue(tab.Id, out Border dot))
+                {
+                    dot.Background = ResolveBrowserTabDotBrush(tab, string.Equals(tab.Id, _selectedBrowserTabId, StringComparison.Ordinal));
                 }
             }
         }
 
         private void UpdateBrowserTabSelectionVisuals()
         {
-            if (_browserTabButtonsById.Count != _browserTabs.Count || _browserTabTitlesById.Count != _browserTabs.Count)
+            if (_browserTabButtonsById.Count != _browserTabs.Count ||
+                _browserTabDotsById.Count != _browserTabs.Count ||
+                _browserTabTitlesById.Count != _browserTabs.Count)
             {
                 RefreshBrowserTabStrip();
                 return;
@@ -833,6 +1011,12 @@ namespace SelfContainedDeployment.Panes
                     title.FontWeight = isActive
                         ? Microsoft.UI.Text.FontWeights.SemiBold
                         : Microsoft.UI.Text.FontWeights.Normal;
+                    title.Opacity = isActive ? 1.0 : 0.82;
+                }
+
+                if (_browserTabDotsById.TryGetValue(tab.Id, out Border dot))
+                {
+                    dot.Background = ResolveBrowserTabDotBrush(tab, isActive);
                 }
             }
         }
@@ -871,12 +1055,12 @@ namespace SelfContainedDeployment.Panes
             double targetTitleWidth = ResolveBrowserTabTitleWidth();
             bool refreshTabStrip = compact != _lastCompactLayout ||
                 Math.Abs(targetTitleWidth - _lastBrowserTabTitleWidth) >= 2;
-            BrowserChromeBorder.Padding = compact ? new Thickness(6, 4, 6, 4) : new Thickness(8, 6, 8, 5);
-            BrowserChromeGrid.RowSpacing = compact ? 4 : 6;
-            BrowserTabStripPanel.Spacing = compact ? 2 : 4;
+            BrowserChromeBorder.Padding = compact ? new Thickness(6, 4, 6, 4) : new Thickness(6, 5, 6, 4);
+            BrowserChromeGrid.RowSpacing = compact ? 4 : 5;
+            BrowserTabStripPanel.Spacing = compact ? 3 : 4;
             BrowserTabStripScroller.VerticalAlignment = VerticalAlignment.Center;
 
-            double chromeButtonSize = compact ? 28 : 30;
+            double chromeButtonSize = compact ? 28 : 28;
             AddressBox.Height = chromeButtonSize;
             AddressBox.MinWidth = compact ? 120 : 180;
 
@@ -908,6 +1092,15 @@ namespace SelfContainedDeployment.Panes
 
             button.Width = size;
             button.Height = size;
+            switch (button.Content)
+            {
+                case FontIcon icon:
+                    icon.FontSize = size <= 22 ? 9.5 : 10.5;
+                    break;
+                case TextBlock text:
+                    text.FontSize = size <= 22 ? 10.5 : 12;
+                    break;
+            }
         }
 
         private void UpdateAdaptiveZoomFactor()
@@ -939,6 +1132,54 @@ namespace SelfContainedDeployment.Panes
                 $"(() => {{ document.documentElement.style.zoom = '{zoomText}'; if (document.body) document.body.style.zoom = '{zoomText}'; }})()").AsTask();
         }
 
+        private Brush ResolveBrowserTabDotBrush(BrowserTabSession tab, bool active)
+        {
+            string brushKey = ResolveBrowserTabDotBrushKey(tab?.Uri);
+            Brush accent = ResolveShellBrush(brushKey);
+            if (active)
+            {
+                return accent;
+            }
+
+            Windows.UI.Color fallbackBaseColor = brushKey switch
+            {
+                "ShellSuccessBrush" => Windows.UI.Color.FromArgb(0xFF, 0x16, 0xA3, 0x4A),
+                "ShellWarningBrush" => Windows.UI.Color.FromArgb(0xFF, 0xCA, 0x8A, 0x04),
+                "ShellInfoBrush" => Windows.UI.Color.FromArgb(0xFF, 0x25, 0x63, 0xEB),
+                _ => Windows.UI.Color.FromArgb(0xFF, 0x7E, 0x86, 0x91),
+            };
+            return CreateTintedBrush(accent, 0xB8, fallbackBaseColor);
+        }
+
+        private static string ResolveBrowserTabDotBrushKey(string uri)
+        {
+            if (string.IsNullOrWhiteSpace(uri))
+            {
+                return "ShellTextTertiaryBrush";
+            }
+
+            if (string.Equals(uri, "winmux://start", StringComparison.OrdinalIgnoreCase))
+            {
+                return "ShellWarningBrush";
+            }
+
+            if (Uri.TryCreate(uri, UriKind.Absolute, out Uri absoluteUri))
+            {
+                if (absoluteUri.IsLoopback)
+                {
+                    return "ShellSuccessBrush";
+                }
+
+                if (string.Equals(absoluteUri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(absoluteUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+                {
+                    return "ShellInfoBrush";
+                }
+            }
+
+            return "ShellTextTertiaryBrush";
+        }
+
         private Brush ResolveShellBrush(string key)
         {
             ElementTheme effectiveTheme = _themePreference == ElementTheme.Default
@@ -947,18 +1188,30 @@ namespace SelfContainedDeployment.Panes
 
             Windows.UI.Color color = (effectiveTheme, key) switch
             {
-                (ElementTheme.Light, "ShellMutedSurfaceBrush") => Windows.UI.Color.FromArgb(0xFF, 0xF4, 0xF4, 0xF5),
-                (ElementTheme.Light, "ShellNavActiveBrush") => Windows.UI.Color.FromArgb(0xFF, 0xE7, 0xE7, 0xEB),
-                (ElementTheme.Light, "ShellBorderBrush") => Windows.UI.Color.FromArgb(0xFF, 0xE4, 0xE4, 0xE7),
-                (ElementTheme.Light, "ShellPaneActiveBorderBrush") => Windows.UI.Color.FromArgb(0xFF, 0x25, 0x63, 0xEB),
-                (ElementTheme.Light, "ShellTextPrimaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0x18, 0x18, 0x1B),
-                (ElementTheme.Light, "ShellTextSecondaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0x52, 0x52, 0x5B),
-                (ElementTheme.Dark, "ShellMutedSurfaceBrush") => Windows.UI.Color.FromArgb(0xFF, 0x17, 0x18, 0x1C),
-                (ElementTheme.Dark, "ShellNavActiveBrush") => Windows.UI.Color.FromArgb(0xFF, 0x1F, 0x22, 0x28),
-                (ElementTheme.Dark, "ShellBorderBrush") => Windows.UI.Color.FromArgb(0xFF, 0x23, 0x25, 0x2B),
-                (ElementTheme.Dark, "ShellPaneActiveBorderBrush") => Windows.UI.Color.FromArgb(0xFF, 0x60, 0xA5, 0xFA),
-                (ElementTheme.Dark, "ShellTextPrimaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0xFA, 0xFA, 0xFA),
-                (ElementTheme.Dark, "ShellTextSecondaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0xA1, 0xA1, 0xAA),
+                (ElementTheme.Light, "ShellPageBackgroundBrush") => Windows.UI.Color.FromArgb(0xFF, 0xF5, 0xF6, 0xF8),
+                (ElementTheme.Light, "ShellSurfaceBackgroundBrush") => Windows.UI.Color.FromArgb(0xFF, 0xFB, 0xFC, 0xFD),
+                (ElementTheme.Light, "ShellMutedSurfaceBrush") => Windows.UI.Color.FromArgb(0xFF, 0xEE, 0xF1, 0xF4),
+                (ElementTheme.Light, "ShellNavActiveBrush") => Windows.UI.Color.FromArgb(0xFF, 0xE7, 0xEB, 0xF0),
+                (ElementTheme.Light, "ShellBorderBrush") => Windows.UI.Color.FromArgb(0xFF, 0xE1, 0xE5, 0xEA),
+                (ElementTheme.Light, "ShellPaneActiveBorderBrush") => Windows.UI.Color.FromArgb(0xFF, 0x2C, 0x2D, 0x31),
+                (ElementTheme.Light, "ShellTextPrimaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0x1B, 0x1F, 0x24),
+                (ElementTheme.Light, "ShellTextSecondaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0x59, 0x60, 0x6A),
+                (ElementTheme.Light, "ShellTextTertiaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0x7E, 0x86, 0x91),
+                (ElementTheme.Light, "ShellSuccessBrush") => Windows.UI.Color.FromArgb(0xFF, 0x16, 0xA3, 0x4A),
+                (ElementTheme.Light, "ShellWarningBrush") => Windows.UI.Color.FromArgb(0xFF, 0xCA, 0x8A, 0x04),
+                (ElementTheme.Light, "ShellInfoBrush") => Windows.UI.Color.FromArgb(0xFF, 0x25, 0x63, 0xEB),
+                (ElementTheme.Dark, "ShellPageBackgroundBrush") => Windows.UI.Color.FromArgb(0xFF, 0x0C, 0x0D, 0x10),
+                (ElementTheme.Dark, "ShellSurfaceBackgroundBrush") => Windows.UI.Color.FromArgb(0xFF, 0x10, 0x12, 0x16),
+                (ElementTheme.Dark, "ShellMutedSurfaceBrush") => Windows.UI.Color.FromArgb(0xFF, 0x14, 0x16, 0x1B),
+                (ElementTheme.Dark, "ShellNavActiveBrush") => Windows.UI.Color.FromArgb(0xFF, 0x17, 0x1A, 0x20),
+                (ElementTheme.Dark, "ShellBorderBrush") => Windows.UI.Color.FromArgb(0xFF, 0x1E, 0x21, 0x27),
+                (ElementTheme.Dark, "ShellPaneActiveBorderBrush") => Windows.UI.Color.FromArgb(0xFF, 0xC9, 0xCD, 0xD4),
+                (ElementTheme.Dark, "ShellTextPrimaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0xF3, 0xF4, 0xF6),
+                (ElementTheme.Dark, "ShellTextSecondaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0xA7, 0xAD, 0xB7),
+                (ElementTheme.Dark, "ShellTextTertiaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0x7A, 0x80, 0x8B),
+                (ElementTheme.Dark, "ShellSuccessBrush") => Windows.UI.Color.FromArgb(0xFF, 0x4A, 0xDE, 0x80),
+                (ElementTheme.Dark, "ShellWarningBrush") => Windows.UI.Color.FromArgb(0xFF, 0xFB, 0xBF, 0x24),
+                (ElementTheme.Dark, "ShellInfoBrush") => Windows.UI.Color.FromArgb(0xFF, 0x60, 0xA5, 0xFA),
                 _ => default,
             };
 
@@ -970,6 +1223,30 @@ namespace SelfContainedDeployment.Panes
             return (Brush)Application.Current.Resources[key];
         }
 
+        private string ResolveCssColor(string key, Windows.UI.Color fallbackColor)
+        {
+            Windows.UI.Color color = ResolveShellBrush(key) is SolidColorBrush solid
+                ? solid.Color
+                : fallbackColor;
+            return $"#{color.R:X2}{color.G:X2}{color.B:X2}";
+        }
+
+        private string ResolveCssColor(string key, byte alpha, Windows.UI.Color fallbackColor)
+        {
+            Windows.UI.Color color = ResolveShellBrush(key) is SolidColorBrush solid
+                ? solid.Color
+                : fallbackColor;
+            return $"rgba({color.R}, {color.G}, {color.B}, {(alpha / 255d).ToString("0.###", CultureInfo.InvariantCulture)})";
+        }
+
+        private static Brush CreateTintedBrush(Brush source, byte alpha, Windows.UI.Color fallbackBaseColor)
+        {
+            Windows.UI.Color baseColor = source is SolidColorBrush solid
+                ? solid.Color
+                : fallbackBaseColor;
+            return new SolidColorBrush(Windows.UI.Color.FromArgb(alpha, baseColor.R, baseColor.G, baseColor.B));
+        }
+
         private void ApplyBrowserTabButtonState(Button button, bool active)
         {
             if (button is null)
@@ -977,10 +1254,19 @@ namespace SelfContainedDeployment.Panes
                 return;
             }
 
-            button.Background = null;
-            button.BorderBrush = null;
-            button.Foreground = ResolveShellBrush(active ? "ShellTextPrimaryBrush" : "ShellTextSecondaryBrush");
-            button.BorderThickness = new Thickness(0);
+            if (active)
+            {
+                button.Background = CreateTintedBrush(ResolveShellBrush("ShellPaneActiveBorderBrush"), 0x08, Windows.UI.Color.FromArgb(0xFF, 0x2C, 0x2D, 0x31));
+                button.BorderBrush = CreateTintedBrush(ResolveShellBrush("ShellPaneActiveBorderBrush"), 0x2C, Windows.UI.Color.FromArgb(0xFF, 0x2C, 0x2D, 0x31));
+                button.Foreground = ResolveShellBrush("ShellTextPrimaryBrush");
+                button.BorderThickness = new Thickness(1);
+                return;
+            }
+
+            button.Background = CreateTintedBrush(ResolveShellBrush("ShellBorderBrush"), 0x03, Windows.UI.Color.FromArgb(0xFF, 0x7E, 0x86, 0x91));
+            button.BorderBrush = CreateTintedBrush(ResolveShellBrush("ShellBorderBrush"), 0x12, Windows.UI.Color.FromArgb(0xFF, 0x7E, 0x86, 0x91));
+            button.Foreground = ResolveShellBrush("ShellTextSecondaryBrush");
+            button.BorderThickness = new Thickness(1);
         }
 
         private void UpdateNavigationButtons()
@@ -999,6 +1285,17 @@ namespace SelfContainedDeployment.Panes
 
         private async void OnLoaded(object sender, RoutedEventArgs e)
         {
+            if (_disposed || _initialized)
+            {
+                return;
+            }
+
+            await Task.Yield();
+            if (_disposed)
+            {
+                return;
+            }
+
             await EnsureInitializedAsync();
         }
 
@@ -1013,7 +1310,7 @@ namespace SelfContainedDeployment.Panes
                 _ = NavigateToStartPageAsync();
             }
 
-            RefreshBrowserTabStrip();
+            UpdateBrowserTabSelectionVisuals();
         }
 
         private void QueueLayoutRefresh()
@@ -1047,7 +1344,7 @@ namespace SelfContainedDeployment.Panes
             }
 
             UpdateNavigationButtons();
-            StateChanged?.Invoke(this, EventArgs.Empty);
+            RaiseStateChangedIfNeeded();
             await Task.CompletedTask;
         }
 
@@ -1308,6 +1605,16 @@ namespace SelfContainedDeployment.Panes
                 return;
             }
 
+            double width = Math.Round(e.NewSize.Width);
+            double height = Math.Round(e.NewSize.Height);
+            if (Math.Abs(_lastQueuedLayoutWidth - width) < 1 &&
+                Math.Abs(_lastQueuedLayoutHeight - height) < 1)
+            {
+                return;
+            }
+
+            _lastQueuedLayoutWidth = width;
+            _lastQueuedLayoutHeight = height;
             QueueLayoutRefresh();
         }
 
@@ -1369,7 +1676,7 @@ namespace SelfContainedDeployment.Panes
                     ["error"] = args.WebErrorStatus.ToString(),
                     ["uri"] = _currentUri ?? string.Empty,
                 });
-                StateChanged?.Invoke(this, EventArgs.Empty);
+                RaiseStateChangedIfNeeded();
                 return;
             }
 
@@ -1387,7 +1694,7 @@ namespace SelfContainedDeployment.Panes
                 ["uri"] = _currentUri ?? string.Empty,
                 ["success"] = args.IsSuccess.ToString(),
             });
-            StateChanged?.Invoke(this, EventArgs.Empty);
+            RaiseStateChangedIfNeeded();
         }
 
         private void OnDocumentTitleChanged(CoreWebView2 sender, object args)
@@ -1400,10 +1707,16 @@ namespace SelfContainedDeployment.Panes
                     : ProjectName ?? "Preview";
             }
 
-            _currentTitle = title.Trim();
+            string normalizedTitle = title.Trim();
+            bool titleChanged = !string.Equals(_currentTitle, normalizedTitle, StringComparison.Ordinal);
+            _currentTitle = normalizedTitle;
             SyncSelectedBrowserTab(title: _currentTitle);
-            TitleChanged?.Invoke(this, _currentTitle);
-            StateChanged?.Invoke(this, EventArgs.Empty);
+            if (titleChanged)
+            {
+                TitleChanged?.Invoke(this, _currentTitle);
+            }
+
+            RaiseStateChangedIfNeeded();
         }
 
         private void OnSourceChanged(CoreWebView2 sender, CoreWebView2SourceChangedEventArgs args)
@@ -1423,6 +1736,60 @@ namespace SelfContainedDeployment.Panes
             SyncSelectedBrowserTab(uri: _currentUri);
             UpdateNavigationButtons();
             LogBrowserEvent("source.changed", $"Browser source changed to {_currentUri}");
+            RaiseStateChangedIfNeeded();
+        }
+
+        private string BuildBrowserTabStripStructureSignature(double targetTitleWidth, bool compact, bool showInlineCloseButtons)
+        {
+            StringBuilder builder = new();
+            builder.Append(compact ? '1' : '0')
+                .Append('|')
+                .Append(showInlineCloseButtons ? '1' : '0')
+                .Append('|')
+                .Append(Math.Round(targetTitleWidth).ToString(CultureInfo.InvariantCulture))
+                .Append('|');
+
+            foreach (BrowserTabSession tab in _browserTabs)
+            {
+                builder.Append(tab.Id)
+                    .Append('|');
+            }
+
+            return builder.ToString();
+        }
+
+        private string BuildStateChangeSignature()
+        {
+            StringBuilder builder = new();
+            builder.Append(_selectedBrowserTabId ?? string.Empty)
+                .Append('|')
+                .Append(_currentUri ?? string.Empty)
+                .Append('|')
+                .Append(_currentTitle ?? string.Empty)
+                .Append('|');
+
+            foreach (BrowserTabSession tab in _browserTabs)
+            {
+                builder.Append(tab.Id)
+                    .Append(':')
+                    .Append(tab.Title ?? string.Empty)
+                    .Append(':')
+                    .Append(tab.Uri ?? string.Empty)
+                    .Append('|');
+            }
+
+            return builder.ToString();
+        }
+
+        private void RaiseStateChangedIfNeeded()
+        {
+            string signature = BuildStateChangeSignature();
+            if (string.Equals(signature, _lastStateChangeSignature, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _lastStateChangeSignature = signature;
             StateChanged?.Invoke(this, EventArgs.Empty);
         }
 
@@ -1784,6 +2151,56 @@ namespace SelfContainedDeployment.Panes
 
             await core.AddScriptToExecuteOnDocumentCreatedAsync(script).AsTask().ConfigureAwait(true);
             _credentialCaptureScriptInjected = true;
+        }
+
+        private void StartDeferredSetup(CoreWebView2 core)
+        {
+            if (_disposed || core is null)
+            {
+                return;
+            }
+
+            Task existingTask = _deferredSetupTask;
+            if (existingTask is not null)
+            {
+                return;
+            }
+
+            _deferredSetupTask = RunDeferredSetupAsync(core);
+        }
+
+        private async Task RunDeferredSetupAsync(CoreWebView2 core)
+        {
+            try
+            {
+                await Task.Delay(150).ConfigureAwait(true);
+                if (_disposed || !_initialized)
+                {
+                    return;
+                }
+
+                await ImportSeededExtensionsAsync(core).ConfigureAwait(true);
+                if (_disposed)
+                {
+                    return;
+                }
+
+                await RefreshInstalledExtensionsAsync(core).ConfigureAwait(true);
+                if (_disposed)
+                {
+                    return;
+                }
+
+                UpdateCredentialAutofillStatus();
+                RaiseStateChangedIfNeeded();
+            }
+            catch (Exception ex)
+            {
+                LogBrowserEvent("webview.deferred_setup_failed", $"Deferred browser setup failed: {ex.Message}", new Dictionary<string, string>
+                {
+                    ["error"] = ex.Message,
+                });
+            }
         }
 
         private async Task NotifyBrowserResizedAsync()
@@ -2457,14 +2874,26 @@ namespace SelfContainedDeployment.Panes
         private string BuildStartPageHtml()
         {
             bool darkTheme = (_themePreference == ElementTheme.Default ? ActualTheme : _themePreference) != ElementTheme.Light;
-            string background = darkTheme ? "#111214" : "#ffffff";
-            string surface = darkTheme ? "#17181c" : "#f4f4f5";
-            string border = darkTheme ? "#23252b" : "#e4e4e7";
-            string text = darkTheme ? "#fafafa" : "#18181b";
-            string subtext = darkTheme ? "#a1a1aa" : "#52525b";
-            string accent = darkTheme ? "#4ea8de" : "#2563eb";
-            string projectName = WebUtility.HtmlEncode(ProjectName ?? "Project preview");
-            string projectPath = WebUtility.HtmlEncode(ProjectPath ?? string.Empty);
+            string projectName = WebUtility.HtmlEncode(string.IsNullOrWhiteSpace(ProjectName) ? "Project preview" : ProjectName);
+            string projectPath = WebUtility.HtmlEncode(string.IsNullOrWhiteSpace(ProjectPath) ? "No active path yet." : ProjectPath);
+            string rootLabel = WebUtility.HtmlEncode(string.IsNullOrWhiteSpace(ProjectRootPath)
+                ? (string.IsNullOrWhiteSpace(ProjectPath) ? "No project root yet." : ProjectPath)
+                : ProjectRootPath);
+            string profileStatus = WebUtility.HtmlEncode(string.IsNullOrWhiteSpace(_profileSeedStatus) ? "Shared WinMux browser profile" : _profileSeedStatus);
+            string extensionStatus = WebUtility.HtmlEncode(string.IsNullOrWhiteSpace(_extensionImportStatus) ? "No browser extensions imported yet." : _extensionImportStatus);
+            string credentialStatus = WebUtility.HtmlEncode(string.IsNullOrWhiteSpace(_credentialAutofillStatus) ? "No imported WinMux credentials." : _credentialAutofillStatus);
+            string background = ResolveCssColor("ShellPageBackgroundBrush", Windows.UI.Color.FromArgb(0xFF, 0xF5, 0xF6, 0xF8));
+            string surface = ResolveCssColor("ShellSurfaceBackgroundBrush", Windows.UI.Color.FromArgb(0xFF, 0xFB, 0xFC, 0xFD));
+            string mutedSurface = ResolveCssColor("ShellMutedSurfaceBrush", Windows.UI.Color.FromArgb(0xFF, 0xEE, 0xF1, 0xF4));
+            string border = ResolveCssColor("ShellBorderBrush", Windows.UI.Color.FromArgb(0xFF, 0xE1, 0xE5, 0xEA));
+            string borderSoft = ResolveCssColor("ShellBorderBrush", 0x88, Windows.UI.Color.FromArgb(0xFF, 0xE1, 0xE5, 0xEA));
+            string text = ResolveCssColor("ShellTextPrimaryBrush", Windows.UI.Color.FromArgb(0xFF, 0x1B, 0x1F, 0x24));
+            string subtext = ResolveCssColor("ShellTextSecondaryBrush", Windows.UI.Color.FromArgb(0xFF, 0x59, 0x60, 0x6A));
+            string faint = ResolveCssColor("ShellTextTertiaryBrush", Windows.UI.Color.FromArgb(0xFF, 0x7E, 0x86, 0x91));
+            string accent = ResolveCssColor("ShellPaneActiveBorderBrush", Windows.UI.Color.FromArgb(0xFF, 0x2C, 0x2D, 0x31));
+            string success = ResolveCssColor("ShellSuccessBrush", Windows.UI.Color.FromArgb(0xFF, 0x16, 0xA3, 0x4A));
+            string warning = ResolveCssColor("ShellWarningBrush", Windows.UI.Color.FromArgb(0xFF, 0xCA, 0x8A, 0x04));
+            string info = ResolveCssColor("ShellInfoBrush", Windows.UI.Color.FromArgb(0xFF, 0x25, 0x63, 0xEB));
 
             string[] previewUrls =
             {
@@ -2477,7 +2906,23 @@ namespace SelfContainedDeployment.Panes
             StringBuilder links = new();
             foreach (string previewUrl in previewUrls)
             {
-                links.Append($"<a class=\"chip\" href=\"{previewUrl}\">{previewUrl}</a>");
+                string label = previewUrl.Contains("3000", StringComparison.Ordinal) ? "Common app dev server"
+                    : previewUrl.Contains("5173", StringComparison.Ordinal) ? "Vite preview"
+                    : previewUrl.Contains("8000", StringComparison.Ordinal) ? "API or docs server"
+                    : "Alternate local preview";
+                string note = previewUrl.Contains("5173", StringComparison.Ordinal) ? "hot reload"
+                    : previewUrl.Contains("8000", StringComparison.Ordinal) ? "docs"
+                    : previewUrl.Contains("8080", StringComparison.Ordinal) ? "alt"
+                    : "open";
+                links.Append($"""
+<a class="launch" href="{previewUrl}">
+  <span class="launch-copy">
+    <span class="launch-kicker">{label}</span>
+    <span class="launch-url">{previewUrl}</span>
+  </span>
+  <span class="launch-note">{note}</span>
+</a>
+""");
             }
 
             return $$"""
@@ -2487,74 +2932,290 @@ namespace SelfContainedDeployment.Panes
   <meta charset="utf-8" />
   <title>{{projectName}}</title>
   <style>
+    :root {
+      color-scheme: {{(darkTheme ? "dark" : "light")}};
+    }
     body {
       margin: 0;
       background: {{background}};
       color: {{text}};
-      font-family: "Segoe UI", sans-serif;
+      font-family: "Segoe UI Variable Text", "Segoe UI", sans-serif;
     }
     .wrap {
-      padding: 28px;
+      padding: 24px 26px 30px;
       display: grid;
       gap: 18px;
+      max-width: 940px;
     }
     .hero {
-      padding: 18px 20px;
+      display: grid;
+      gap: 10px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid {{border}};
+    }
+    .hero-top {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .mark {
+      width: 24px;
+      height: 24px;
+      display: grid;
+      place-items: center;
       border: 1px solid {{border}};
+      border-radius: 4px;
       background: {{surface}};
-      border-radius: 10px;
+      font-size: 8.5px;
+      font-weight: 700;
+      letter-spacing: 0.09em;
+      color: {{text}};
+    }
+    .hero-copy,
+    .hero-summary {
+      display: grid;
+      gap: 4px;
+      min-width: 0;
+    }
+    .eyebrow {
+      font-size: 10.5px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: {{faint}};
     }
     h1 {
-      margin: 0 0 8px;
-      font-size: 24px;
-      font-weight: 700;
+      margin: 0;
+      font-size: 22px;
+      line-height: 1.08;
+      font-weight: 650;
     }
     p {
       margin: 0;
       color: {{subtext}};
-      line-height: 1.5;
+      line-height: 1.45;
+      max-width: 720px;
     }
-    .chips {
-      display: flex;
-      flex-wrap: wrap;
+    .grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(280px, 0.9fr);
+      gap: 24px;
+    }
+    .aside {
+      display: grid;
+      gap: 18px;
+      align-content: start;
+    }
+    .section {
+      display: grid;
       gap: 10px;
+      min-width: 0;
     }
-    .chip {
-      display: inline-flex;
+    .section-header {
+      display: grid;
+      gap: 3px;
+    }
+    .section-label {
+      font-size: 10.5px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: {{faint}};
+    }
+    .section-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: {{text}};
+    }
+    .section-copy {
+      font-size: 12px;
+      color: {{subtext}};
+      line-height: 1.45;
+    }
+    .launches,
+    .facts {
+      display: grid;
+      gap: 4px;
+    }
+    .launch {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
       align-items: center;
-      justify-content: center;
-      min-height: 34px;
-      padding: 0 12px;
+      gap: 10px;
+      padding: 10px;
       border: 1px solid {{border}};
-      border-radius: 999px;
+      border-radius: 4px;
       background: {{surface}};
       color: {{text}};
       text-decoration: none;
-      font-size: 13px;
+      transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
     }
-    .chip:hover {
+    .launch:hover {
       border-color: {{accent}};
-      color: {{accent}};
+      background: {{mutedSurface}};
+    }
+    .launch-copy {
+      display: grid;
+      gap: 2px;
+      min-width: 0;
+    }
+    .launch-kicker {
+      font-size: 10.5px;
+      color: {{subtext}};
+    }
+    .launch-url {
+      font-size: 12.5px;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .launch-note {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: {{faint}};
+    }
+    .facts {
+      border-top: 1px solid {{borderSoft}};
+    }
+    .fact {
+      display: grid;
+      gap: 3px;
+      padding: 9px 0;
+      border-bottom: 1px solid {{borderSoft}};
+    }
+    .fact-title {
+      font-size: 10.5px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: {{faint}};
+    }
+    .fact-value {
+      font-size: 12px;
+      color: {{text}};
+      line-height: 1.45;
+      word-break: break-word;
+    }
+    .fact-value.path {
+      font-family: Consolas, monospace;
+      font-size: 11.5px;
+    }
+    .status-strip {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 14px;
+      align-items: center;
+      color: {{subtext}};
+      font-size: 11px;
+    }
+    .status-item {
+      display: inline-flex;
+      gap: 6px;
+      align-items: center;
+    }
+    .status-dot {
+      width: 5px;
+      height: 5px;
+      border-radius: 2.5px;
+      background: {{success}};
+    }
+    .status-dot.warning {
+      background: {{warning}};
+    }
+    .status-dot.info {
+      background: {{info}};
     }
     code {
       font-family: Consolas, monospace;
       color: {{text}};
+    }
+    @media (max-width: 760px) {
+      .wrap {
+        padding: 18px 16px 22px;
+      }
+      .grid {
+        grid-template-columns: 1fr;
+      }
     }
   </style>
 </head>
 <body>
   <div class="wrap">
     <div class="hero">
-      <h1>{{projectName}}</h1>
-      <p>Shared-browser preview pane. Type any URL above, or open a common local dev server below.</p>
+      <div class="hero-top">
+        <div class="mark">WM</div>
+        <div class="hero-copy">
+          <div class="eyebrow">Browser workspace</div>
+          <h1>{{projectName}}</h1>
+        </div>
+      </div>
+      <div class="hero-summary">
+        <p>Open previews, docs, and live project context without leaving the current thread. This pane stays aligned with the same shell palette and shared browser profile as the rest of WinMux.</p>
+      </div>
     </div>
-    <div>
-      <p>Project path</p>
-      <p><code>{{projectPath}}</code></p>
+
+    <div class="status-strip">
+      <span class="status-item"><span class="status-dot"></span>Shared WinMux browser profile</span>
+      <span class="status-item"><span class="status-dot info"></span>Local preview shortcuts for this workspace</span>
+      <span class="status-item"><span class="status-dot warning"></span>Use the address field above for any URL</span>
     </div>
-    <div>
-      <p>Suggested previews</p>
-      <div class="chips">{{links}}</div>
+
+    <div class="grid">
+      <section class="section">
+        <div class="section-header">
+          <div class="section-label">Quick launch</div>
+          <div class="section-title">Common local previews</div>
+          <div class="section-copy">Keep the high-frequency local routes one click away. These links are intentionally sparse so the pane stays useful instead of noisy.</div>
+        </div>
+        <div class="launches">{{links}}</div>
+      </section>
+
+      <div class="aside">
+        <section class="section">
+          <div class="section-header">
+            <div class="section-label">Workspace</div>
+            <div class="section-title">Current project context</div>
+          </div>
+          <div class="facts">
+            <div class="fact">
+              <div class="fact-title">Project root</div>
+              <div class="fact-value path"><code>{{rootLabel}}</code></div>
+            </div>
+            <div class="fact">
+              <div class="fact-title">Active path</div>
+              <div class="fact-value path"><code>{{projectPath}}</code></div>
+            </div>
+            <div class="fact">
+              <div class="fact-title">Suggested use</div>
+              <div class="fact-value">Run local apps, open docs, compare external references, or keep web context beside the terminal and diff panes.</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="section">
+          <div class="section-header">
+            <div class="section-label">Browser state</div>
+            <div class="section-title">Shared profile and helpers</div>
+          </div>
+          <div class="facts">
+            <div class="fact">
+              <div class="fact-title">Profile</div>
+              <div class="fact-value">{{profileStatus}}</div>
+            </div>
+            <div class="fact">
+              <div class="fact-title">Extensions</div>
+              <div class="fact-value">{{extensionStatus}}</div>
+            </div>
+            <div class="fact">
+              <div class="fact-title">Autofill</div>
+              <div class="fact-value">{{credentialStatus}}</div>
+            </div>
+          </div>
+        </section>
+      </div>
     </div>
   </div>
 </body>
@@ -2566,6 +3227,13 @@ namespace SelfContainedDeployment.Panes
         {
             string safeUri = WebUtility.HtmlEncode(uri ?? string.Empty);
             string safeError = WebUtility.HtmlEncode(error ?? "Navigation failed");
+            string background = ResolveCssColor("ShellPageBackgroundBrush", Windows.UI.Color.FromArgb(0xFF, 0x0C, 0x0D, 0x10));
+            string surface = ResolveCssColor("ShellSurfaceBackgroundBrush", Windows.UI.Color.FromArgb(0xFF, 0x10, 0x12, 0x16));
+            string border = ResolveCssColor("ShellBorderBrush", Windows.UI.Color.FromArgb(0xFF, 0x1E, 0x21, 0x27));
+            string borderSoft = ResolveCssColor("ShellBorderBrush", 0x88, Windows.UI.Color.FromArgb(0xFF, 0x1E, 0x21, 0x27));
+            string text = ResolveCssColor("ShellTextPrimaryBrush", Windows.UI.Color.FromArgb(0xFF, 0xF3, 0xF4, 0xF6));
+            string subtext = ResolveCssColor("ShellTextSecondaryBrush", Windows.UI.Color.FromArgb(0xFF, 0xA7, 0xAD, 0xB7));
+            string faint = ResolveCssColor("ShellTextTertiaryBrush", Windows.UI.Color.FromArgb(0xFF, 0x7A, 0x80, 0x8B));
             return $$"""
 <!doctype html>
 <html>
@@ -2575,45 +3243,111 @@ namespace SelfContainedDeployment.Panes
   <style>
     body {
       margin: 0;
-      background: #111214;
-      color: #fafafa;
-      font-family: "Segoe UI", sans-serif;
+      background: {{background}};
+      color: {{text}};
+      font-family: "Segoe UI Variable Text", "Segoe UI", sans-serif;
     }
     .wrap {
-      padding: 24px;
+      padding: 24px 26px;
       display: grid;
-      gap: 12px;
+      gap: 18px;
+      max-width: 760px;
     }
-    .card {
-      border: 1px solid #23252b;
-      background: #17181c;
-      border-radius: 10px;
-      padding: 16px;
+    .hero {
+      display: grid;
+      gap: 10px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid {{border}};
+    }
+    .hero-top {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .mark {
+      width: 24px;
+      height: 24px;
+      display: grid;
+      place-items: center;
+      border: 1px solid {{border}};
+      border-radius: 4px;
+      background: {{surface}};
+      font-size: 8.5px;
+      font-weight: 700;
+      letter-spacing: 0.09em;
+      color: {{text}};
+    }
+    .hero-copy {
+      display: grid;
+      gap: 4px;
+    }
+    .label {
+      font-size: 10.5px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: {{faint}};
     }
     h1 {
-      margin: 0 0 8px;
+      margin: 0;
       font-size: 20px;
+      line-height: 1.1;
     }
     p {
       margin: 0;
-      color: #a1a1aa;
+      color: {{subtext}};
       line-height: 1.5;
     }
+    .facts {
+      display: grid;
+      border-top: 1px solid {{borderSoft}};
+    }
+    .fact {
+      display: grid;
+      gap: 4px;
+      padding: 10px 0;
+      border-bottom: 1px solid {{borderSoft}};
+    }
+    .fact-title {
+      font-size: 10.5px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: {{faint}};
+    }
+    .fact-value {
+      color: {{text}};
+      line-height: 1.45;
+      word-break: break-word;
+    }
     code {
-      color: #fafafa;
+      color: {{text}};
       font-family: Consolas, monospace;
     }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <div class="card">
-      <h1>Preview unavailable</h1>
-      <p>The browser pane could not load <code>{{safeUri}}</code>.</p>
+    <div class="hero">
+      <div class="hero-top">
+        <div class="mark">WM</div>
+        <div class="hero-copy">
+          <div class="label">Browser pane</div>
+          <h1>Preview unavailable</h1>
+        </div>
+      </div>
+      <p>The current pane could not load <code>{{safeUri}}</code>. The browser surface stayed native, but this destination returned an error.</p>
     </div>
-    <div class="card">
-      <p>Error</p>
-      <p><code>{{safeError}}</code></p>
+
+    <div class="facts">
+      <div class="fact">
+        <div class="fact-title">Requested address</div>
+        <div class="fact-value"><code>{{safeUri}}</code></div>
+      </div>
+      <div class="fact">
+        <div class="fact-title">Error detail</div>
+        <div class="fact-value"><code>{{safeError}}</code></div>
+      </div>
     </div>
   </div>
 </body>

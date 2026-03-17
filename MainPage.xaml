@@ -15,7 +15,7 @@
                    CompactPaneLength="48"
                    DisplayMode="CompactInline"
                    IsPaneOpen="True"
-                   OpenPaneLength="228"
+                   OpenPaneLength="224"
                    PaneBackground="{ThemeResource ShellPaneBackgroundBrush}">
             <SplitView.Pane>
                 <Border AutomationProperties.AutomationId="shell-sidebar"
@@ -30,11 +30,11 @@
                         </Grid.RowDefinitions>
 
                         <Border AutomationProperties.AutomationId="shell-sidebar-header"
-                                Padding="12,12,12,14"
+                                Padding="8,7,8,6"
                                 BorderBrush="{ThemeResource ShellBorderBrush}"
-                                BorderThickness="0,0,0,1">
-                            <Grid ColumnDefinitions="28,Auto,*"
-                                  ColumnSpacing="10">
+                                BorderThickness="0">
+                            <Grid ColumnDefinitions="24,Auto,*"
+                                  ColumnSpacing="7">
                                 <Button x:Name="PaneToggleButton"
                                         AutomationProperties.AutomationId="shell-pane-toggle"
                                         Style="{StaticResource ShellChromeButtonStyle}"
@@ -43,34 +43,28 @@
                                     <FontIcon FontSize="12" Glyph="&#xE700;" />
                                 </Button>
 
-                                <Border Grid.Column="1"
+                                <Border x:Name="PaneBrandMark"
+                                        Grid.Column="1"
                                         AutomationProperties.AutomationId="shell-brand-mark"
-                                        MinWidth="26"
-                                        Padding="7,3"
                                         HorizontalAlignment="Left"
                                         VerticalAlignment="Center"
-                                        Background="{ThemeResource ShellMutedSurfaceBrush}"
-                                        BorderBrush="{ThemeResource ShellBorderBrush}"
-                                        BorderThickness="1"
-                                        CornerRadius="4">
-                                    <TextBlock HorizontalAlignment="Center"
-                                               VerticalAlignment="Center"
-                                               FontSize="10"
-                                               FontWeight="SemiBold"
-                                               Foreground="{ThemeResource ShellTextPrimaryBrush}"
-                                               Text="WM" />
+                                        Style="{StaticResource ShellMarkBorderStyle}">
+                                    <TextBlock Style="{StaticResource ShellMarkTextStyle}" />
                                 </Border>
 
-                                <StackPanel Grid.Column="2"
+                                <StackPanel x:Name="PaneBrandTextStack"
+                                            Grid.Column="2"
                                             Spacing="0"
                                             VerticalAlignment="Center">
                                     <TextBlock x:Name="PaneBrandText"
                                                AutomationProperties.AutomationId="shell-brand-text"
                                                Style="{StaticResource ShellTitleTextStyle}"
+                                               TextTrimming="CharacterEllipsis"
                                                Text="WinMux" />
                                     <TextBlock AutomationProperties.AutomationId="shell-brand-meta"
                                                Style="{StaticResource ShellInteractiveHintTextStyle}"
-                                               Text="workspace shell" />
+                                               TextTrimming="CharacterEllipsis"
+                                               Text="workspace" />
                                 </StackPanel>
                             </Grid>
                         </Border>
@@ -78,448 +72,680 @@
                         <ScrollViewer Grid.Row="1"
                                       VerticalScrollBarVisibility="Auto"
                                       VerticalScrollMode="Auto">
-                            <StackPanel Margin="0,10,0,12">
+                            <StackPanel Margin="0,6,0,8">
                                 <TextBlock x:Name="ProjectSectionText"
-                                           Margin="14,0,14,8"
-                                           Style="{StaticResource ShellHintTextStyle}"
-                                           Text="PROJECTS" />
+                                           Margin="6,0,6,4"
+                                           Style="{StaticResource ShellSidebarSectionTextStyle}"
+                                           Text="Projects" />
 
                                 <StackPanel x:Name="ProjectListPanel"
                                             AutomationProperties.AutomationId="shell-project-list"
                                             HorizontalAlignment="Stretch"
-                                            Margin="8,0,8,0"
-                                            Spacing="8" />
+                                            Margin="2,0,2,0"
+                                            Spacing="3" />
                             </StackPanel>
                         </ScrollViewer>
 
                         <StackPanel Grid.Row="2"
                                     AutomationProperties.AutomationId="shell-sidebar-footer"
-                                    Margin="8,10,8,8"
+                                    Margin="2,6,3,4"
                                     Spacing="2">
                             <Button x:Name="NewProjectButton"
                                     AutomationProperties.AutomationId="shell-new-project"
-                                    Style="{StaticResource ShellNavButtonStyle}"
+                                    Style="{StaticResource ShellSidebarPrimaryButtonStyle}"
                                     Click="OnNewProjectClicked"
                                     ToolTipService.ToolTip="Add a new project">
-                                <Grid ColumnDefinitions="16,*" ColumnSpacing="10">
+                                <StackPanel Orientation="Horizontal"
+                                            HorizontalAlignment="Center"
+                                            Spacing="6">
                                     <FontIcon FontSize="12" Glyph="&#xE8FA;" />
                                     <TextBlock x:Name="NewProjectText"
-                                               Grid.Column="1"
                                                FontSize="12"
                                                Text="New project" />
-                                </Grid>
+                                </StackPanel>
                             </Button>
 
                             <Button x:Name="SettingsNavButton"
                                     AutomationProperties.AutomationId="shell-nav-settings"
-                                    Style="{StaticResource ShellNavButtonStyle}"
+                                    Style="{StaticResource ShellSidebarPrimaryButtonStyle}"
                                     Click="OnSettingsNavClicked"
                                     ToolTipService.ToolTip="Open preferences">
-                                <Grid ColumnDefinitions="16,*" ColumnSpacing="10">
+                                <StackPanel Orientation="Horizontal"
+                                            HorizontalAlignment="Center"
+                                            Spacing="6">
                                     <FontIcon FontSize="12" Glyph="&#xE713;" />
                                     <TextBlock x:Name="SettingsNavText"
-                                               Grid.Column="1"
                                                FontSize="12"
                                                Text="Preferences" />
-                                </Grid>
+                                </StackPanel>
                             </Button>
                         </StackPanel>
                     </Grid>
                 </Border>
             </SplitView.Pane>
 
-            <Grid AutomationProperties.AutomationId="shell-main-content"
+                <Grid AutomationProperties.AutomationId="shell-main-content"
                   Background="{ThemeResource ShellPageBackgroundBrush}"
-                  Margin="4,0,0,0">
+                  Margin="0">
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="40" />
+                    <RowDefinition Height="36" />
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
 
-                <Grid Grid.Row="0"
+                    <Grid Grid.Row="0"
                       AutomationProperties.AutomationId="shell-header-bar"
-                      Padding="12,6,14,6"
-                      Background="{ThemeResource ShellSurfaceBackgroundBrush}"
-                      BorderBrush="{ThemeResource ShellBorderBrush}"
-                      BorderThickness="0,0,0,1"
+                      Padding="8,3,10,3"
+                      Background="{ThemeResource ShellPageBackgroundBrush}"
+                      BorderBrush="Transparent"
+                      BorderThickness="0"
                       ColumnDefinitions="*,Auto,*">
-                    <TextBox x:Name="ThreadNameBox"
-                             AutomationProperties.AutomationId="shell-thread-name"
-                             Grid.Column="1"
-                             HorizontalAlignment="Center"
-                             Style="{StaticResource ShellHeaderInputStyle}"
-                             TextChanged="OnThreadNameTextChanged" />
+                    <StackPanel Grid.Column="1"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Orientation="Horizontal"
+                                Spacing="8"
+                                MaxWidth="620">
+                        <TextBox x:Name="ThreadNameBox"
+                                 AutomationProperties.AutomationId="shell-thread-name"
+                                 HorizontalAlignment="Center"
+                                 MinWidth="180"
+                                 MaxWidth="280"
+                                 Style="{StaticResource ShellHeaderInputStyle}"
+                                 TextChanged="OnThreadNameTextChanged" />
 
-                    <TextBlock x:Name="ActiveDirectoryText"
-                               Grid.Column="2"
-                               AutomationProperties.AutomationId="shell-active-directory"
-                               Margin="14,0,0,0"
-                               HorizontalAlignment="Left"
-                               VerticalAlignment="Center"
-                               Style="{StaticResource ShellMetaTextStyle}"
-                               TextTrimming="CharacterEllipsis" />
+                        <TextBlock x:Name="ActiveDirectorySeparator"
+                                   AutomationProperties.AutomationId="shell-active-directory-separator"
+                                   Style="{StaticResource ShellHintTextStyle}"
+                                   Text="•"
+                                   VerticalAlignment="Center"
+                                   Visibility="Collapsed" />
+
+                        <TextBlock x:Name="ActiveDirectoryText"
+                                   AutomationProperties.AutomationId="shell-active-directory"
+                                   MaxWidth="300"
+                                   HorizontalAlignment="Left"
+                                   TextAlignment="Left"
+                                   VerticalAlignment="Center"
+                                   Style="{StaticResource ShellMetaTextStyle}"
+                                   TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
                 </Grid>
 
                 <Grid Grid.Row="1"
                       AutomationProperties.AutomationId="shell-workspace-host"
                       Background="{ThemeResource ShellPageBackgroundBrush}">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition x:Name="InspectorColumn" Width="320" />
-                    </Grid.ColumnDefinitions>
+                    <SplitView x:Name="InspectorSplitView"
+                               AutomationProperties.AutomationId="shell-inspector-split-view"
+                               CompactPaneLength="0"
+                               DisplayMode="CompactInline"
+                               IsPaneOpen="True"
+                               OpenPaneLength="320"
+                               PaneBackground="{ThemeResource ShellSurfaceBackgroundBrush}"
+                               PanePlacement="Right">
+                        <SplitView.Content>
+                            <Grid x:Name="PaneWorkspaceShell"
+                                  AutomationProperties.AutomationId="shell-pane-workspace">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="36" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
 
-                    <Grid x:Name="PaneWorkspaceShell"
-                          Grid.Column="0"
-                          AutomationProperties.AutomationId="shell-pane-workspace">
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="40" />
-                            <RowDefinition Height="*" />
-                        </Grid.RowDefinitions>
-
-                        <Grid Grid.Row="0"
-                              AutomationProperties.AutomationId="shell-pane-strip"
-                              Background="{ThemeResource ShellSurfaceBackgroundBrush}"
-                              BorderBrush="{ThemeResource ShellBorderBrush}"
-                              BorderThickness="0,0,0,1"
-                              ColumnDefinitions="*,Auto">
-                            <TabView x:Name="TerminalTabs"
-                                     AutomationProperties.AutomationId="shell-tab-view"
-                                     AddTabButtonClick="TerminalTabs_AddTabButtonClick"
-                                     CanDragTabs="True"
-                                     Grid.Column="0"
-                                     HorizontalAlignment="Stretch"
-                                     IsAddTabButtonVisible="True"
-                                     SelectionChanged="TerminalTabs_SelectionChanged"
-                                     TabCloseRequested="TerminalTabs_TabCloseRequested"
-                                     TabWidthMode="SizeToContent"
-                                     VerticalAlignment="Stretch" />
-
-                            <StackPanel Grid.Column="1"
-                                        Orientation="Horizontal"
-                                        HorizontalAlignment="Right"
-                                        VerticalAlignment="Center"
-                                        Margin="0,0,10,0"
-                                        Spacing="2">
-                                <Button x:Name="AddBrowserPaneButton"
-                                        AutomationProperties.AutomationId="shell-add-browser-pane"
-                                        Style="{StaticResource ShellChromeButtonStyle}"
-                                        Click="OnAddBrowserPaneClicked"
-                                        ToolTipService.ToolTip="Add browser pane">
-                                    <FontIcon FontSize="12" Glyph="&#xE774;" />
-                                </Button>
-
-                                <Button x:Name="AddEditorPaneButton"
-                                        AutomationProperties.AutomationId="shell-add-editor-pane"
-                                        Style="{StaticResource ShellChromeButtonStyle}"
-                                        Click="OnAddEditorPaneClicked"
-                                        ToolTipService.ToolTip="Add editor pane">
-                                    <FontIcon FontSize="12" Glyph="&#xE70F;" />
-                                </Button>
-
-                                <Button x:Name="FitPanesButton"
-                                        AutomationProperties.AutomationId="shell-fit-panes"
-                                        Style="{StaticResource ShellChromeButtonStyle}"
-                                        Click="OnFitPanesClicked"
-                                        DoubleTapped="OnFitPanesDoubleTapped"
-                                        ToolTipService.ToolTip="Fit visible panes">
-                                    <FontIcon FontSize="12" Glyph="&#xE9A8;" />
-                                </Button>
-
-                                <Button x:Name="ToggleInspectorButton"
-                                        AutomationProperties.AutomationId="shell-toggle-inspector"
-                                        Style="{StaticResource ShellChromeButtonStyle}"
-                                        Click="OnToggleInspectorClicked"
-                                        ToolTipService.ToolTip="Hide inspector">
-                                    <FontIcon FontSize="12" Glyph="&#xE7F8;" />
-                                </Button>
-                            </StackPanel>
-                        </Grid>
-
-                        <Grid x:Name="PaneWorkspaceGrid"
-                              Grid.Row="1"
-                              AutomationProperties.AutomationId="shell-pane-grid"
-                              Background="{ThemeResource ShellPaneDividerBrush}" />
-
-                        <Border x:Name="ThreadOverviewPanel"
-                                Grid.Row="1"
-                                AutomationProperties.AutomationId="shell-thread-overview"
-                                Background="{ThemeResource ShellPageBackgroundBrush}"
-                                Visibility="Collapsed">
-                            <Grid RowDefinitions="Auto,*">
-                                <Grid Padding="18,16,18,12"
-                                      ColumnDefinitions="*,Auto"
-                                      ColumnSpacing="12">
-                                    <StackPanel Spacing="2">
-                                        <TextBlock Text="Thread overview"
-                                                   Style="{StaticResource ShellSectionTextStyle}" />
-                                        <TextBlock x:Name="ThreadOverviewMetaText"
-                                                   Style="{StaticResource ShellHintTextStyle}"
-                                                   Text="Active project thread stack" />
-                                    </StackPanel>
+                                <Grid Grid.Row="0"
+                                      AutomationProperties.AutomationId="shell-pane-strip"
+                                      Background="{ThemeResource ShellSurfaceBackgroundBrush}"
+                                      BorderBrush="{ThemeResource ShellBorderBrush}"
+                                      BorderThickness="0,0,0,1"
+                                      ColumnDefinitions="*,Auto">
+                                    <TabView x:Name="TerminalTabs"
+                                             AutomationProperties.AutomationId="shell-tab-view"
+                                             AddTabButtonClick="TerminalTabs_AddTabButtonClick"
+                                             CanDragTabs="True"
+                                             Grid.Column="0"
+                                             HorizontalAlignment="Stretch"
+                                             IsAddTabButtonVisible="True"
+                                             SelectionChanged="TerminalTabs_SelectionChanged"
+                                             TabCloseRequested="TerminalTabs_TabCloseRequested"
+                                             TabWidthMode="SizeToContent"
+                                             VerticalAlignment="Stretch" />
 
                                     <StackPanel Grid.Column="1"
                                                 Orientation="Horizontal"
-                                                Spacing="8">
-                                        <Button x:Name="OverviewNewThreadButton"
-                                                AutomationProperties.AutomationId="shell-overview-new-thread"
-                                                Style="{StaticResource ShellSubItemButtonStyle}"
-                                                Click="OnOverviewNewThreadClicked"
-                                                Content="New thread" />
+                                                HorizontalAlignment="Right"
+                                                VerticalAlignment="Center"
+                                                Margin="0,0,8,0"
+                                                Spacing="4">
+                                        <Button x:Name="AddBrowserPaneButton"
+                                                AutomationProperties.AutomationId="shell-add-browser-pane"
+                                                Style="{StaticResource ShellToolbarButtonStyle}"
+                                                Click="OnAddBrowserPaneClicked"
+                                                ToolTipService.ToolTip="Add browser pane">
+                                            <FontIcon FontSize="11" Glyph="&#xE774;" />
+                                        </Button>
 
-                                        <Button x:Name="CloseOverviewButton"
-                                                AutomationProperties.AutomationId="shell-close-overview"
-                                                Style="{StaticResource ShellSubItemButtonStyle}"
-                                                Click="OnCloseOverviewClicked"
-                                                Content="Back to panes" />
+                                        <Button x:Name="AddEditorPaneButton"
+                                                AutomationProperties.AutomationId="shell-add-editor-pane"
+                                                Style="{StaticResource ShellToolbarButtonStyle}"
+                                                Click="OnAddEditorPaneClicked"
+                                                ToolTipService.ToolTip="Add editor pane">
+                                            <FontIcon FontSize="11" Glyph="&#xE70F;" />
+                                        </Button>
+
+                                        <Button x:Name="FitPanesButton"
+                                                AutomationProperties.AutomationId="shell-fit-panes"
+                                                Style="{StaticResource ShellToolbarButtonStyle}"
+                                                Click="OnFitPanesClicked"
+                                                DoubleTapped="OnFitPanesDoubleTapped"
+                                                ToolTipService.ToolTip="Fit visible panes">
+                                            <FontIcon FontSize="11" Glyph="&#xE9A8;" />
+                                        </Button>
+
+                                        <Button x:Name="ToggleInspectorButton"
+                                                AutomationProperties.AutomationId="shell-toggle-inspector"
+                                                Style="{StaticResource ShellToolbarButtonStyle}"
+                                                Click="OnToggleInspectorClicked"
+                                                ToolTipService.ToolTip="Hide inspector">
+                                            <FontIcon FontSize="11" Glyph="&#xE7F8;" />
+                                        </Button>
                                     </StackPanel>
                                 </Grid>
 
-                                <ScrollViewer Grid.Row="1"
-                                              VerticalScrollBarVisibility="Auto"
-                                              VerticalScrollMode="Auto">
-                                    <StackPanel x:Name="ThreadOverviewListPanel"
-                                                Margin="18,0,18,18"
-                                                Spacing="10" />
-                                </ScrollViewer>
+                                <Grid x:Name="PaneWorkspaceGrid"
+                                      Grid.Row="1"
+                                      AutomationProperties.AutomationId="shell-pane-grid"
+                                      Background="{ThemeResource ShellPaneDividerBrush}" />
                             </Grid>
-                        </Border>
-                    </Grid>
+                        </SplitView.Content>
 
-                    <Border Grid.Column="1"
-                            x:Name="InspectorSidebar"
-                            AutomationProperties.AutomationId="shell-diff-sidebar"
-                            Background="{ThemeResource ShellSurfaceBackgroundBrush}"
-                            BorderBrush="{ThemeResource ShellBorderBrush}"
-                            BorderThickness="1,0,0,0">
-                        <Grid RowDefinitions="Auto,*">
-                            <Grid Padding="12,10,12,10"
-                                  BorderBrush="{ThemeResource ShellBorderBrush}"
-                                  BorderThickness="0,0,0,1"
-                                  ColumnDefinitions="Auto,*,Auto"
-                                  ColumnSpacing="8">
-                                <StackPanel Orientation="Horizontal"
-                                            Spacing="6"
-                                            VerticalAlignment="Center">
-                                    <Button x:Name="InspectorReviewTabButton"
-                                            AutomationProperties.AutomationId="shell-inspector-tab-review"
-                                            Click="OnInspectorReviewTabClicked"
-                                            Style="{StaticResource ShellSubItemButtonStyle}"
-                                            Height="28"
-                                            Padding="10,3"
-                                            MinWidth="56">
-                                        <TextBlock Text="Review"
-                                                   FontSize="12" />
-                                    </Button>
+                        <SplitView.Pane>
+                            <Border x:Name="InspectorSidebar"
+                                    AutomationProperties.AutomationId="shell-diff-sidebar"
+                                    Background="{ThemeResource ShellSurfaceBackgroundBrush}"
+                                    BorderBrush="{ThemeResource ShellBorderBrush}"
+                                    BorderThickness="1,0,0,0">
+                                <Grid RowDefinitions="Auto,*">
+                                    <Grid Padding="10,9,10,8"
+                                          BorderBrush="{ThemeResource ShellBorderBrush}"
+                                          BorderThickness="0,0,0,1"
+                                          ColumnDefinitions="Auto,*,Auto"
+                                          ColumnSpacing="6">
+                                        <StackPanel Orientation="Horizontal"
+                                                    Spacing="4"
+                                                    VerticalAlignment="Center">
+                                            <Button x:Name="InspectorReviewTabButton"
+                                                    AutomationProperties.AutomationId="shell-inspector-tab-review"
+                                                    Click="OnInspectorReviewTabClicked"
+                                                    Style="{StaticResource ShellInspectorTabButtonStyle}"
+                                                    Height="28"
+                                                    Padding="9,3"
+                                                    MinWidth="58">
+                                                <TextBlock Text="Review"
+                                                           FontSize="11.5" />
+                                            </Button>
 
-                                    <Button x:Name="InspectorFilesTabButton"
-                                            AutomationProperties.AutomationId="shell-inspector-tab-files"
-                                            Click="OnInspectorFilesTabClicked"
-                                            Style="{StaticResource ShellSubItemButtonStyle}"
-                                            Height="28"
-                                            Padding="10,3"
-                                            MinWidth="48">
-                                        <TextBlock Text="Files"
-                                                   FontSize="12" />
-                                    </Button>
-                                </StackPanel>
+                                            <Button x:Name="InspectorFilesTabButton"
+                                                    AutomationProperties.AutomationId="shell-inspector-tab-files"
+                                                    Click="OnInspectorFilesTabClicked"
+                                                    Style="{StaticResource ShellInspectorTabButtonStyle}"
+                                                    Height="28"
+                                                    Padding="9,3"
+                                                    MinWidth="48">
+                                                <TextBlock Text="Files"
+                                                           FontSize="11.5" />
+                                            </Button>
 
-                                <StackPanel x:Name="InspectorReviewActionsPanel"
-                                            Grid.Column="2"
-                                            Orientation="Horizontal"
-                                            Spacing="4"
-                                            VerticalAlignment="Center">
-                                    <Button x:Name="OpenFullPatchButton"
-                                            AutomationProperties.AutomationId="shell-open-full-patch"
-                                            Click="OnOpenFullPatchClicked"
-                                            Style="{StaticResource ShellChromeButtonStyle}"
-                                            ToolTipService.ToolTip="Review all changed files">
-                                        <FontIcon FontSize="11"
-                                                  Glyph="&#xE8A5;" />
-                                    </Button>
-
-                                    <Button x:Name="CaptureCheckpointButton"
-                                            AutomationProperties.AutomationId="shell-diff-capture-checkpoint"
-                                            Click="OnCaptureCheckpointClicked"
-                                            Style="{StaticResource ShellChromeButtonStyle}"
-                                            ToolTipService.ToolTip="Capture checkpoint">
-                                        <FontIcon FontSize="11"
-                                                  Glyph="&#xE823;" />
-                                    </Button>
-
-                                    <Button x:Name="RefreshDiffButton"
-                                            AutomationProperties.AutomationId="shell-diff-refresh"
-                                            Click="OnRefreshDiffClicked"
-                                            Style="{StaticResource ShellChromeButtonStyle}"
-                                            ToolTipService.ToolTip="Refresh review">
-                                        <FontIcon FontSize="11"
-                                                  Glyph="&#xE72C;" />
-                                    </Button>
-                                </StackPanel>
-
-                                <StackPanel x:Name="InspectorFileActionsPanel"
-                                            Grid.Column="2"
-                                            Orientation="Horizontal"
-                                            Spacing="4"
-                                            VerticalAlignment="Center"
-                                            Visibility="Collapsed">
-                                    <Button x:Name="InspectorSaveFileButton"
-                                            AutomationProperties.AutomationId="shell-editor-save-file"
-                                            Click="OnInspectorSaveFileClicked"
-                                            Style="{StaticResource ShellChromeButtonStyle}"
-                                            ToolTipService.ToolTip="Save file">
-                                        <FontIcon FontSize="11"
-                                                  Glyph="&#xE74E;" />
-                                    </Button>
-
-                                </StackPanel>
-                            </Grid>
-
-                            <Border x:Name="InspectorReviewContent"
-                                    Grid.Row="1"
-                                    Padding="12,12,12,14">
-                                <Grid RowSpacing="12">
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="*" />
-                                    </Grid.RowDefinitions>
-
-                                    <StackPanel x:Name="DiffReviewSourceSection"
-                                                Spacing="6"
-                                                Visibility="Collapsed">
-                                        <TextBlock Text="COMPARE"
-                                                   Style="{StaticResource ShellInspectorLabelTextStyle}" />
-                                        <ComboBox x:Name="DiffReviewSourceComboBox"
-                                                  AutomationProperties.AutomationId="shell-diff-review-source"
-                                                  SelectionChanged="OnDiffReviewSourceSelectionChanged"
-                                                  HorizontalAlignment="Stretch"
-                                                  PlaceholderText="Live working tree" />
-                                        <TextBlock x:Name="DiffReviewSourceMetaText"
-                                                   AutomationProperties.AutomationId="shell-diff-review-meta"
-                                                   Style="{StaticResource ShellHintTextStyle}"
-                                                   Text="Live working tree"
-                                                   TextWrapping="WrapWholeWords" />
-                                    </StackPanel>
-
-                                    <StackPanel Grid.Row="1"
-                                                Spacing="10">
-                                        <StackPanel Spacing="4">
-                                            <TextBlock Text="BRANCH"
-                                                       Style="{StaticResource ShellInspectorLabelTextStyle}" />
-                                            <TextBlock x:Name="DiffBranchText"
-                                                       AutomationProperties.AutomationId="shell-diff-branch"
-                                                       Style="{StaticResource ShellBodyTextStyle}"
-                                                       Text="No git context"
-                                                       TextTrimming="CharacterEllipsis"
-                                                       TextWrapping="NoWrap" />
+                                            <Button x:Name="InspectorNotesTabButton"
+                                                    AutomationProperties.AutomationId="shell-inspector-tab-notes"
+                                                    Click="OnInspectorNotesTabClicked"
+                                                    Style="{StaticResource ShellInspectorTabButtonStyle}"
+                                                    Height="28"
+                                                    Padding="9,3"
+                                                    MinWidth="52">
+                                                <TextBlock Text="Notes"
+                                                           FontSize="11.5" />
+                                            </Button>
                                         </StackPanel>
 
-                                        <StackPanel Spacing="4">
-                                            <TextBlock Text="ROOT"
-                                                       Style="{StaticResource ShellInspectorLabelTextStyle}" />
-                                            <TextBlock x:Name="DiffWorktreeText"
-                                                       AutomationProperties.AutomationId="shell-diff-worktree"
-                                                       Style="{StaticResource ShellHintTextStyle}"
-                                                       TextTrimming="CharacterEllipsis"
-                                                       TextWrapping="NoWrap" />
+                                        <StackPanel x:Name="InspectorReviewActionsPanel"
+                                                    Grid.Column="2"
+                                                    Orientation="Horizontal"
+                                                    Spacing="4"
+                                                    VerticalAlignment="Center">
+                                            <Button x:Name="OpenFullPatchButton"
+                                                    AutomationProperties.AutomationId="shell-open-full-patch"
+                                                    Click="OnOpenFullPatchClicked"
+                                                    Style="{StaticResource ShellToolbarButtonStyle}"
+                                                    ToolTipService.ToolTip="Review all changed files">
+                                                <FontIcon FontSize="11"
+                                                          Glyph="&#xE8A5;" />
+                                            </Button>
+
+                                            <Button x:Name="CaptureCheckpointButton"
+                                                    AutomationProperties.AutomationId="shell-diff-capture-checkpoint"
+                                                    Click="OnCaptureCheckpointClicked"
+                                                    Style="{StaticResource ShellToolbarButtonStyle}"
+                                                    ToolTipService.ToolTip="Capture checkpoint">
+                                                <FontIcon FontSize="11"
+                                                          Glyph="&#xE823;" />
+                                            </Button>
+
+                                            <Button x:Name="RefreshDiffButton"
+                                                    AutomationProperties.AutomationId="shell-diff-refresh"
+                                                    Click="OnRefreshDiffClicked"
+                                                    Style="{StaticResource ShellToolbarButtonStyle}"
+                                                    ToolTipService.ToolTip="Refresh review">
+                                                <FontIcon FontSize="11"
+                                                          Glyph="&#xE72C;" />
+                                            </Button>
                                         </StackPanel>
-                                    </StackPanel>
 
-                                    <TextBlock Grid.Row="2"
-                                               x:Name="DiffSummaryText"
-                                               AutomationProperties.AutomationId="shell-diff-summary"
-                                               Style="{StaticResource ShellHintTextStyle}"
-                                               Text="No working tree changes"
-                                               TextWrapping="WrapWholeWords" />
+                                        <StackPanel x:Name="InspectorFileActionsPanel"
+                                                    Grid.Column="2"
+                                                    Orientation="Horizontal"
+                                                    Spacing="4"
+                                                    VerticalAlignment="Center"
+                                                    Visibility="Collapsed">
+                                            <Button x:Name="InspectorCollapseAllButton"
+                                                    AutomationProperties.AutomationId="shell-directory-collapse-all"
+                                                    Click="OnInspectorCollapseAllClicked"
+                                                    Style="{StaticResource ShellToolbarButtonStyle}"
+                                                    ToolTipService.ToolTip="Collapse all folders">
+                                                <TextBlock FontSize="12"
+                                                           FontWeight="SemiBold"
+                                                           Text="−" />
+                                            </Button>
 
-                                    <Grid Grid.Row="3"
-                                          MinHeight="0"
-                                          RowSpacing="8">
-                                        <Grid.RowDefinitions>
-                                            <RowDefinition Height="Auto" />
-                                            <RowDefinition Height="*" />
-                                        </Grid.RowDefinitions>
+                                            <Button x:Name="InspectorSaveFileButton"
+                                                    AutomationProperties.AutomationId="shell-editor-save-file"
+                                                    Click="OnInspectorSaveFileClicked"
+                                                    Style="{StaticResource ShellToolbarButtonStyle}"
+                                                    ToolTipService.ToolTip="Save file">
+                                                <FontIcon FontSize="11"
+                                                          Glyph="&#xE74E;" />
+                                            </Button>
+                                        </StackPanel>
 
-                                        <TextBlock Text="CHANGED FILES"
-                                                   Style="{StaticResource ShellInspectorLabelTextStyle}" />
+                                        <StackPanel x:Name="InspectorNotesActionsPanel"
+                                                    Grid.Column="2"
+                                                    Orientation="Horizontal"
+                                                    Spacing="4"
+                                                    VerticalAlignment="Center"
+                                                    Visibility="Collapsed">
+                                            <Button x:Name="InspectorAddNoteButton"
+                                                    AutomationProperties.AutomationId="shell-thread-note-add"
+                                                    Click="OnInspectorAddNoteClicked"
+                                                    Style="{StaticResource ShellToolbarButtonStyle}"
+                                                    ToolTipService.ToolTip="New note">
+                                                <FontIcon FontSize="11"
+                                                          Glyph="&#xE710;" />
+                                            </Button>
 
-                                        <Grid Grid.Row="1"
-                                              MinHeight="0">
-                                            <Grid>
-                                                <ScrollViewer VerticalScrollBarVisibility="Auto"
-                                                              HorizontalScrollBarVisibility="Disabled">
-                                                    <StackPanel x:Name="DiffFileListPanel"
-                                                                AutomationProperties.AutomationId="shell-diff-file-list"
-                                                                Spacing="2" />
-                                                </ScrollViewer>
+                                            <Button x:Name="InspectorDeleteNoteButton"
+                                                    AutomationProperties.AutomationId="shell-thread-note-delete"
+                                                    Click="OnInspectorDeleteNoteClicked"
+                                                    Style="{StaticResource ShellToolbarButtonStyle}"
+                                                    ToolTipService.ToolTip="Delete selected note">
+                                                <FontIcon FontSize="11"
+                                                          Glyph="&#xE74D;" />
+                                            </Button>
+                                        </StackPanel>
+                                    </Grid>
 
-                                                <TextBlock x:Name="DiffEmptyText"
-                                                           VerticalAlignment="Top"
-                                                           Style="{StaticResource ShellHintTextStyle}"
-                                                           Text="No changed files in this thread."
-                                                           Visibility="Collapsed" />
+                                    <Border x:Name="InspectorReviewContent"
+                                            Grid.Row="1"
+                                            Padding="10,10,10,12">
+                                        <Grid RowSpacing="10">
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="*" />
+                                            </Grid.RowDefinitions>
+
+                                            <Grid x:Name="DiffReviewSourceSection"
+                                                  ColumnDefinitions="Auto,*"
+                                                  ColumnSpacing="10"
+                                                  Visibility="Collapsed">
+                                                <TextBlock Text="COMPARE"
+                                                           Style="{StaticResource ShellInspectorLabelTextStyle}" />
+                                                <StackPanel Grid.Column="1"
+                                                            Spacing="4">
+                                                    <ComboBox x:Name="DiffReviewSourceComboBox"
+                                                              AutomationProperties.AutomationId="shell-diff-review-source"
+                                                              SelectionChanged="OnDiffReviewSourceSelectionChanged"
+                                                              HorizontalAlignment="Stretch"
+                                                              PlaceholderText="Live working tree" />
+                                                    <TextBlock x:Name="DiffReviewSourceMetaText"
+                                                               AutomationProperties.AutomationId="shell-diff-review-meta"
+                                                               Style="{StaticResource ShellHintTextStyle}"
+                                                               Text="Live working tree"
+                                                               TextWrapping="WrapWholeWords" />
+                                                </StackPanel>
+                                            </Grid>
+
+                                            <Grid Grid.Row="1"
+                                                  ColumnDefinitions="Auto,*"
+                                                  ColumnSpacing="10"
+                                                  RowSpacing="6">
+                                                <Grid.RowDefinitions>
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="Auto" />
+                                                </Grid.RowDefinitions>
+
+                                                <TextBlock Text="BRANCH"
+                                                           Style="{StaticResource ShellInspectorLabelTextStyle}" />
+                                                <TextBlock x:Name="DiffBranchText"
+                                                           Grid.Column="1"
+                                                           AutomationProperties.AutomationId="shell-diff-branch"
+                                                           Style="{StaticResource ShellBodyTextStyle}"
+                                                           Text="No git context"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           TextWrapping="NoWrap" />
+
+                                                <TextBlock Grid.Row="1"
+                                                           Text="ROOT"
+                                                           Style="{StaticResource ShellInspectorLabelTextStyle}" />
+                                                <TextBlock x:Name="DiffWorktreeText"
+                                                           Grid.Row="1"
+                                                           Grid.Column="1"
+                                                           AutomationProperties.AutomationId="shell-diff-worktree"
+                                                           Style="{StaticResource ShellSidebarMetaTextStyle}"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           TextWrapping="NoWrap" />
+                                            </Grid>
+
+                                            <TextBlock Grid.Row="2"
+                                                       x:Name="DiffSummaryText"
+                                                       AutomationProperties.AutomationId="shell-diff-summary"
+                                                       Style="{StaticResource ShellSidebarMetaTextStyle}"
+                                                       Text="No working tree changes"
+                                                       TextWrapping="WrapWholeWords" />
+
+                                            <Grid Grid.Row="3"
+                                                  MinHeight="0"
+                                                  RowSpacing="8">
+                                                <Grid.RowDefinitions>
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="*" />
+                                                </Grid.RowDefinitions>
+
+                                                <TextBlock Text="CHANGED FILES"
+                                                           Style="{StaticResource ShellInspectorLabelTextStyle}" />
+
+                                                <Grid Grid.Row="1"
+                                                      MinHeight="0">
+                                                    <Grid>
+                                                        <ListView x:Name="DiffFileListView"
+                                                                  AutomationProperties.AutomationId="shell-diff-file-list"
+                                                                  SelectionMode="None"
+                                                                  IsItemClickEnabled="False"
+                                                                  HorizontalContentAlignment="Stretch"
+                                                                  VerticalAlignment="Stretch"
+                                                                  ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                                                  ScrollViewer.VerticalScrollBarVisibility="Auto">
+                                                            <ListView.ItemContainerStyle>
+                                                                <Style TargetType="ListViewItem">
+                                                                    <Setter Property="Padding" Value="0" />
+                                                                    <Setter Property="Margin" Value="0,0,0,2" />
+                                                                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                                                </Style>
+                                                            </ListView.ItemContainerStyle>
+                                                            <ListView.ItemTemplate>
+                                                                <DataTemplate>
+                                                                    <Button Style="{StaticResource ShellDiffFileButtonStyle}"
+                                                                            Tag="{Binding File}"
+                                                                            HorizontalAlignment="Stretch"
+                                                                            HorizontalContentAlignment="Stretch"
+                                                                            Click="OnDiffFileButtonClicked"
+                                                                            Loaded="OnDiffFileItemButtonLoaded"
+                                                                            Unloaded="OnDiffFileItemButtonUnloaded"
+                                                                            AutomationProperties.AutomationId="{Binding AutomationId}"
+                                                                            AutomationProperties.Name="{Binding AutomationName}">
+                                                                        <Grid ColumnSpacing="8">
+                                                                            <Grid.ColumnDefinitions>
+                                                                                <ColumnDefinition Width="Auto" />
+                                                                                <ColumnDefinition Width="*" />
+                                                                                <ColumnDefinition Width="Auto" />
+                                                                            </Grid.ColumnDefinitions>
+
+                                                                            <TextBlock Text="{Binding StatusSymbol}"
+                                                                                       FontFamily="Consolas"
+                                                                                       FontSize="10.25"
+                                                                                       FontWeight="SemiBold"
+                                                                                       Foreground="{Binding StatusBrush}"
+                                                                                       Opacity="0.92"
+                                                                                       VerticalAlignment="Top" />
+
+                                                                            <StackPanel Grid.Column="1"
+                                                                                        Spacing="1">
+                                                                                <TextBlock Text="{Binding FileName}"
+                                                                                           FontSize="12"
+                                                                                           FontWeight="SemiBold"
+                                                                                           TextTrimming="CharacterEllipsis" />
+                                                                                <TextBlock Text="{Binding MetaText}"
+                                                                                           FontSize="10.5"
+                                                                                           Opacity="0.74"
+                                                                                           TextTrimming="CharacterEllipsis" />
+                                                                            </StackPanel>
+
+                                                                            <StackPanel Grid.Column="2"
+                                                                                        Orientation="Horizontal"
+                                                                                        Spacing="7"
+                                                                                        VerticalAlignment="Top">
+                                                                                <TextBlock Text="{Binding AddedText}"
+                                                                                           Visibility="{Binding AddedVisibility}"
+                                                                                           FontSize="11"
+                                                                                           FontWeight="SemiBold"
+                                                                                           Foreground="{ThemeResource ShellSuccessBrush}" />
+                                                                                <TextBlock Text="{Binding RemovedText}"
+                                                                                           Visibility="{Binding RemovedVisibility}"
+                                                                                           FontSize="11"
+                                                                                           FontWeight="SemiBold"
+                                                                                           Foreground="{ThemeResource ShellDangerBrush}" />
+                                                                            </StackPanel>
+                                                                        </Grid>
+                                                                    </Button>
+                                                                </DataTemplate>
+                                                            </ListView.ItemTemplate>
+                                                        </ListView>
+
+                                                        <TextBlock x:Name="DiffEmptyText"
+                                                                   VerticalAlignment="Top"
+                                                                   Style="{StaticResource ShellHintTextStyle}"
+                                                                   Text="No changed files in this thread."
+                                                                   Visibility="Collapsed" />
+                                                    </Grid>
+                                                </Grid>
                                             </Grid>
                                         </Grid>
-                                    </Grid>
+                                    </Border>
+
+                                    <ScrollViewer x:Name="InspectorFilesContent"
+                                                  Grid.Row="1"
+                                                  Visibility="Collapsed"
+                                                  VerticalScrollBarVisibility="Auto"
+                                                  HorizontalScrollBarVisibility="Disabled">
+                                        <StackPanel Padding="8,12,8,14"
+                                                    Spacing="12">
+                                            <StackPanel Spacing="4">
+                                                <TextBlock Text="DIRECTORY"
+                                                           Style="{StaticResource ShellInspectorLabelTextStyle}" />
+                                                <TextBlock x:Name="InspectorDirectoryRootText"
+                                                           AutomationProperties.AutomationId="shell-directory-root"
+                                                           Style="{StaticResource ShellBodyTextStyle}"
+                                                           Text="No active project"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           TextWrapping="NoWrap" />
+                                                <TextBlock x:Name="InspectorDirectoryMetaText"
+                                                           AutomationProperties.AutomationId="shell-directory-meta"
+                                                           Style="{StaticResource ShellHintTextStyle}"
+                                                           Text="Open an editor pane to browse files."
+                                                           TextWrapping="WrapWholeWords" />
+                                            </StackPanel>
+
+                                            <TreeView x:Name="InspectorDirectoryTree"
+                                                      AutomationProperties.AutomationId="shell-directory-tree"
+                                                      DoubleTapped="OnInspectorDirectoryTreeDoubleTapped"
+                                                      KeyDown="OnInspectorDirectoryTreeKeyDown"
+                                                      Margin="-8,0,0,0"
+                                                      SelectionMode="Single">
+                                                <TreeView.ItemTemplate>
+                                                    <DataTemplate x:DataType="controls:TreeViewNode">
+                                                        <ContentPresenter Content="{x:Bind Content}" />
+                                                    </DataTemplate>
+                                                </TreeView.ItemTemplate>
+                                            </TreeView>
+
+                                            <TextBlock x:Name="InspectorDirectoryEmptyText"
+                                                       AutomationProperties.AutomationId="shell-directory-empty"
+                                                       Style="{StaticResource ShellHintTextStyle}"
+                                                       Text="No editable files were found for this thread."
+                                                       Visibility="Collapsed"
+                                                       TextWrapping="WrapWholeWords" />
+                                        </StackPanel>
+                                    </ScrollViewer>
+
+                                    <ScrollViewer x:Name="InspectorNotesContent"
+                                                  Grid.Row="1"
+                                                  Visibility="Collapsed"
+                                                  VerticalScrollBarVisibility="Auto"
+                                                  HorizontalScrollBarVisibility="Disabled">
+                                        <StackPanel Padding="10,10,10,12"
+                                                    Spacing="6">
+                                            <Grid ColumnDefinitions="Auto,Auto,*,Auto"
+                                                  ColumnSpacing="4">
+                                                <Button x:Name="InspectorNotesThreadScopeButton"
+                                                        AutomationProperties.AutomationId="shell-thread-notes-scope-thread"
+                                                        Click="OnInspectorNotesThreadScopeClicked"
+                                                        Style="{StaticResource ShellNoteFilterButtonStyle}"
+                                                        ToolTipService.ToolTip="Show notes in the current thread"
+                                                        Content="Thread" />
+
+                                                <Button x:Name="InspectorNotesProjectScopeButton"
+                                                        AutomationProperties.AutomationId="shell-thread-notes-scope-project"
+                                                        Grid.Column="1"
+                                                        Click="OnInspectorNotesProjectScopeClicked"
+                                                        Style="{StaticResource ShellNoteFilterButtonStyle}"
+                                                        ToolTipService.ToolTip="Show notes across the current project"
+                                                        Content="Project" />
+
+                                                <TextBlock x:Name="InspectorNotesMetaText"
+                                                           Grid.Column="3"
+                                                           AutomationProperties.AutomationId="shell-thread-notes-meta"
+                                                           Style="{StaticResource ShellHintTextStyle}"
+                                                           Text="No notes"
+                                                           TextAlignment="Right"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           VerticalAlignment="Center" />
+                                            </Grid>
+
+                                            <ListView x:Name="InspectorNotesListView"
+                                                      AutomationProperties.AutomationId="shell-thread-note-list"
+                                                      HorizontalContentAlignment="Stretch"
+                                                      MaxHeight="148"
+                                                      ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                                      ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                                      SelectionChanged="OnInspectorNotesListSelectionChanged"
+                                                      SelectionMode="Single">
+                                                <ListView.ItemContainerStyle>
+                                                    <Style TargetType="ListViewItem">
+                                                        <Setter Property="Padding" Value="0" />
+                                                        <Setter Property="Margin" Value="0,0,0,2" />
+                                                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                                    </Style>
+                                                </ListView.ItemContainerStyle>
+                                                <ListView.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Grid Padding="6,6,4,6"
+                                                              ColumnSpacing="7">
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="Auto" />
+                                                                <ColumnDefinition Width="*" />
+                                                            </Grid.ColumnDefinitions>
+
+                                                            <Border Width="2"
+                                                                    Margin="0,1,0,1"
+                                                                    Background="{Binding AccentBrush}"
+                                                                    CornerRadius="1" />
+
+                                                            <StackPanel Grid.Column="1"
+                                                                        Spacing="1">
+                                                                <TextBlock Text="{Binding Title}"
+                                                                           FontSize="11.25"
+                                                                           FontWeight="SemiBold"
+                                                                           MaxLines="2"
+                                                                           TextTrimming="CharacterEllipsis"
+                                                                           TextWrapping="WrapWholeWords" />
+
+                                                                <StackPanel Orientation="Horizontal"
+                                                                            Spacing="6">
+                                                                    <TextBlock Text="{Binding ScopeLabel}"
+                                                                               FontSize="9.25"
+                                                                               FontWeight="SemiBold"
+                                                                               Foreground="{Binding AccentBrush}" />
+                                                                    <TextBlock Text="{Binding Meta}"
+                                                                               Style="{StaticResource ShellHintTextStyle}"
+                                                                               MaxLines="1"
+                                                                               TextTrimming="CharacterEllipsis" />
+                                                                </StackPanel>
+
+                                                                <TextBlock Text="{Binding Preview}"
+                                                                           Style="{StaticResource ShellHintTextStyle}"
+                                                                           MaxLines="2"
+                                                                           TextTrimming="CharacterEllipsis"
+                                                                           TextWrapping="WrapWholeWords" />
+                                                            </StackPanel>
+                                                        </Grid>
+                                                    </DataTemplate>
+                                                </ListView.ItemTemplate>
+                                            </ListView>
+
+                                            <TextBlock x:Name="InspectorNotesEmptyText"
+                                                       AutomationProperties.AutomationId="shell-thread-note-empty"
+                                                       Style="{StaticResource ShellHintTextStyle}"
+                                                       Text="No notes in this project."
+                                                       Visibility="Collapsed"
+                                                       TextWrapping="WrapWholeWords" />
+
+                                            <Grid ColumnDefinitions="*,Auto"
+                                                  ColumnSpacing="6">
+                                                <TextBox x:Name="InspectorNoteTitleTextBox"
+                                                         AutomationProperties.AutomationId="shell-thread-note-title"
+                                                         PlaceholderText="Title"
+                                                         Style="{StaticResource ShellInlineTextBoxStyle}"
+                                                         TextChanged="OnInspectorNoteTitleTextChanged" />
+
+                                                <ComboBox x:Name="InspectorNoteScopeComboBox"
+                                                          AutomationProperties.AutomationId="shell-thread-note-scope"
+                                                          Grid.Column="1"
+                                                          HorizontalAlignment="Right"
+                                                          MinWidth="132"
+                                                          SelectionChanged="OnInspectorNoteScopeSelectionChanged"
+                                                          Style="{StaticResource ShellNoteScopeComboBoxStyle}" />
+                                            </Grid>
+
+                                            <TextBox x:Name="InspectorNotesTextBox"
+                                                     AutomationProperties.AutomationId="shell-thread-notes"
+                                                     AcceptsReturn="True"
+                                                     HorizontalAlignment="Stretch"
+                                                     MinHeight="184"
+                                                     PlaceholderText="Leave a handoff or memory."
+                                                     Style="{StaticResource ShellInspectorNotesTextBoxStyle}"
+                                                     TextChanged="OnInspectorNotesTextChanged"
+                                                     TextWrapping="Wrap" />
+                                        </StackPanel>
+                                    </ScrollViewer>
                                 </Grid>
                             </Border>
-
-                            <ScrollViewer x:Name="InspectorFilesContent"
-                                          Grid.Row="1"
-                                          Visibility="Collapsed"
-                                          VerticalScrollBarVisibility="Auto"
-                                          HorizontalScrollBarVisibility="Disabled">
-                                <StackPanel Padding="12,12,12,14"
-                                            Spacing="12">
-                                    <StackPanel Spacing="4">
-                                        <TextBlock Text="DIRECTORY"
-                                                   Style="{StaticResource ShellInspectorLabelTextStyle}" />
-                                        <TextBlock x:Name="InspectorDirectoryRootText"
-                                                   AutomationProperties.AutomationId="shell-directory-root"
-                                                   Style="{StaticResource ShellBodyTextStyle}"
-                                                   Text="No active project"
-                                                   TextTrimming="CharacterEllipsis"
-                                                   TextWrapping="NoWrap" />
-                                        <TextBlock x:Name="InspectorDirectoryMetaText"
-                                                   AutomationProperties.AutomationId="shell-directory-meta"
-                                                   Style="{StaticResource ShellHintTextStyle}"
-                                                   Text="Open an editor pane to browse files."
-                                                   TextWrapping="WrapWholeWords" />
-                                    </StackPanel>
-
-                                    <TreeView x:Name="InspectorDirectoryTree"
-                                              AutomationProperties.AutomationId="shell-directory-tree"
-                                              DoubleTapped="OnInspectorDirectoryTreeDoubleTapped"
-                                              KeyDown="OnInspectorDirectoryTreeKeyDown"
-                                              SelectionMode="Single">
-                                        <TreeView.ItemTemplate>
-                                            <DataTemplate x:DataType="controls:TreeViewNode">
-                                                <ContentPresenter Content="{x:Bind Content}" />
-                                            </DataTemplate>
-                                        </TreeView.ItemTemplate>
-                                    </TreeView>
-
-                                    <TextBlock x:Name="InspectorDirectoryEmptyText"
-                                               AutomationProperties.AutomationId="shell-directory-empty"
-                                               Style="{StaticResource ShellHintTextStyle}"
-                                               Text="No editable files were found for this thread."
-                                               Visibility="Collapsed"
-                                               TextWrapping="WrapWholeWords" />
-                                </StackPanel>
-                            </ScrollViewer>
-                        </Grid>
-                    </Border>
+                        </SplitView.Pane>
+                    </SplitView>
 
                     <Frame x:Name="SettingsFrame"
                            AutomationProperties.AutomationId="shell-settings-frame"
-                           Grid.ColumnSpan="2"
                            Visibility="Collapsed"
                            Background="{ThemeResource ShellPageBackgroundBrush}" />
 
                     <StackPanel x:Name="EmptyThreadStatePanel"
                                 AutomationProperties.AutomationId="shell-empty-thread-state"
-                                Grid.ColumnSpan="2"
                                 HorizontalAlignment="Center"
                                 VerticalAlignment="Center"
                                 Visibility="Collapsed"

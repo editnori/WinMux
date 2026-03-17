@@ -60,6 +60,8 @@ namespace SelfContainedDeployment.Automation
         public string SelectedThreadId { get; set; }
 
         public List<NativeAutomationThreadState> Threads { get; set; } = new();
+
+        public List<NativeAutomationThreadNoteState> Notes { get; set; } = new();
     }
 
     public sealed class NativeAutomationThreadState
@@ -82,6 +84,10 @@ namespace SelfContainedDeployment.Automation
 
         public string Layout { get; set; }
 
+        public bool AutoFitPaneContentLocked { get; set; }
+
+        public string ZoomedPaneId { get; set; }
+
         public int PaneLimit { get; set; }
 
         public int VisiblePaneCapacity { get; set; }
@@ -92,6 +98,14 @@ namespace SelfContainedDeployment.Automation
 
         public int ChangedFileCount { get; set; }
 
+        public bool HasNotes { get; set; }
+
+        public int NoteCount { get; set; }
+
+        public string SelectedNoteId { get; set; }
+
+        public string NotePreview { get; set; }
+
         public string DiffReviewSource { get; set; }
 
         public string SelectedCheckpointId { get; set; }
@@ -101,6 +115,35 @@ namespace SelfContainedDeployment.Automation
         public List<NativeAutomationTabState> Tabs { get; set; } = new();
 
         public List<NativeAutomationTabState> Panes { get; set; } = new();
+
+        public List<NativeAutomationThreadNoteState> Notes { get; set; } = new();
+    }
+
+    public sealed class NativeAutomationThreadNoteState
+    {
+        public string Id { get; set; }
+
+        public string Title { get; set; }
+
+        public string Text { get; set; }
+
+        public string Preview { get; set; }
+
+        public string ProjectId { get; set; }
+
+        public string ProjectName { get; set; }
+
+        public string ThreadId { get; set; }
+
+        public string ThreadName { get; set; }
+
+        public string PaneId { get; set; }
+
+        public string PaneTitle { get; set; }
+
+        public bool Selected { get; set; }
+
+        public string UpdatedAt { get; set; }
     }
 
     public sealed class NativeAutomationTabState
@@ -126,6 +169,10 @@ namespace SelfContainedDeployment.Automation
 
         public string TargetTabId { get; set; }
 
+        public string NoteId { get; set; }
+
+        public string Title { get; set; }
+
         public string Value { get; set; }
     }
 
@@ -134,6 +181,10 @@ namespace SelfContainedDeployment.Automation
         public bool Ok { get; set; }
 
         public string Message { get; set; }
+
+        public string CorrelationId { get; set; }
+
+        public double DurationMs { get; set; }
 
         public NativeAutomationState State { get; set; }
     }
@@ -249,6 +300,10 @@ namespace SelfContainedDeployment.Automation
 
         public string Message { get; set; }
 
+        public string CorrelationId { get; set; }
+
+        public double DurationMs { get; set; }
+
         public NativeAutomationUiNode Target { get; set; }
     }
 
@@ -298,6 +353,16 @@ namespace SelfContainedDeployment.Automation
 
         public string StatusText { get; set; }
 
+        public double? WebViewInitializedMs { get; set; }
+
+        public double? NavigationCompletedMs { get; set; }
+
+        public double? RendererReadyMs { get; set; }
+
+        public double? SessionStartedMs { get; set; }
+
+        public double? FirstDisplayOutputMs { get; set; }
+
         public int Cols { get; set; }
 
         public int Rows { get; set; }
@@ -315,6 +380,10 @@ namespace SelfContainedDeployment.Automation
         public string ReplaySessionId { get; set; }
 
         public string ReplayCommand { get; set; }
+
+        public string ActiveToolSession { get; set; }
+
+        public bool ToolSurfaceVisible { get; set; }
 
         public string Selection { get; set; }
 
@@ -626,6 +695,10 @@ namespace SelfContainedDeployment.Automation
 
         public NativeAutomationState State { get; set; }
 
+        public List<string> StateChanges { get; set; } = new();
+
+        public List<string> InteractiveChanges { get; set; } = new();
+
         public List<NativeAutomationUiNode> InteractiveNodes { get; set; } = new();
     }
 
@@ -771,5 +844,130 @@ namespace SelfContainedDeployment.Automation
         public string Message { get; set; }
 
         public NativeAutomationExternalUiNode Target { get; set; }
+    }
+
+    public sealed class NativeAutomationPerfSnapshot
+    {
+        public string Timestamp { get; set; }
+
+        public string LastUiHeartbeat { get; set; }
+
+        public bool UiResponsive { get; set; }
+
+        public string ActiveCorrelationId { get; set; }
+
+        public string ActiveAction { get; set; }
+
+        public Dictionary<string, long> Counters { get; set; } = new();
+
+        public Dictionary<string, double> LastDurationsMs { get; set; } = new();
+
+        public NativeAutomationActionProfile LastAction { get; set; }
+
+        public List<NativeAutomationPerfOperation> RecentOperations { get; set; } = new();
+    }
+
+    public sealed class NativeAutomationActionProfile
+    {
+        public string CorrelationId { get; set; }
+
+        public string Kind { get; set; }
+
+        public string Name { get; set; }
+
+        public string StartedAt { get; set; }
+
+        public string CompletedAt { get; set; }
+
+        public double TotalMs { get; set; }
+
+        public double UiThreadWorkMs { get; set; }
+
+        public double AsyncBackgroundMs { get; set; }
+
+        public double FirstRenderCompleteMs { get; set; }
+
+        public double PaneLayoutMs { get; set; }
+
+        public double ProjectRailRefreshMs { get; set; }
+
+        public double InspectorRebuildMs { get; set; }
+
+        public double GitRefreshMs { get; set; }
+
+        public string Error { get; set; }
+
+        public Dictionary<string, string> Data { get; set; } = new();
+
+        public Dictionary<string, double> OperationTotalsMs { get; set; } = new();
+
+        public Dictionary<string, long> CounterDeltas { get; set; } = new();
+    }
+
+    public sealed class NativeAutomationPerfOperation
+    {
+        public string Timestamp { get; set; }
+
+        public string CorrelationId { get; set; }
+
+        public string Name { get; set; }
+
+        public double DurationMs { get; set; }
+
+        public string ThreadKind { get; set; }
+
+        public bool Background { get; set; }
+
+        public Dictionary<string, string> Data { get; set; } = new();
+    }
+
+    public sealed class NativeAutomationDoctorResponse
+    {
+        public bool Ok { get; set; }
+
+        public string Timestamp { get; set; }
+
+        public int ProcessId { get; set; }
+
+        public string WindowTitle { get; set; }
+
+        public string AutomationLogPath { get; set; }
+
+        public string AutomationLogTail { get; set; }
+
+        public string StartupErrorLogPath { get; set; }
+
+        public string StartupErrorLogTail { get; set; }
+
+        public string LastUnhandledExceptionMessage { get; set; }
+
+        public string LastUnhandledExceptionDetails { get; set; }
+
+        public bool UiResponsive { get; set; }
+
+        public NativeAutomationState State { get; set; }
+
+        public NativeAutomationPerfSnapshot Perf { get; set; }
+
+        public NativeAutomationEventsResponse Events { get; set; }
+
+        public NativeAutomationRecordingStatusResponse RecordingStatus { get; set; }
+
+        public NativeAutomationHangDump LastHangDump { get; set; }
+    }
+
+    public sealed class NativeAutomationHangDump
+    {
+        public string Timestamp { get; set; }
+
+        public string CorrelationId { get; set; }
+
+        public string Action { get; set; }
+
+        public string ScreenshotPath { get; set; }
+
+        public string EventsPath { get; set; }
+
+        public string Message { get; set; }
     }
 }

@@ -30,6 +30,21 @@
     "native:recording-start": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-automation.ps1\")\" recording-start",
     "native:recording-stop": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-automation.ps1\")\" recording-stop",
     "native:render-trace": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-automation.ps1\")\" render-trace",
+    "native:notes": "bun tools/winmux-notes.mjs",
+    "native:perf-snapshot": "bun tools/native-debugger.mjs perf-snapshot",
+    "native:doctor": "bun tools/native-debugger.mjs doctor",
+    "native:inspect": "bun tools/native-debugger.mjs inspect",
+    "native:wait": "bun tools/native-debugger.mjs wait",
+    "native:profile-action": "bun tools/native-debugger.mjs profile-action",
+    "native:click-and-capture": "bun tools/native-debugger.mjs click-and-capture",
+    "native:state-diff": "bun tools/native-debugger.mjs state-diff",
+    "native:ui-watch": "bun tools/native-debugger.mjs ui-watch",
+    "native:scenario": "bun tools/native-debugger.mjs scenario",
+    "native:benchmark": "bun tools/native-debugger.mjs benchmark",
+    "native:crash-report": "bun tools/native-debugger.mjs crash-report",
+    "native:perf:list": "bun tools/native-perf-governor.mjs list",
+    "native:perf:check": "bun tools/native-perf-governor.mjs check",
+    "native:perf:run": "bun tools/native-perf-governor.mjs run",
     "native:screenshot": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-automation.ps1\")\" screenshot",
     "native:screenshot:annotated": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-automation.ps1\")\" screenshot \"\" true",
     "native:smoke": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-automation-smoke.ps1\")\"",
@@ -49,6 +64,7 @@
   },
   "devDependencies": {
     "monaco-editor": "^0.55.1",
-    "playwright": "^1.58.2"
+    "playwright": "^1.58.2",
+    "yaml": "^2.8.2"
   }
 }

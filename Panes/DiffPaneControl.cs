@@ -10,6 +10,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 using Windows.Foundation;
 
 namespace SelfContainedDeployment.Panes
@@ -38,11 +39,38 @@ namespace SelfContainedDeployment.Panes
         public string Foreground { get; set; }
     }
 
+    internal sealed class DiffLineRenderItem
+    {
+        public int? OldLineNumber { get; set; }
+
+        public int? NewLineNumber { get; set; }
+
+        public string Line { get; set; }
+
+        public string Kind { get; set; }
+    }
+
+    internal sealed class DiffRenderCursor
+    {
+        public IReadOnlyList<string> Lines { get; init; } = Array.Empty<string>();
+
+        public int NextIndex { get; set; }
+
+        public int OldLineNumber { get; set; }
+
+        public int NewLineNumber { get; set; }
+
+        public bool HasActiveHunk { get; set; }
+    }
+
     public sealed class DiffPaneControl : UserControl
     {
         private static readonly Regex HunkHeaderRegex = new(@"@@ -(?<old>\d+)(?:,\d+)? \+(?<new>\d+)(?:,\d+)? @@", RegexOptions.Compiled);
         private const float MinFitWidthZoomFactor = 0.5f;
         private const double DiffCharacterWidth = 7.2;
+        private const int InitialDiffRenderLineBatch = 40;
+        private const int SubsequentDiffRenderLineBatch = 192;
+        private const int AsyncDiffRenderCharThreshold = 24000;
         private readonly Grid _root;
         private readonly Border _headerBorder;
         private readonly TextBlock _pathText;
@@ -59,6 +87,9 @@ namespace SelfContainedDeployment.Panes
         private bool _fitWidthRequested;
         private float _lastAppliedZoomFactor = float.NaN;
         private int _maxVisibleLineLength;
+        private int _renderGeneration;
+        private bool _showLoadingState;
+        private bool _disposed;
 
         public DiffPaneControl()
         {
@@ -200,16 +231,43 @@ namespace SelfContainedDeployment.Panes
 
         public void FocusPane()
         {
+            if (_disposed)
+            {
+                return;
+            }
+
             _scrollViewer.Focus(FocusState.Programmatic);
         }
 
         public void RequestLayout()
         {
+            if (_disposed)
+            {
+                return;
+            }
+
             InvalidateMeasure();
             InvalidateArrange();
             UpdateLayout();
             UpdateDiffContentWidth();
             QueueZoomToFitWidth();
+        }
+
+        public void DisposePane()
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _disposed = true;
+            _renderGeneration++;
+            _currentPath = null;
+            _currentDiff = null;
+            _currentFiles = Array.Empty<GitChangedFile>();
+            _showLoadingState = false;
+            _sectionAnchors.Clear();
+            _diffLinesPanel.Children.Clear();
         }
 
         public void ApplyFitToWidth(bool autoLock)
@@ -230,9 +288,25 @@ namespace SelfContainedDeployment.Panes
 
         public void SetDiff(string path, string diffText)
         {
+            string normalizedPath = path ?? string.Empty;
+            string normalizedDiff = diffText ?? string.Empty;
+            if (!_showLoadingState &&
+                _currentFiles.Count == 0 &&
+                string.Equals(_currentPath ?? string.Empty, normalizedPath, StringComparison.Ordinal) &&
+                string.Equals(_currentDiff ?? string.Empty, normalizedDiff, StringComparison.Ordinal))
+            {
+                _pathText.Text = string.IsNullOrWhiteSpace(path) ? "No diff selected" : path.Replace('\\', '/');
+                _summaryText.Text = string.IsNullOrWhiteSpace(path)
+                    ? "Choose a changed file from the inspector."
+                    : "Patch view";
+                UpdateHeaderVisibility();
+                return;
+            }
+
             _currentFiles = Array.Empty<GitChangedFile>();
-            _currentPath = path ?? string.Empty;
-            _currentDiff = diffText ?? string.Empty;
+            _currentPath = normalizedPath;
+            _currentDiff = normalizedDiff;
+            _showLoadingState = false;
 
             _pathText.Text = string.IsNullOrWhiteSpace(path) ? "No diff selected" : path.Replace('\\', '/');
             _summaryText.Text = string.IsNullOrWhiteSpace(path)
@@ -241,6 +315,20 @@ namespace SelfContainedDeployment.Panes
             UpdateHeaderVisibility();
 
             RenderDiff(diffText);
+        }
+
+        public void SetLoadingState(string path, string summary = null)
+        {
+            _currentFiles = Array.Empty<GitChangedFile>();
+            _currentPath = path ?? string.Empty;
+            _currentDiff = string.Empty;
+            _showLoadingState = true;
+            _pathText.Text = string.IsNullOrWhiteSpace(path) ? "No diff selected" : path.Replace('\\', '/');
+            _summaryText.Text = string.IsNullOrWhiteSpace(summary)
+                ? (string.IsNullOrWhiteSpace(path) ? "Choose a changed file from the inspector." : "Loading patch…")
+                : summary;
+            UpdateHeaderVisibility();
+            RenderDiff(null);
         }
 
         internal void SetDiffSet(IReadOnlyList<GitChangedFile> files, string selectedPath)
@@ -268,6 +356,7 @@ namespace SelfContainedDeployment.Panes
             _currentFiles = diffFiles;
             _currentPath = selectedPath ?? string.Empty;
             _currentDiff = BuildCombinedDiffText(diffFiles);
+            _showLoadingState = false;
             _pathText.Text = string.IsNullOrWhiteSpace(selectedPath)
                 ? "All changed files"
                 : selectedPath.Replace('\\', '/');
@@ -315,19 +404,19 @@ namespace SelfContainedDeployment.Panes
         private void RenderDiff(string diffText)
         {
             Stopwatch stopwatch = Stopwatch.StartNew();
+            int renderGeneration = ++_renderGeneration;
             _sectionAnchors.Clear();
             _diffLinesPanel.Children.Clear();
             _maxVisibleLineLength = 0;
             if (string.IsNullOrWhiteSpace(diffText))
             {
-                if (!string.IsNullOrWhiteSpace(_currentPath))
-                {
-                    return;
-                }
-
                 TextBlock emptyText = new()
                 {
-                    Text = "Select a changed file to inspect its patch.",
+                    Text = string.IsNullOrWhiteSpace(_currentPath)
+                        ? "Select a changed file to inspect its patch."
+                        : _showLoadingState
+                            ? "Loading patch for the selected file..."
+                            : "Patch unavailable for this file.",
                     Foreground = ResolveBrush("ShellTextTertiaryBrush"),
                     FontSize = 12,
                     IsTextSelectionEnabled = true,
@@ -339,11 +428,78 @@ namespace SelfContainedDeployment.Panes
                 return;
             }
 
+            if (diffText.Length >= AsyncDiffRenderCharThreshold)
+            {
+                TextBlock loadingIndicator = BuildLoadingIndicator(0, "Preparing patch view…");
+                _diffLinesPanel.Children.Add(loadingIndicator);
+                _maxVisibleLineLength = Math.Max(_maxVisibleLineLength, loadingIndicator.Text?.Length ?? 0);
+                UpdateDiffContentWidth();
+                QueueZoomToFitWidth();
+                _ = PrepareAndRenderDiffAsync(diffText, renderGeneration, stopwatch);
+                RecordRenderMetrics("single-deferred", lineCount: 0, fileCount: 1, durationMs: stopwatch.ElapsedMilliseconds);
+                return;
+            }
+
             string[] lines = diffText.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
-            RenderDiffLines(lines, 0);
+            DiffRenderCursor cursor = new()
+            {
+                Lines = lines,
+            };
+            RenderDiffLineBatch(cursor, InitialDiffRenderLineBatch);
+
+            if (cursor.NextIndex < lines.Length)
+            {
+                TextBlock loadingIndicator = BuildLoadingIndicator(lines.Length - cursor.NextIndex);
+                _diffLinesPanel.Children.Add(loadingIndicator);
+                UpdateDiffContentWidth();
+                QueueZoomToFitWidth();
+                DispatcherQueue?.TryEnqueue(() => ContinueRenderDiff(cursor, renderGeneration, loadingIndicator, stopwatch));
+                RecordRenderMetrics("single-partial", lines.Length, fileCount: 1, durationMs: stopwatch.ElapsedMilliseconds);
+                return;
+            }
+
             UpdateDiffContentWidth();
             QueueZoomToFitWidth();
             RecordRenderMetrics("single", lines.Length, fileCount: 1, durationMs: stopwatch.ElapsedMilliseconds);
+        }
+
+        private async Task PrepareAndRenderDiffAsync(string diffText, int renderGeneration, Stopwatch stopwatch)
+        {
+            string[] lines = await Task.Run(() => diffText.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None)).ConfigureAwait(false);
+            if (_disposed || DispatcherQueue is null)
+            {
+                return;
+            }
+
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                if (_disposed || renderGeneration != _renderGeneration)
+                {
+                    return;
+                }
+
+                _diffLinesPanel.Children.Clear();
+                DiffRenderCursor cursor = new()
+                {
+                    Lines = lines,
+                };
+                RenderDiffLineBatch(cursor, InitialDiffRenderLineBatch);
+
+                if (cursor.NextIndex < lines.Length)
+                {
+                    TextBlock loadingIndicator = BuildLoadingIndicator(lines.Length - cursor.NextIndex);
+                    _diffLinesPanel.Children.Add(loadingIndicator);
+                    UpdateDiffContentWidth();
+                    QueueZoomToFitWidth();
+                    DispatcherQueue?.TryEnqueue(() => ContinueRenderDiff(cursor, renderGeneration, loadingIndicator, stopwatch));
+                    RecordRenderMetrics("single-partial", lines.Length, fileCount: 1, durationMs: stopwatch.ElapsedMilliseconds);
+                    return;
+                }
+
+                UpdateDiffContentWidth();
+                QueueZoomToFitWidth();
+                RecordRenderMetrics("single", lines.Length, fileCount: 1, durationMs: stopwatch.ElapsedMilliseconds);
+            });
         }
 
         private void RenderDiffSet(IReadOnlyList<GitChangedFile> files, string selectedPath)
@@ -372,7 +528,9 @@ namespace SelfContainedDeployment.Panes
                     ? new[] { "Patch unavailable for this file." }
                     : file.DiffText.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
                 lineCount += lines.Length;
-                rowIndex = RenderDiffLines(lines, rowIndex);
+                List<DiffLineRenderItem> renderItems = BuildRenderItems(lines);
+                RenderDiffLineBatch(renderItems, 0, renderItems.Count);
+                rowIndex += renderItems.Count;
             }
 
             UpdateDiffContentWidth();
@@ -381,12 +539,12 @@ namespace SelfContainedDeployment.Panes
             RecordRenderMetrics("full", lineCount, files.Count, stopwatch.ElapsedMilliseconds);
         }
 
-        private int RenderDiffLines(IReadOnlyList<string> lines, int startingRow)
+        private List<DiffLineRenderItem> BuildRenderItems(IReadOnlyList<string> lines)
         {
             int oldLineNumber = 0;
             int newLineNumber = 0;
             bool hasActiveHunk = false;
-            int nextRow = startingRow;
+            List<DiffLineRenderItem> items = new(lines.Count);
 
             for (int index = 0; index < lines.Count; index++)
             {
@@ -422,12 +580,110 @@ namespace SelfContainedDeployment.Panes
                     }
                 }
 
-                _maxVisibleLineLength = Math.Max(_maxVisibleLineLength, line?.Length ?? 0);
-                FrameworkElement row = BuildDiffLineRow(leftNumber, rightNumber, line, kind);
-                AddDiffRow(row, nextRow++);
+                items.Add(new DiffLineRenderItem
+                {
+                    OldLineNumber = leftNumber,
+                    NewLineNumber = rightNumber,
+                    Line = line,
+                    Kind = kind,
+                });
             }
 
-            return nextRow;
+            return items;
+        }
+
+        private void RenderDiffLineBatch(DiffRenderCursor cursor, int count)
+        {
+            int endIndex = Math.Min(cursor.Lines.Count, cursor.NextIndex + count);
+            while (cursor.NextIndex < endIndex)
+            {
+                string line = cursor.Lines[cursor.NextIndex];
+                string kind = ClassifyDiffLine(line);
+                int? oldLineNumber = null;
+                int? newLineNumber = null;
+
+                if (kind == "hunk")
+                {
+                    cursor.HasActiveHunk = TryParseHunkHeader(line, out int oldLineStart, out int newLineStart);
+                    cursor.OldLineNumber = oldLineStart;
+                    cursor.NewLineNumber = newLineStart;
+                }
+                else if (kind == "deletion")
+                {
+                    if (cursor.HasActiveHunk)
+                    {
+                        oldLineNumber = cursor.OldLineNumber++;
+                    }
+                }
+                else if (kind == "addition")
+                {
+                    if (cursor.HasActiveHunk)
+                    {
+                        newLineNumber = cursor.NewLineNumber++;
+                    }
+                }
+                else if (kind == "context")
+                {
+                    if (cursor.HasActiveHunk)
+                    {
+                        oldLineNumber = cursor.OldLineNumber++;
+                        newLineNumber = cursor.NewLineNumber++;
+                    }
+                }
+
+                _maxVisibleLineLength = Math.Max(_maxVisibleLineLength, line?.Length ?? 0);
+                FrameworkElement row = BuildDiffLineRow(oldLineNumber, newLineNumber, line, kind);
+                AddDiffRow(row, cursor.NextIndex);
+                cursor.NextIndex++;
+            }
+        }
+
+        private void RenderDiffLineBatch(IReadOnlyList<DiffLineRenderItem> items, int startIndex, int count)
+        {
+            int endIndex = Math.Min(items.Count, startIndex + count);
+            for (int index = startIndex; index < endIndex; index++)
+            {
+                DiffLineRenderItem item = items[index];
+                _maxVisibleLineLength = Math.Max(_maxVisibleLineLength, item.Line?.Length ?? 0);
+                FrameworkElement row = BuildDiffLineRow(item.OldLineNumber, item.NewLineNumber, item.Line, item.Kind);
+                AddDiffRow(row, index);
+            }
+        }
+
+        private void ContinueRenderDiff(DiffRenderCursor cursor, int renderGeneration, TextBlock loadingIndicator, Stopwatch stopwatch)
+        {
+            if (renderGeneration != _renderGeneration)
+            {
+                return;
+            }
+
+            _diffLinesPanel.Children.Remove(loadingIndicator);
+            RenderDiffLineBatch(cursor, SubsequentDiffRenderLineBatch);
+
+            if (cursor.NextIndex < cursor.Lines.Count)
+            {
+                loadingIndicator.Text = $"Rendering patch… {cursor.NextIndex}/{cursor.Lines.Count}";
+                _diffLinesPanel.Children.Add(loadingIndicator);
+                DispatcherQueue?.TryEnqueue(() => ContinueRenderDiff(cursor, renderGeneration, loadingIndicator, stopwatch));
+                return;
+            }
+
+            UpdateDiffContentWidth();
+            QueueZoomToFitWidth();
+            RecordRenderMetrics("single", cursor.Lines.Count, fileCount: 1, durationMs: stopwatch.ElapsedMilliseconds);
+        }
+
+        private static TextBlock BuildLoadingIndicator(int remainingLineCount, string text = null)
+        {
+            return new TextBlock
+            {
+                Text = string.IsNullOrWhiteSpace(text)
+                    ? $"Rendering patch… {remainingLineCount} lines remaining"
+                    : text,
+                Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(0xFF, 0x71, 0x71, 0x7A)),
+                FontSize = 11,
+                Margin = new Thickness(8, 8, 8, 0),
+            };
         }
 
         private void AddDiffRow(FrameworkElement row, int rowIndex)

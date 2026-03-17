@@ -17,12 +17,15 @@ namespace SelfContainedDeployment.Automation
         {
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         };
+        private const long MaxLogBytes = 512 * 1024;
+        private const long RetainedLogBytes = 192 * 1024;
 
         private readonly MainWindow _window;
         private readonly TcpListener _listener;
         private readonly CancellationTokenSource _shutdown = new();
         private readonly int _port;
         private readonly string _logPath;
+        private readonly object _logGate = new();
         private Task _listenTask;
         private bool _disposed;
 
@@ -137,6 +140,19 @@ namespace SelfContainedDeployment.Automation
 
                     case ("GET", "/events"):
                         await WriteJsonAsync(stream, 200, NativeAutomationEventLog.Snapshot()).ConfigureAwait(false);
+                        break;
+
+                    case ("GET", "/perf-snapshot"):
+                        var perfSnapshot = _window.GetAutomationPerfSnapshot();
+                        await WriteJsonAsync(stream, 200, perfSnapshot).ConfigureAwait(false);
+                        break;
+
+                    case ("GET", "/doctor"):
+                        var perf = _window.GetAutomationPerfSnapshot();
+                        var doctor = perf.UiResponsive
+                            ? await InvokeOnUiThreadAsync(() => _window.GetAutomationDoctorSnapshot(_logPath)).ConfigureAwait(false)
+                            : _window.GetAutomationDoctorSnapshot(_logPath, preferLiveState: false);
+                        await WriteJsonAsync(stream, 200, doctor).ConfigureAwait(false);
                         break;
 
                     case ("POST", "/action"):
@@ -434,11 +450,38 @@ namespace SelfContainedDeployment.Automation
         {
             try
             {
-                File.AppendAllText(_logPath, $"[{DateTimeOffset.Now:O}] {message}{Environment.NewLine}");
+                lock (_logGate)
+                {
+                    TrimLogIfNeeded();
+                    File.AppendAllText(_logPath, $"[{DateTimeOffset.Now:O}] {message}{Environment.NewLine}");
+                }
             }
             catch
             {
             }
+        }
+
+        private void TrimLogIfNeeded()
+        {
+            FileInfo info = new(_logPath);
+            if (!info.Exists || info.Length <= MaxLogBytes)
+            {
+                return;
+            }
+
+            byte[] bytes = File.ReadAllBytes(_logPath);
+            int retainedLength = (int)Math.Min(RetainedLogBytes, bytes.Length);
+            byte[] tail = new byte[retainedLength];
+            Buffer.BlockCopy(bytes, bytes.Length - retainedLength, tail, 0, retainedLength);
+            string banner = $"[{DateTimeOffset.Now:O}] [log-trimmed] retained last {retainedLength} bytes{Environment.NewLine}";
+            byte[] bannerBytes = Encoding.UTF8.GetBytes(banner);
+            using FileStream stream = new(
+                _logPath,
+                FileMode.Create,
+                FileAccess.Write,
+                FileShare.ReadWrite);
+            stream.Write(bannerBytes, 0, bannerBytes.Length);
+            stream.Write(tail, 0, tail.Length);
         }
 
         private sealed record IncomingRequest(string Method, string Path, string Body);

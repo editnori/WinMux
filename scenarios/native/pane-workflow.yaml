@@ -1,0 +1,53 @@
+vars:
+  EDITOR_PATH: "MainPage.xaml.cs"
+  DIFF_PATH: "MainPage.xaml.cs"
+  BROWSER_URL: "https://example.org"
+
+defaults:
+  capture: true
+  annotated: true
+  events: 50
+  retries: 1
+  retryDelayMs: 250
+
+steps:
+  - name: open-editor-pane
+    type: semanticAction
+    action: openEditorFile
+    value: "${EDITOR_PATH}"
+
+  - name: inspect-editor-state
+    type: inspect
+    includeUiTree: true
+
+  - name: open-diff-pane
+    type: semanticAction
+    action: openDiffFile
+    value: "${DIFF_PATH}"
+
+  - name: inspect-diff-state
+    type: inspect
+    includeUiTree: true
+
+  - name: open-browser-pane
+    type: action
+    request:
+      action: newBrowserPane
+
+  - name: navigate-browser
+    type: action
+    request:
+      action: navigateBrowser
+      value: "${BROWSER_URL}"
+
+  - name: toggle-inspector-closed
+    type: semanticAction
+    action: toggleInspector
+    wait:
+      inspectorOpen: false
+
+  - name: toggle-inspector-open
+    type: semanticAction
+    action: toggleInspector
+    wait:
+      inspectorOpen: true

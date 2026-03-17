@@ -1,0 +1,35 @@
+defaults:
+  capture: true
+  annotated: false
+  events: 30
+  retries: 1
+  retryDelayMs: 200
+
+steps:
+  - name: new-tab-1
+    type: action
+    request:
+      action: newTab
+
+  - name: new-tab-2
+    type: action
+    request:
+      action: newTab
+
+  - name: new-tab-3
+    type: action
+    request:
+      action: newTab
+
+  - name: inspect-after-tab-burst
+    type: inspect
+    includeUiTree: false
+
+  - name: fit-panes
+    type: action
+    request:
+      action: fitPanes
+
+  - name: inspect-after-fit
+    type: inspect
+    includeUiTree: false

@@ -1,0 +1,30 @@
+vars:
+  RESTORE_PROJECT: ""
+
+defaults:
+  capture: true
+  annotated: false
+  events: 60
+  retries: 1
+  retryDelayMs: 500
+
+steps:
+  - name: stop-existing-app
+    type: command
+    command: powershell.exe -NoProfile -Command "Get-Process WinMux -ErrorAction SilentlyContinue | Stop-Process -Force"
+    failOnNonZero: false
+
+  - name: relaunch-app
+    type: command
+    command: bun run webview2:start
+
+  - name: wait-for-project-restore
+    type: wait
+    timeoutMs: 30000
+    intervalMs: 500
+    condition:
+      projectName: "${RESTORE_PROJECT}"
+
+  - name: inspect-restored-session
+    type: inspect
+    includeUiTree: true

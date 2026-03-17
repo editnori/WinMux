@@ -1,0 +1,32 @@
+vars:
+  PROJECT_A: ""
+  PROJECT_B: ""
+
+defaults:
+  capture: true
+  annotated: false
+  events: 40
+  retries: 1
+  retryDelayMs: 250
+
+steps:
+  - name: select-project-a
+    type: semanticAction
+    action: selectProjectByName
+    value: "${PROJECT_A}"
+    wait:
+      projectName: "${PROJECT_A}"
+
+  - name: select-project-b
+    type: semanticAction
+    action: selectProjectByName
+    value: "${PROJECT_B}"
+    wait:
+      projectName: "${PROJECT_B}"
+
+  - name: select-project-a-again
+    type: semanticAction
+    action: selectProjectByName
+    value: "${PROJECT_A}"
+    wait:
+      projectName: "${PROJECT_A}"

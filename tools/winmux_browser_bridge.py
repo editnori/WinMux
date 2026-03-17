@@ -8,11 +8,13 @@ import urllib.error
 import urllib.request
 
 
-def require_url(env_name: str) -> str:
+def resolve_url(env_name: str, path: str) -> str:
     value = os.environ.get(env_name, "").strip()
-    if not value:
-        raise SystemExit(f"Missing required environment variable: {env_name}")
-    return value
+    if value:
+        return value
+
+    automation_port = os.environ.get("WINMUX_AUTOMATION_PORT", "").strip() or "9331"
+    return f"http://127.0.0.1:{automation_port}{path}"
 
 
 def post_json(url: str, payload: dict) -> dict:
@@ -69,17 +71,22 @@ def main() -> int:
 
     try:
         if args.command == "state":
-            url = require_url("WINMUX_BROWSER_STATE_URL")
             payload = {"paneId": args.pane_id}
             path = "/browser-state"
         elif args.command == "eval":
-            url = require_url("WINMUX_BROWSER_EVAL_URL")
             payload = {"paneId": args.pane_id, "script": args.script}
             path = "/browser-eval"
         else:
-            url = require_url("WINMUX_BROWSER_SCREENSHOT_URL")
             payload = {"paneId": args.pane_id, "path": args.path}
             path = "/browser-screenshot"
+        url = resolve_url(
+            {
+                "/browser-state": "WINMUX_BROWSER_STATE_URL",
+                "/browser-eval": "WINMUX_BROWSER_EVAL_URL",
+                "/browser-screenshot": "WINMUX_BROWSER_SCREENSHOT_URL",
+            }[path],
+            path,
+        )
         try:
             result = post_json_via_powershell(path, payload)
         except (FileNotFoundError, subprocess.CalledProcessError, json.JSONDecodeError, UnicodeDecodeError):

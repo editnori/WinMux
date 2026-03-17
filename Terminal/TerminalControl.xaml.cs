@@ -5,6 +5,7 @@ using Microsoft.Web.WebView2.Core;
 using SelfContainedDeployment.Automation;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -50,11 +51,18 @@ namespace SelfContainedDeployment.Terminal
         private int _lastLoggedResizeRows;
         private string _sessionTitle = "Terminal";
         private ElementTheme _themePreference = ElementTheme.Default;
+        private readonly Stopwatch _startupStopwatch = Stopwatch.StartNew();
         private readonly StringBuilder _outputBuffer = new();
+        private readonly StringBuilder _pendingRendererOutput = new();
         private readonly StringBuilder _inputLineBuffer = new();
         private readonly Dictionary<string, TaskCompletionSource<NativeAutomationTerminalSnapshot>> _inspectionRequests = new();
         private readonly DispatcherQueueTimer _fitTimer;
         private readonly DispatcherQueueTimer _replayRestoreTimer;
+        private double? _webViewInitializedMs;
+        private double? _navigationCompletedMs;
+        private double? _rendererReadyMs;
+        private double? _sessionStartedMs;
+        private double? _firstDisplayOutputMs;
         private string _activeToolSession;
         private string _replayTool;
         private string _replaySessionId;
@@ -183,6 +191,8 @@ namespace SelfContainedDeployment.Terminal
 
         private async Task InitializeTerminalWebViewAsync()
         {
+            using var perfScope = NativeAutomationDiagnostics.TrackOperation("terminal.webview.init");
+            NativeAutomationDiagnostics.IncrementCounter("terminalWebViewInit.count");
             try
             {
                 CoreWebView2 core;
@@ -220,6 +230,14 @@ namespace SelfContainedDeployment.Terminal
                 TerminalView.Source = new Uri(rendererPath);
 
                 _webViewInitialized = true;
+                MarkStartupMilestone(
+                    ref _webViewInitializedMs,
+                    "startup.webview_initialized",
+                    "Terminal WebView2 initialized",
+                    new Dictionary<string, string>
+                    {
+                        ["rendererPath"] = rendererPath,
+                    });
                 LogTerminalEvent("webview.initialized", "Terminal WebView2 initialized", new Dictionary<string, string>
                 {
                     ["rendererPath"] = rendererPath,
@@ -269,9 +287,13 @@ namespace SelfContainedDeployment.Terminal
                 case "ready":
                     _rendererReady = true;
                     _rendererReadyProbePending = false;
+                    MarkStartupMilestone(ref _rendererReadyMs, "startup.renderer_ready", "Terminal renderer reported ready");
                     LogTerminalEvent("renderer.ready", "Terminal renderer reported ready");
                     ApplyBackgroundColor();
                     PostCurrentTheme();
+                    PostToolSessionState();
+                    PostMessage(new HostMessage { Type = "setTitle", Title = _sessionTitle });
+                    FlushPendingRendererOutput();
                     RequestFit();
                     HideStatus();
                     RendererReady?.Invoke(this, EventArgs.Empty);
@@ -359,7 +381,12 @@ namespace SelfContainedDeployment.Terminal
                 return;
             }
 
+            MarkStartupMilestone(ref _navigationCompletedMs, "startup.navigation_completed", "Terminal renderer navigation completed");
             LogTerminalEvent("renderer.navigation_completed", "Terminal renderer navigation completed");
+            if (AutoStartSession)
+            {
+                EnsureStarted();
+            }
             await EnsureRendererReadyAsync().ConfigureAwait(true);
         }
 
@@ -375,7 +402,7 @@ namespace SelfContainedDeployment.Terminal
 
         private void EnsureStarted()
         {
-            if (_started || !_rendererReady || _disposed || !AutoStartSession)
+            if (_started || !_webViewInitialized || _disposed || !AutoStartSession)
             {
                 return;
             }
@@ -391,6 +418,17 @@ namespace SelfContainedDeployment.Terminal
                 _connection.OutputReceived += OnOutputReceived;
                 _connection.ProcessExited += OnProcessExited;
                 _connection.Start(_cols, _rows, ShellCommand, ResolveProcessWorkingDirectory(), LaunchEnvironment);
+                MarkStartupMilestone(
+                    ref _sessionStartedMs,
+                    "startup.session_started",
+                    "Started ConPTY session",
+                    new Dictionary<string, string>
+                    {
+                        ["cols"] = _cols.ToString(),
+                        ["rows"] = _rows.ToString(),
+                        ["shellCommand"] = ShellCommand ?? string.Empty,
+                        ["processWorkingDirectory"] = ResolveProcessWorkingDirectory() ?? string.Empty,
+                    });
                 LogTerminalEvent("session.started", "Started ConPTY session", new Dictionary<string, string>
                 {
                     ["cols"] = _cols.ToString(),
@@ -424,10 +462,18 @@ namespace SelfContainedDeployment.Terminal
                 }
 
                 AppendOutput(text);
-                UpdateReplayCommandFromOutput();
-                UpdateLiveToolSessionFromOutput();
+                if (ShouldScanForReplayCommand(text))
+                {
+                    UpdateReplayCommandFromOutput();
+                }
+
+                if (ShouldScanForPrompt(text))
+                {
+                    UpdateLiveToolSessionFromOutput();
+                }
                 if (ContainsDisplayText(text))
                 {
+                    MarkStartupMilestone(ref _firstDisplayOutputMs, "startup.first_display_output", "Terminal produced visible output");
                     _hasDisplayOutput = true;
                     HideStartupMask();
                 }
@@ -438,7 +484,15 @@ namespace SelfContainedDeployment.Terminal
                      _replayRestoreTimer.Start();
                  }
 
-                PostMessage(new HostMessage { Type = "output", Data = text });
+                if (_rendererReady)
+                {
+                    PostMessage(new HostMessage { Type = "output", Data = text });
+                }
+                else
+                {
+                    BufferPendingRendererOutput(text);
+                }
+
                 HideStatus();
                 OutputActivity?.Invoke(this, EventArgs.Empty);
             });
@@ -490,6 +544,11 @@ namespace SelfContainedDeployment.Terminal
             TerminalView.Focus(FocusState.Programmatic);
             PostMessage(new HostMessage { Type = "focus" });
             LogTerminalEvent("focus.requested", "Terminal focus requested");
+        }
+
+        public Task WarmupAsync()
+        {
+            return EnsureInitializedAsync();
         }
 
         public void ApplyTheme(ElementTheme theme)
@@ -697,6 +756,15 @@ namespace SelfContainedDeployment.Terminal
             _disposed = true;
             _replayRestoreTimer.Stop();
             _fitTimer.Stop();
+            ActualThemeChanged -= OnActualThemeChanged;
+            SizeChanged -= OnTerminalSizeChanged;
+
+            TaskCompletionSource<NativeAutomationTerminalSnapshot>[] pendingInspectionRequests = _inspectionRequests.Values.ToArray();
+            _inspectionRequests.Clear();
+            foreach (TaskCompletionSource<NativeAutomationTerminalSnapshot> pendingInspection in pendingInspectionRequests)
+            {
+                pendingInspection.TrySetCanceled();
+            }
 
             try
             {
@@ -852,6 +920,8 @@ namespace SelfContainedDeployment.Terminal
                 return;
             }
 
+            NativeAutomationDiagnostics.IncrementCounter("terminalFit.count");
+            using var perfScope = NativeAutomationDiagnostics.TrackOperation("terminal.fit");
             PostMessage(new HostMessage { Type = "fit" });
             LogTerminalEvent("fit.requested", "Renderer fit requested");
         }
@@ -885,6 +955,52 @@ namespace SelfContainedDeployment.Terminal
             {
                 _outputBuffer.Remove(0, _outputBuffer.Length - maxChars);
             }
+        }
+
+        private void BufferPendingRendererOutput(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return;
+            }
+
+            _pendingRendererOutput.Append(text);
+            const int maxChars = 120000;
+            if (_pendingRendererOutput.Length > maxChars)
+            {
+                _pendingRendererOutput.Remove(0, _pendingRendererOutput.Length - maxChars);
+            }
+        }
+
+        private void FlushPendingRendererOutput()
+        {
+            if (!_rendererReady || _pendingRendererOutput.Length == 0)
+            {
+                return;
+            }
+
+            string bufferedOutput = _pendingRendererOutput.ToString();
+            _pendingRendererOutput.Clear();
+            PostMessage(new HostMessage { Type = "output", Data = bufferedOutput });
+        }
+
+        private void MarkStartupMilestone(
+            ref double? milestoneMs,
+            string eventName,
+            string message,
+            IReadOnlyDictionary<string, string> data = null)
+        {
+            if (milestoneMs.HasValue)
+            {
+                return;
+            }
+
+            milestoneMs = Math.Round(_startupStopwatch.Elapsed.TotalMilliseconds, 3);
+            Dictionary<string, string> payload = data is null
+                ? new Dictionary<string, string>()
+                : new Dictionary<string, string>(data);
+            payload["elapsedMs"] = milestoneMs.Value.ToString("0.###");
+            LogTerminalEvent(eventName, message, payload);
         }
 
         private void TrackInput(string text)
@@ -1006,6 +1122,21 @@ namespace SelfContainedDeployment.Terminal
             }
         }
 
+        private bool ShouldScanForReplayCommand(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(_replayCommand))
+            {
+                return true;
+            }
+
+            return text.Contains("resume", StringComparison.OrdinalIgnoreCase);
+        }
+
         private bool SetReplayCommand(string tool, string sessionId, string command)
         {
             if (string.Equals(_replayTool, tool, StringComparison.Ordinal) &&
@@ -1043,6 +1174,21 @@ namespace SelfContainedDeployment.Terminal
             }
         }
 
+        private bool ShouldScanForPrompt(string text)
+        {
+            if (string.IsNullOrWhiteSpace(_activeToolSession) || string.IsNullOrEmpty(text))
+            {
+                return false;
+            }
+
+            return text.Contains('\n') ||
+                text.Contains('\r') ||
+                text.Contains('>') ||
+                text.Contains('$') ||
+                text.Contains('#') ||
+                text.Contains('❯');
+        }
+
         private void SetActiveToolSession(string tool)
         {
             string previous = _activeToolSession;
@@ -1055,11 +1201,28 @@ namespace SelfContainedDeployment.Terminal
             }
 
             _activeToolSession = normalized;
+            PostToolSessionState();
             ToolSessionStateChanged?.Invoke(this, EventArgs.Empty);
             if (!string.IsNullOrWhiteSpace(previous) && string.IsNullOrWhiteSpace(normalized))
             {
                 ToolInteractionCompleted?.Invoke(this, EventArgs.Empty);
             }
+        }
+
+        private bool ShouldShowToolSurface()
+        {
+            // The renderer no longer overlays tool chrome on top of terminal rows.
+            return false;
+        }
+
+        private void PostToolSessionState()
+        {
+            PostMessage(new HostMessage
+            {
+                Type = "setToolSession",
+                ToolSession = _activeToolSession,
+                ToolSurfaceVisible = ShouldShowToolSurface(),
+            });
         }
 
         private static string BuildReplayCommand(string tool, string sessionId, string arguments)
@@ -1093,6 +1256,11 @@ namespace SelfContainedDeployment.Terminal
                 StatusVisible = StatusBadge?.Visibility == Visibility.Visible,
                 StatusText = StatusText?.Text,
                 HasDisplayOutput = _hasDisplayOutput,
+                WebViewInitializedMs = _webViewInitializedMs,
+                NavigationCompletedMs = _navigationCompletedMs,
+                RendererReadyMs = _rendererReadyMs,
+                SessionStartedMs = _sessionStartedMs,
+                FirstDisplayOutputMs = _firstDisplayOutputMs,
                 Cols = _cols,
                 Rows = _rows,
                 ViewportY = 0,
@@ -1100,6 +1268,8 @@ namespace SelfContainedDeployment.Terminal
                 ReplayTool = _replayTool,
                 ReplaySessionId = _replaySessionId,
                 ReplayCommand = _replayCommand,
+                ActiveToolSession = _activeToolSession,
+                ToolSurfaceVisible = ShouldShowToolSurface(),
                 BufferTail = buffer,
             };
         }
@@ -1133,6 +1303,11 @@ namespace SelfContainedDeployment.Terminal
                 StatusVisible = StatusBadge?.Visibility == Visibility.Visible,
                 StatusText = StatusText?.Text,
                 HasDisplayOutput = _hasDisplayOutput,
+                WebViewInitializedMs = _webViewInitializedMs,
+                NavigationCompletedMs = _navigationCompletedMs,
+                RendererReadyMs = _rendererReadyMs,
+                SessionStartedMs = _sessionStartedMs,
+                FirstDisplayOutputMs = _firstDisplayOutputMs,
                 Cols = Math.Max(1, message.Cols),
                 Rows = Math.Max(1, message.Rows),
                 CursorX = message.CursorX,
@@ -1142,6 +1317,8 @@ namespace SelfContainedDeployment.Terminal
                 ReplayTool = _replayTool,
                 ReplaySessionId = _replaySessionId,
                 ReplayCommand = _replayCommand,
+                ActiveToolSession = string.IsNullOrWhiteSpace(message.ToolSession) ? _activeToolSession : message.ToolSession,
+                ToolSurfaceVisible = message.ToolSurfaceVisible || ShouldShowToolSurface(),
                 Selection = message.Selection,
                 VisibleText = message.VisibleText,
                 BufferTail = string.IsNullOrWhiteSpace(message.BufferTail) ? BuildFallbackTerminalSnapshot().BufferTail : message.BufferTail,
@@ -1210,6 +1387,11 @@ namespace SelfContainedDeployment.Terminal
 
         private void UpdateStartupMask()
         {
+            if (StartupKickerText is not null)
+            {
+                StartupKickerText.Text = ResolveStartupKicker();
+            }
+
             if (StartupTitleText is not null)
             {
                 StartupTitleText.Text = ResolveStartupTitle();
@@ -1236,7 +1418,38 @@ namespace SelfContainedDeployment.Terminal
                 StartupDetailText.Text = detail;
             }
 
+            if (StartupMetaText is not null)
+            {
+                StartupMetaText.Text = ResolveStartupMeta();
+            }
+
             UpdateTerminalHeader();
+        }
+
+        private string ResolveStartupKicker()
+        {
+            if (!AutoStartSession)
+            {
+                return "Suspended pane";
+            }
+
+            string command = ShellCommand ?? string.Empty;
+            if (command.Contains("wsl.exe", StringComparison.OrdinalIgnoreCase))
+            {
+                return "WSL shell";
+            }
+
+            if (command.Contains("powershell", StringComparison.OrdinalIgnoreCase))
+            {
+                return "PowerShell";
+            }
+
+            if (command.Contains("cmd.exe", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Command Prompt";
+            }
+
+            return "Terminal workspace";
         }
 
         private string ResolveStartupTitle()
@@ -1263,6 +1476,32 @@ namespace SelfContainedDeployment.Terminal
             }
 
             return "Starting terminal";
+        }
+
+        private string ResolveStartupMeta()
+        {
+            if (!AutoStartSession)
+            {
+                return "This pane is suspended until you explicitly resume it.";
+            }
+
+            string command = ShellCommand ?? string.Empty;
+            if (command.Contains("wsl.exe", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Booting the distro, reconnecting the terminal bridge, and waiting for the first prompt.";
+            }
+
+            if (command.Contains("powershell", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Preparing PowerShell and attaching the shared renderer.";
+            }
+
+            if (command.Contains("cmd.exe", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Preparing Command Prompt and attaching the shared renderer.";
+            }
+
+            return "Preparing the terminal host, shell bridge, and renderer state.";
         }
 
         private static bool ContainsDisplayText(string text)
@@ -1512,6 +1751,8 @@ namespace SelfContainedDeployment.Terminal
             public string Selection { get; set; }
             public string VisibleText { get; set; }
             public string BufferTail { get; set; }
+            public string ToolSession { get; set; }
+            public bool ToolSurfaceVisible { get; set; }
         }
 
         private sealed class HostMessage
@@ -1522,6 +1763,8 @@ namespace SelfContainedDeployment.Terminal
             public string Title { get; set; }
             public string Theme { get; set; }
             public string RequestId { get; set; }
+            public string ToolSession { get; set; }
+            public bool ToolSurfaceVisible { get; set; }
         }
     }
 }
