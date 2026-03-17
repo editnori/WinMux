@@ -17,12 +17,34 @@
     let readyPosted = false;
     let activeToolSession = null;
     let appliedToolSession = "none";
-    const darkTheme = {
+    let toolSurfaceVisible = false;
+    let activeShellKind = "terminal";
+    let currentThemeName = "dark";
+    const shellAccents = {
+        terminal: {
+            dark: { accent: "#c9cdd4", selection: "rgba(201, 205, 212, 0.14)" },
+            light: { accent: "#48505a", selection: "rgba(72, 80, 90, 0.12)" },
+        },
+        wsl: {
+            dark: { accent: "#60a5fa", selection: "rgba(96, 165, 250, 0.16)" },
+            light: { accent: "#2563eb", selection: "rgba(37, 99, 235, 0.14)" },
+        },
+        powershell: {
+            dark: { accent: "#4ade80", selection: "rgba(74, 222, 128, 0.16)" },
+            light: { accent: "#16a34a", selection: "rgba(22, 163, 74, 0.14)" },
+        },
+        cmd: {
+            dark: { accent: "#fbbf24", selection: "rgba(251, 191, 36, 0.16)" },
+            light: { accent: "#ca8a04", selection: "rgba(202, 138, 4, 0.14)" },
+        },
+    };
+    const darkThemeBase = {
         background: "#101216",
         foreground: "#f3f4f6",
-        cursor: "#f3f4f6",
+        cursor: "#60a5fa",
         cursorAccent: "#101216",
-        selectionBackground: "rgba(243, 244, 246, 0.14)",
+        selectionBackground: "rgba(96, 165, 250, 0.16)",
+        selectionInactiveBackground: "rgba(167, 173, 183, 0.12)",
         black: "#0c0d10",
         red: "#f87171",
         green: "#4ade80",
@@ -40,12 +62,13 @@
         brightCyan: "#67e8f9",
         brightWhite: "#ffffff",
     };
-    const lightTheme = {
+    const lightThemeBase = {
         background: "#fbfcfd",
         foreground: "#1b1f24",
-        cursor: "#1b1f24",
+        cursor: "#2563eb",
         cursorAccent: "#fbfcfd",
-        selectionBackground: "rgba(27, 31, 36, 0.12)",
+        selectionBackground: "rgba(37, 99, 235, 0.14)",
+        selectionInactiveBackground: "rgba(72, 80, 90, 0.1)",
         black: "#1b1f24",
         red: "#dc2626",
         green: "#16a34a",
@@ -73,9 +96,11 @@
         fontFamily: '"Cascadia Mono", "Cascadia Code", Consolas, "Courier New", monospace',
         fontSize: 13,
         letterSpacing: 0,
-        lineHeight: 1,
+        lineHeight: 1.05,
+        fontWeight: "400",
+        fontWeightBold: "600",
         scrollback: 6000,
-        theme: darkTheme,
+        theme: darkThemeBase,
         windowsPty: {
             backend: "conpty",
             buildNumber: 22621,
@@ -92,10 +117,39 @@
         ended: false,
     };
 
-    function setTheme(themeName) {
+    function normalizeShellKind(shellKind) {
+        if (!shellKind || typeof shellKind !== "string") {
+            return "terminal";
+        }
+
+        const normalized = shellKind.trim().toLowerCase();
+        return normalized === "wsl" || normalized === "powershell" || normalized === "cmd"
+            ? normalized
+            : "terminal";
+    }
+
+    function buildTheme(themeName, shellKind) {
         const resolvedTheme = themeName === "light" ? "light" : "dark";
-        document.body.dataset.theme = resolvedTheme;
-        term.options.theme = resolvedTheme === "light" ? lightTheme : darkTheme;
+        const resolvedShellKind = normalizeShellKind(shellKind);
+        const baseTheme = resolvedTheme === "light" ? lightThemeBase : darkThemeBase;
+        const accent = shellAccents[resolvedShellKind]?.[resolvedTheme] ?? shellAccents.terminal[resolvedTheme];
+        return {
+            ...baseTheme,
+            cursor: accent.accent,
+            selectionBackground: accent.selection,
+        };
+    }
+
+    function updateChrome() {
+        document.body.dataset.shellKind = normalizeShellKind(activeShellKind);
+        document.body.dataset.toolSurface = toolSurfaceVisible ? "true" : "false";
+    }
+
+    function setTheme(themeName) {
+        currentThemeName = themeName === "light" ? "light" : "dark";
+        document.body.dataset.theme = currentThemeName;
+        term.options.theme = buildTheme(currentThemeName, activeShellKind);
+        updateChrome();
     }
 
     function normalizeToolSession(toolSession) {
@@ -127,11 +181,28 @@
     function setToolSession(toolSession) {
         activeToolSession = normalizeToolSession(toolSession);
         syncToolSession(true);
+        updateChrome();
+    }
+
+    function setToolSurfaceVisible(visible) {
+        toolSurfaceVisible = !!visible;
+        updateChrome();
+    }
+
+    function setSurfaceContext(shellKind) {
+        activeShellKind = normalizeShellKind(shellKind);
+        term.options.theme = buildTheme(currentThemeName, activeShellKind);
+        updateChrome();
+    }
+
+    function setWindowFocused(focused) {
+        document.body.dataset.focused = focused ? "true" : "false";
     }
 
     function setTitle(title) {
         const nextTitle = title && title.trim() ? title.trim() : "Native Terminal";
         document.title = nextTitle;
+        updateChrome();
     }
 
     function setStatus(text, visible) {
@@ -383,6 +454,10 @@
                 break;
             case "setToolSession":
                 setToolSession(message.toolSession);
+                setToolSurfaceVisible(message.toolSurfaceVisible);
+                break;
+            case "setSurfaceContext":
+                setSurfaceContext(message.shellKind);
                 break;
             default:
                 break;
@@ -483,6 +558,7 @@
         hideContextMenu();
         post({ type: "focus" });
         term.focus();
+        setWindowFocused(true);
     });
 
     term.onData((data) => {
@@ -554,7 +630,11 @@
         term.focus();
     });
 
-    window.addEventListener("blur", hideContextMenu);
+    window.addEventListener("blur", () => {
+        hideContextMenu();
+        setWindowFocused(false);
+    });
+    window.addEventListener("focus", () => setWindowFocused(true));
     window.addEventListener("resize", () => {
         hideContextMenu();
     });
@@ -569,6 +649,9 @@
     requestAnimationFrame(() => {
         setTheme("dark");
         setToolSession(null);
+        setToolSurfaceVisible(false);
+        setSurfaceContext("terminal");
+        setWindowFocused(document.hasFocus());
         syncToolSession(true);
         scheduleFit(true);
         term.focus();

@@ -10,7 +10,7 @@ namespace SelfContainedDeployment.Persistence
 {
     internal sealed class WorkspaceSessionSnapshot
     {
-        public int Version { get; set; } = 2;
+        public int Version { get; set; } = 3;
 
         public string SavedAt { get; set; }
 
@@ -106,6 +106,8 @@ namespace SelfContainedDeployment.Persistence
         public string CreatedAt { get; set; }
 
         public string UpdatedAt { get; set; }
+
+        public string ArchivedAt { get; set; }
     }
 
     internal sealed class GitCheckpointSessionSnapshot

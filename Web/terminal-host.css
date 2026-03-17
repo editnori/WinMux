@@ -1,31 +1,91 @@
 :root {
-    --app-bg: #101216;
-    --border: rgba(255, 255, 255, 0.08);
-    --overlay-bg: rgba(15, 16, 19, 0.94);
+    --app-bg: #0c0d10;
+    --surface-bg: #101216;
+    --surface-border: #1e2127;
+    --surface-inner-border: rgba(255, 255, 255, 0.028);
+    --surface-shadow: rgba(0, 0, 0, 0.18);
+    --overlay-bg: rgba(12, 13, 16, 0.92);
+    --overlay-border: rgba(255, 255, 255, 0.08);
+    --scrollbar-thumb: rgba(167, 173, 183, 0.3);
+    --scrollbar-thumb-hover: rgba(167, 173, 183, 0.42);
+    --shell-accent: #60a5fa;
+    --shell-accent-soft: rgba(96, 165, 250, 0.1);
+    --shell-accent-border: rgba(96, 165, 250, 0.24);
     --text-primary: #f3f4f6;
     --text-muted: #a7adb7;
     --terminal-gutter-top: 0px;
-    --terminal-gutter-right: 6px;
+    --terminal-gutter-right: 8px;
     --terminal-gutter-bottom: 0px;
     --terminal-gutter-left: 8px;
 }
 
 body[data-theme="dark"] {
     color-scheme: dark;
-    --app-bg: #101216;
-    --border: rgba(255, 255, 255, 0.08);
-    --overlay-bg: rgba(15, 16, 19, 0.94);
+    --app-bg: #0c0d10;
+    --surface-bg: #101216;
+    --surface-border: #1e2127;
+    --surface-inner-border: rgba(255, 255, 255, 0.028);
+    --surface-shadow: rgba(0, 0, 0, 0.18);
+    --overlay-bg: rgba(12, 13, 16, 0.92);
+    --overlay-border: rgba(255, 255, 255, 0.08);
+    --scrollbar-thumb: rgba(167, 173, 183, 0.3);
+    --scrollbar-thumb-hover: rgba(167, 173, 183, 0.42);
     --text-primary: #f3f4f6;
     --text-muted: #a7adb7;
 }
 
 body[data-theme="light"] {
     color-scheme: light;
-    --app-bg: #fbfcfd;
-    --border: rgba(24, 24, 27, 0.12);
-    --overlay-bg: rgba(255, 255, 255, 0.96);
+    --app-bg: #f5f6f8;
+    --surface-bg: #fbfcfd;
+    --surface-border: #e1e5ea;
+    --surface-inner-border: rgba(255, 255, 255, 0.78);
+    --surface-shadow: rgba(27, 31, 36, 0.04);
+    --overlay-bg: rgba(251, 252, 253, 0.94);
+    --overlay-border: rgba(27, 31, 36, 0.1);
+    --scrollbar-thumb: rgba(89, 96, 106, 0.24);
+    --scrollbar-thumb-hover: rgba(72, 80, 90, 0.36);
+    --shell-accent: #2563eb;
+    --shell-accent-soft: rgba(37, 99, 235, 0.08);
+    --shell-accent-border: rgba(37, 99, 235, 0.18);
     --text-primary: #1b1f24;
-    --text-muted: #59606a;
+    --text-muted: #48505a;
+}
+
+body[data-shell-kind="powershell"][data-theme="dark"] {
+    --shell-accent: #4ade80;
+    --shell-accent-soft: rgba(74, 222, 128, 0.16);
+    --shell-accent-border: rgba(74, 222, 128, 0.34);
+}
+
+body[data-shell-kind="powershell"][data-theme="light"] {
+    --shell-accent: #16a34a;
+    --shell-accent-soft: rgba(22, 163, 74, 0.14);
+    --shell-accent-border: rgba(22, 163, 74, 0.26);
+}
+
+body[data-shell-kind="cmd"][data-theme="dark"] {
+    --shell-accent: #fbbf24;
+    --shell-accent-soft: rgba(251, 191, 36, 0.14);
+    --shell-accent-border: rgba(251, 191, 36, 0.3);
+}
+
+body[data-shell-kind="cmd"][data-theme="light"] {
+    --shell-accent: #ca8a04;
+    --shell-accent-soft: rgba(202, 138, 4, 0.13);
+    --shell-accent-border: rgba(202, 138, 4, 0.24);
+}
+
+body[data-shell-kind="terminal"][data-theme="dark"] {
+    --shell-accent: #c9cdd4;
+    --shell-accent-soft: rgba(201, 205, 212, 0.12);
+    --shell-accent-border: rgba(201, 205, 212, 0.22);
+}
+
+body[data-shell-kind="terminal"][data-theme="light"] {
+    --shell-accent: #48505a;
+    --shell-accent-soft: rgba(72, 80, 90, 0.12);
+    --shell-accent-border: rgba(72, 80, 90, 0.18);
 }
 
 html,
@@ -54,17 +114,38 @@ body {
     padding: var(--terminal-gutter-top) var(--terminal-gutter-right) var(--terminal-gutter-bottom) var(--terminal-gutter-left);
 }
 
+.terminal-surface {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    border: 1px solid var(--surface-border);
+    background: var(--surface-bg);
+    box-shadow:
+        inset 0 1px 0 var(--surface-inner-border),
+        0 0 0 1px color-mix(in srgb, var(--surface-border) 18%, transparent);
+}
+
+body[data-focused="true"] .terminal-surface {
+    box-shadow:
+        inset 0 1px 0 var(--surface-inner-border),
+        0 0 0 1px color-mix(in srgb, var(--shell-accent-border) 42%, transparent);
+}
+
+body[data-tool-session="codex"] .terminal-surface {
+    max-width: min(100%, 92ch);
+}
+
 .terminal-stage {
     width: 100%;
     height: 100%;
     min-width: 0;
+    min-height: 0;
     overflow: hidden;
     font-family: "Cascadia Mono", "Cascadia Code", Consolas, "Courier New", monospace;
     font-size: 13px;
-}
-
-body[data-tool-session="codex"] .terminal-stage {
-    max-width: min(100%, 92ch);
 }
 
 #terminal-root .xterm {
@@ -76,29 +157,45 @@ body[data-tool-session="codex"] .terminal-stage {
 #terminal-root .xterm-viewport {
     inset: 0;
     overflow-y: auto;
-    scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+    scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 
 #terminal-root .xterm-viewport::-webkit-scrollbar {
-    width: 10px;
+    width: 11px;
 }
 
 #terminal-root .xterm-viewport::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.12);
+    background: var(--scrollbar-thumb);
     border-radius: 999px;
+    border: 3px solid transparent;
+    background-clip: padding-box;
+}
+
+#terminal-root .xterm-viewport::-webkit-scrollbar-thumb:hover {
+    background: var(--scrollbar-thumb-hover);
+    background-clip: padding-box;
+}
+
+#terminal-root .xterm-screen canvas {
+    image-rendering: auto;
+}
+
+#terminal-root .xterm-selection-layer {
+    mix-blend-mode: normal;
 }
 
 .status-line {
     position: absolute;
-    right: 8px;
-    bottom: 8px;
+    right: 16px;
+    bottom: 14px;
     max-width: 50%;
-    padding: 4px 6px;
-    border: 1px solid var(--border);
+    padding: 4px 7px;
+    border: 1px solid var(--overlay-border);
     background: var(--overlay-bg);
     color: var(--text-muted);
     font-size: 11px;
     pointer-events: none;
+    box-shadow: none;
 }
 
 .status-line[data-visible="false"] {
@@ -112,9 +209,9 @@ body[data-tool-session="codex"] .terminal-stage {
     min-width: 140px;
     padding: 6px;
     gap: 4px;
-    border: 1px solid var(--border);
+    border: 1px solid var(--overlay-border);
     background: var(--overlay-bg);
-    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.28);
+    box-shadow: none;
 }
 
 .terminal-menu[hidden] {
@@ -134,7 +231,7 @@ body[data-tool-session="codex"] .terminal-stage {
 }
 
 .terminal-menu-item:hover:not(:disabled) {
-    background: var(--border);
+    background: var(--shell-accent-soft);
 }
 
 .terminal-menu-item:disabled {

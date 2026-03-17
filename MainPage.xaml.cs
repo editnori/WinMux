@@ -93,7 +93,8 @@ namespace SelfContainedDeployment
         private static readonly bool DisableSettingsPagePreload = IsFeatureEnabled("WINMUX_DISABLE_SETTINGS_PRELOAD");
         private static readonly bool EnableSettingsPagePreload = IsFeatureEnabled("WINMUX_ENABLE_SETTINGS_PRELOAD") || !DisableSettingsPagePreload;
         private static readonly bool EnableAutomaticBaselineCapture = IsFeatureEnabled("WINMUX_ENABLE_AUTOMATIC_BASELINE_CAPTURE");
-        private static readonly bool EnableVisibleDeferredPaneMaterialization = IsFeatureEnabled("WINMUX_ENABLE_VISIBLE_DEFERRED_PANES");
+        private static readonly bool DisableVisibleDeferredPaneMaterialization = IsFeatureEnabled("WINMUX_DISABLE_VISIBLE_DEFERRED_PANES");
+        private static readonly bool EnableVisibleDeferredPaneMaterialization = IsFeatureEnabled("WINMUX_ENABLE_VISIBLE_DEFERRED_PANES") || !DisableVisibleDeferredPaneMaterialization;
         private const int MaxPersistedSnapshotDiffFiles = 8;
         private const int MaxPersistedSnapshotDiffChars = 200_000;
         private static readonly TimeSpan CachedThreadGitSnapshotMaxAge = TimeSpan.FromMinutes(5);
@@ -147,10 +148,6 @@ namespace SelfContainedDeployment
         private bool _projectTreeRefreshEnqueued;
         private bool _suppressDiffReviewSourceSelectionChanged;
         private bool _capturingDiffCheckpoint;
-        private bool _suppressInspectorNotesSync;
-        private bool _suppressInspectorNotesSelectionChanged;
-        private bool _suppressInspectorNoteTitleSync;
-        private bool _suppressInspectorNoteScopeSelectionChanged;
         private NotesListScope _activeNotesListScope = NotesListScope.Thread;
         private InspectorSection _activeInspectorSection = InspectorSection.Review;
         private string _lastInspectorDirectoryRootPath;
@@ -167,6 +164,7 @@ namespace SelfContainedDeployment
         private readonly Dictionary<string, ThreadActivitySummary> _threadActivitySummariesById = new(StringComparer.Ordinal);
         private readonly HashSet<string> _hoveredProjectIds = new(StringComparer.Ordinal);
         private readonly HashSet<string> _hoveredThreadIds = new(StringComparer.Ordinal);
+        private readonly HashSet<string> _expandedArchivedNoteThreadIds = new(StringComparer.Ordinal);
         private readonly Dictionary<string, TreeViewNode> _inspectorDirectoryNodesByPath = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<TreeViewNode, InspectorDirectoryTreeItem> _inspectorDirectoryItemsByNode = new();
         private readonly Dictionary<string, InspectorDirectoryUiCache> _inspectorDirectoryUiCacheByKey = new(StringComparer.OrdinalIgnoreCase);
@@ -240,7 +238,7 @@ namespace SelfContainedDeployment
             public bool RequiresAttention { get; init; }
         }
 
-        private sealed class ProjectNoteListItem
+        private sealed class InspectorNoteCardItem
         {
             public string NoteId { get; init; }
 
@@ -248,17 +246,64 @@ namespace SelfContainedDeployment
 
             public string Title { get; init; }
 
-            public string Preview { get; init; }
+            public string Meta { get; init; }
 
-            public string ScopeLabel { get; init; }
+            public string ScopeButtonLabel { get; init; }
+
+            public string ScopeToolTip { get; init; }
+
+            public string ArchiveButtonLabel { get; init; }
+
+            public string ArchiveToolTip { get; init; }
+
+            public string DeleteToolTip { get; init; }
+
+            public string PlaceholderText { get; init; }
+
+            public string EditorAutomationId { get; init; }
+
+            public string Text { get; init; }
+
+            public string TimestampText { get; init; }
+
+            public Brush AccentBrush { get; init; }
+
+            public Brush CardBackground { get; init; }
+
+            public Brush CardBorderBrush { get; init; }
+
+            public Visibility ArchiveButtonVisibility { get; init; }
+
+            public bool IsArchived { get; init; }
+        }
+
+        private sealed class InspectorNoteGroupItem
+        {
+            public string ThreadId { get; init; }
+
+            public string Title { get; init; }
 
             public string Meta { get; init; }
 
-            public Brush AccentBrush { get; init; }
+            public Visibility HeaderVisibility { get; init; }
+
+            public string ArchivedToggleText { get; init; }
+
+            public Visibility ArchivedSectionVisibility { get; init; }
+
+            public Visibility ArchivedItemsVisibility { get; init; }
+
+            public List<InspectorNoteCardItem> ActiveNotes { get; init; } = new();
+
+            public List<InspectorNoteCardItem> ArchivedNotes { get; init; } = new();
         }
 
         private sealed class NoteScopeOption
         {
+            public string ThreadId { get; init; }
+
+            public string NoteId { get; init; }
+
             public string PaneId { get; init; }
 
             public string Label { get; init; }
@@ -1136,6 +1181,25 @@ namespace SelfContainedDeployment
                             ResolveActionThread(request) ?? throw new InvalidOperationException("No thread selected."),
                             request.NoteId);
                         break;
+                    case "archivethreadnote":
+                        {
+                            WorkspaceThread thread = ResolveActionThread(request) ?? throw new InvalidOperationException("No thread selected.");
+                            WorkspaceThreadNote note = string.IsNullOrWhiteSpace(request.NoteId)
+                                ? ResolveSelectedThreadNote(thread)
+                                : thread.NoteEntries.FirstOrDefault(candidate => string.Equals(candidate.Id, request.NoteId, StringComparison.Ordinal));
+                            SetThreadNoteArchived(thread, note, archived: true);
+                            break;
+                        }
+                    case "restorethreadnote":
+                    case "unarchivethreadnote":
+                        {
+                            WorkspaceThread thread = ResolveActionThread(request) ?? throw new InvalidOperationException("No thread selected.");
+                            WorkspaceThreadNote note = string.IsNullOrWhiteSpace(request.NoteId)
+                                ? ResolveSelectedThreadNote(thread)
+                                : thread.NoteEntries.FirstOrDefault(candidate => string.Equals(candidate.Id, request.NoteId, StringComparison.Ordinal));
+                            SetThreadNoteArchived(thread, note, archived: false);
+                            break;
+                        }
                     case "selectthreadnote":
                         SelectThreadNote(
                             ResolveActionThread(request) ?? throw new InvalidOperationException("No thread selected."),
@@ -1499,7 +1563,20 @@ namespace SelfContainedDeployment
         {
             if (sender is MenuFlyoutItem item && item.Tag is string threadId)
             {
-                OpenThreadNotes(FindThread(threadId), scope: NotesListScope.Thread);
+                WorkspaceThread thread = FindThread(threadId);
+                if (thread is null)
+                {
+                    return;
+                }
+
+                if (thread.NoteEntries.Count == 0)
+                {
+                    StartInspectorNoteDraft(thread, scope: NotesListScope.Thread);
+                    return;
+                }
+
+                ClearInspectorNoteDraft();
+                OpenThreadNotes(thread, scope: NotesListScope.Thread);
             }
         }
 
@@ -1516,8 +1593,7 @@ namespace SelfContainedDeployment
                 return;
             }
 
-            AddThreadNote(thread, title: null, text: null, selectAfterCreate: true, paneId: null);
-            OpenThreadNotes(thread, scope: NotesListScope.Thread);
+            StartInspectorNoteDraft(thread, scope: NotesListScope.Thread);
         }
 
         private void OnRenamePaneMenuClicked(object sender, RoutedEventArgs e)
@@ -1542,27 +1618,13 @@ namespace SelfContainedDeployment
                 if (note is not null)
                 {
                     thread.SelectedNoteId = note.Id;
+                    ClearInspectorNoteDraft();
+                    OpenThreadNotes(thread, scope: NotesListScope.Thread);
+                    return;
                 }
 
-                OpenThreadNotes(thread, scope: NotesListScope.Thread);
+                StartInspectorNoteDraft(thread, paneId, scope: NotesListScope.Thread);
             }
-        }
-
-        private void OnNewPaneNoteMenuClicked(object sender, RoutedEventArgs e)
-        {
-            if (sender is not MenuFlyoutItem item || item.Tag is not string paneId)
-            {
-                return;
-            }
-
-            WorkspaceThread thread = FindThreadForPane(paneId);
-            if (thread is null)
-            {
-                return;
-            }
-
-            AddThreadNote(thread, title: null, text: null, selectAfterCreate: true, paneId);
-            OpenThreadNotes(thread, scope: NotesListScope.Thread);
         }
 
         private void OnDuplicateThreadMenuClicked(object sender, RoutedEventArgs e)
@@ -2453,8 +2515,7 @@ namespace SelfContainedDeployment
                 return;
             }
 
-            AddThreadNote(_activeThread, title: null, text: null, selectAfterCreate: true);
-            RefreshInspectorNotes();
+            StartInspectorNoteDraft(_activeThread, scope: _activeNotesListScope);
         }
 
         private void OnInspectorDeleteNoteClicked(object sender, RoutedEventArgs e)
@@ -2465,7 +2526,6 @@ namespace SelfContainedDeployment
             }
 
             DeleteThreadNote(_activeThread, _activeThread.SelectedNoteId);
-            RefreshInspectorNotes();
         }
 
         private void OnInspectorCollapseAllClicked(object sender, RoutedEventArgs e)
@@ -2522,71 +2582,191 @@ namespace SelfContainedDeployment
             await OpenEditorFileFromInspectorAsync(item.RelativePath).ConfigureAwait(true);
         }
 
-        private void OnInspectorNotesTextChanged(object sender, TextChangedEventArgs e)
+        private void OnInspectorNoteCardTextChanged(object sender, TextChangedEventArgs e)
         {
-            if (_suppressInspectorNotesSync || sender is not TextBox noteBox || _activeThread is null)
-            {
-                return;
-            }
-
-            UpdateThreadNotes(_activeThread, noteBox.Text, refreshInspector: false);
-            RefreshInspectorNotes();
-        }
-
-        private void OnInspectorNotesListSelectionChanged(object sender, SelectionChangedEventArgs e)
-        {
-            if (_suppressInspectorNotesSelectionChanged || sender is not ListView listView || listView.SelectedItem is not ProjectNoteListItem item)
+            if (sender is not TextBox noteBox || noteBox.Tag is not InspectorNoteCardItem item || item.IsArchived)
             {
                 return;
             }
 
             WorkspaceThread thread = FindThread(item.ThreadId);
-            SelectThreadNote(thread, item.NoteId, navigateToAttachment: true);
-            OpenThreadNotes(thread, focusEditor: false);
+            WorkspaceThreadNote note = thread?.NoteEntries.FirstOrDefault(candidate => string.Equals(candidate.Id, item.NoteId, StringComparison.Ordinal));
+            if (thread is null || note is null)
+            {
+                return;
+            }
+
+            thread.SelectedNoteId = note.Id;
+            UpdateThreadNoteText(thread, note, noteBox.Text, refreshInspector: false);
         }
 
-        private void OnInspectorNoteTitleTextChanged(object sender, TextChangedEventArgs e)
+        private void OnInspectorNoteCardTapped(object sender, TappedRoutedEventArgs e)
         {
-            if (_suppressInspectorNoteTitleSync || sender is not TextBox titleBox || _activeThread is null)
+            if (sender is not FrameworkElement element || element.Tag is not InspectorNoteCardItem item)
             {
                 return;
             }
 
-            WorkspaceThreadNote note = ResolveSelectedThreadNote(_activeThread);
-            if (note is null)
+            WorkspaceThread thread = FindThread(item.ThreadId);
+            if (thread is null || string.IsNullOrWhiteSpace(item.NoteId))
             {
-                note = AddThreadNote(_activeThread, titleBox.Text, text: null, selectAfterCreate: true);
-            }
-            else
-            {
-                UpsertThreadNote(_activeThread, note.Id, titleBox.Text, note.Text, selectAfterUpdate: true, paneId: note.PaneId);
+                return;
             }
 
-            if (note is not null)
+            bool selectionChanged = !string.Equals(thread.SelectedNoteId, item.NoteId, StringComparison.Ordinal);
+            thread.SelectedNoteId = item.NoteId;
+
+            if (selectionChanged)
             {
-                RefreshInspectorNotes();
+                QueueSessionSave();
             }
         }
 
-        private void OnInspectorNoteScopeSelectionChanged(object sender, SelectionChangedEventArgs e)
+        private void OnInspectorNoteCardDoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
         {
-            if (_suppressInspectorNoteScopeSelectionChanged || sender is not ComboBox scopeBox || _activeThread is null)
+            if (sender is not FrameworkElement element || element.Tag is not InspectorNoteCardItem item)
             {
                 return;
             }
 
-            WorkspaceThreadNote note = ResolveSelectedThreadNote(_activeThread);
-            if (note is null)
+            WorkspaceThread thread = FindThread(item.ThreadId);
+            if (thread is null || string.IsNullOrWhiteSpace(item.NoteId))
             {
                 return;
             }
 
-            if (scopeBox.SelectedItem is not NoteScopeOption option)
+            bool selectionChanged = !string.Equals(thread.SelectedNoteId, item.NoteId, StringComparison.Ordinal);
+            thread.SelectedNoteId = item.NoteId;
+            if (selectionChanged)
+            {
+                QueueSessionSave();
+            }
+
+            if (!item.IsArchived)
+            {
+                FocusInspectorNoteEditor(item.NoteId);
+            }
+
+            e.Handled = true;
+        }
+
+        private void OnInspectorNoteCardTextBoxGotFocus(object sender, RoutedEventArgs e)
+        {
+            if (sender is not TextBox noteBox || noteBox.Tag is not InspectorNoteCardItem item)
             {
                 return;
             }
 
-            UpdateThreadNotePaneAttachment(_activeThread, note, option.PaneId);
+            WorkspaceThread thread = FindThread(item.ThreadId);
+            if (thread is null || string.IsNullOrWhiteSpace(item.NoteId))
+            {
+                return;
+            }
+
+            thread.SelectedNoteId = item.NoteId;
+            QueueSessionSave();
+        }
+
+        private void OnInspectorNoteCardTextBoxKeyDown(object sender, KeyRoutedEventArgs e)
+        {
+            if (e.Key != Windows.System.VirtualKey.Escape ||
+                sender is not TextBox noteBox ||
+                noteBox.Tag is not InspectorNoteCardItem item)
+            {
+                return;
+            }
+
+            WorkspaceThread thread = FindThread(item.ThreadId);
+            if (thread is not null && !string.IsNullOrWhiteSpace(item.NoteId))
+            {
+                thread.SelectedNoteId = item.NoteId;
+            }
+
+            InspectorNotesThreadScopeButton?.Focus(FocusState.Programmatic);
+            e.Handled = true;
+        }
+
+        private void OnInspectorNoteScopeButtonClicked(object sender, RoutedEventArgs e)
+        {
+            if (sender is not Button button || button.Tag is not InspectorNoteCardItem item)
+            {
+                return;
+            }
+
+            WorkspaceThread thread = FindThread(item.ThreadId);
+            if (thread is null)
+            {
+                return;
+            }
+
+            thread.SelectedNoteId = item.NoteId;
+            MenuFlyout flyout = BuildInspectorNoteScopeFlyout(thread, item);
+            flyout.ShowAt(button);
+        }
+
+        private void OnInspectorNoteScopeOptionClicked(object sender, RoutedEventArgs e)
+        {
+            if (sender is not MenuFlyoutItem item || item.Tag is not NoteScopeOption option)
+            {
+                return;
+            }
+
+            WorkspaceThread thread = FindThread(option.ThreadId);
+            WorkspaceThreadNote note = thread?.NoteEntries.FirstOrDefault(candidate => string.Equals(candidate.Id, option.NoteId, StringComparison.Ordinal));
+            if (thread is null || note is null)
+            {
+                return;
+            }
+
+            thread.SelectedNoteId = note.Id;
+            UpdateThreadNotePaneAttachment(thread, note, option.PaneId);
+        }
+
+        private void OnInspectorArchiveNoteButtonClicked(object sender, RoutedEventArgs e)
+        {
+            if (sender is not FrameworkElement element || element.Tag is not InspectorNoteCardItem item)
+            {
+                return;
+            }
+
+            WorkspaceThread thread = FindThread(item.ThreadId);
+            WorkspaceThreadNote note = thread?.NoteEntries.FirstOrDefault(candidate => string.Equals(candidate.Id, item.NoteId, StringComparison.Ordinal));
+            if (thread is null || note is null)
+            {
+                return;
+            }
+
+            SetThreadNoteArchived(thread, note, archived: !note.IsArchived);
+        }
+
+        private void OnInspectorDeleteNoteCardClicked(object sender, RoutedEventArgs e)
+        {
+            if (sender is not FrameworkElement element || element.Tag is not InspectorNoteCardItem item)
+            {
+                return;
+            }
+
+            WorkspaceThread thread = FindThread(item.ThreadId);
+            if (thread is null)
+            {
+                return;
+            }
+
+            DeleteThreadNote(thread, item.NoteId);
+        }
+
+        private void OnInspectorArchivedNotesToggleClicked(object sender, RoutedEventArgs e)
+        {
+            if (sender is not FrameworkElement element || element.Tag is not InspectorNoteGroupItem group || string.IsNullOrWhiteSpace(group.ThreadId))
+            {
+                return;
+            }
+
+            if (!_expandedArchivedNoteThreadIds.Add(group.ThreadId))
+            {
+                _expandedArchivedNoteThreadIds.Remove(group.ThreadId);
+            }
+
             RefreshInspectorNotes();
         }
 
@@ -2668,7 +2848,7 @@ namespace SelfContainedDeployment
 
             if (InspectorNotesActionsPanel is not null)
             {
-                InspectorNotesActionsPanel.Visibility = _activeInspectorSection == InspectorSection.Notes ? Visibility.Visible : Visibility.Collapsed;
+                InspectorNotesActionsPanel.Visibility = Visibility.Collapsed;
             }
 
             RefreshInspectorNotes();
@@ -2682,22 +2862,23 @@ namespace SelfContainedDeployment
                 return;
             }
 
-            int noteCount = _activeThread?.NoteEntries.Count ?? 0;
+            int activeNoteCount = _activeThread?.NoteEntries.Count(candidate => !candidate.IsArchived) ?? 0;
+            int archivedNoteCount = _activeThread?.NoteEntries.Count(candidate => candidate.IsArchived) ?? 0;
 
             ToolTipService.SetToolTip(
                 InspectorNotesTabButton,
                 _activeThread is null
                     ? "No thread selected"
-                    : noteCount == 0
+                    : activeNoteCount == 0 && archivedNoteCount == 0
                         ? "Open project notes"
-                        : $"{noteCount} note{(noteCount == 1 ? string.Empty : "s")} in this thread");
+                        : $"{BuildNotesMeta(_activeProject, _activeThread, NotesListScope.Thread)} in this thread");
 
             if (_activeInspectorSection == InspectorSection.Notes)
             {
                 return;
             }
 
-            if (noteCount > 0)
+            if (activeNoteCount > 0 || archivedNoteCount > 0)
             {
                 InspectorNotesTabButton.Foreground = AppBrush(InspectorNotesTabButton, "ShellWarningBrush");
                 InspectorNotesTabButton.Background = CreateSidebarTintedBrush(AppBrush(InspectorNotesTabButton, "ShellWarningBrush"), 0x0D, Windows.UI.Color.FromArgb(0xFF, 0x14, 0x16, 0x1B));
@@ -2715,6 +2896,42 @@ namespace SelfContainedDeployment
             RefreshInspectorNotes();
         }
 
+        private void StartInspectorNoteDraft(WorkspaceThread thread, string paneId = null, NotesListScope? scope = null)
+        {
+            if (thread is null)
+            {
+                return;
+            }
+
+            OpenThreadNotes(thread, focusEditor: false, scope: scope);
+            string resolvedPaneId = ResolveNotePaneId(thread, paneId, preferSelectedPane: true);
+            WorkspaceThreadNote note = thread.NoteEntries
+                .FirstOrDefault(candidate => !candidate.IsArchived && string.IsNullOrWhiteSpace(candidate.Text));
+
+            if (note is null)
+            {
+                note = AddThreadNote(thread, title: null, text: null, selectAfterCreate: true, paneId: resolvedPaneId);
+            }
+            else
+            {
+                thread.SelectedNoteId = note.Id;
+                if (!string.IsNullOrWhiteSpace(resolvedPaneId) && !string.Equals(note.PaneId, resolvedPaneId, StringComparison.Ordinal))
+                {
+                    UpdateThreadNotePaneAttachment(thread, note, resolvedPaneId);
+                }
+                else
+                {
+                    RefreshInspectorNotes();
+                }
+            }
+
+            FocusInspectorNoteEditor(note?.Id);
+        }
+
+        private void ClearInspectorNoteDraft()
+        {
+        }
+
         private void ApplyNotesListScopeButtonState(Button button, bool active)
         {
             if (button is null)
@@ -2727,6 +2944,45 @@ namespace SelfContainedDeployment
                 : null;
             button.BorderBrush = null;
             button.Foreground = active ? AppBrush(button, "ShellTextPrimaryBrush") : AppBrush(button, "ShellTextSecondaryBrush");
+        }
+
+        private MenuFlyout BuildInspectorNoteScopeFlyout(WorkspaceThread thread, InspectorNoteCardItem item)
+        {
+            MenuFlyout flyout = new();
+            foreach (NoteScopeOption option in BuildNoteScopeOptions(thread, item?.NoteId))
+            {
+                MenuFlyoutItem menuItem = new()
+                {
+                    Text = option.Label,
+                    Tag = option,
+                };
+                menuItem.Click += OnInspectorNoteScopeOptionClicked;
+                flyout.Items.Add(menuItem);
+            }
+
+            return flyout;
+        }
+
+        private void FocusInspectorNoteEditor(string noteId)
+        {
+            if (string.IsNullOrWhiteSpace(noteId))
+            {
+                return;
+            }
+
+            string automationId = BuildNoteEditorAutomationId(noteId);
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                if (FindFirstElement(ShellRoot, candidate =>
+                        candidate is TextBox textBox &&
+                        string.Equals(AutomationProperties.GetAutomationId(textBox), automationId, StringComparison.Ordinal)) is not TextBox noteEditor)
+                {
+                    return;
+                }
+
+                noteEditor.Focus(FocusState.Programmatic);
+                noteEditor.Select(noteEditor.Text?.Length ?? 0, 0);
+            });
         }
 
         private void RefreshInspectorFileBrowser(bool forceRebuild = false)
@@ -2890,6 +3146,8 @@ namespace SelfContainedDeployment
                         {
                             _pendingInspectorDirectoryRootPath = null;
                             _pendingInspectorDirectoryRenderKey = null;
+                            _lastInspectorDirectoryRootPath = null;
+                            InspectorDirectoryTree.Tag = null;
                             InspectorDirectoryEmptyText.Visibility = Visibility.Visible;
                             UpdateInspectorFileActionState();
                             return;
@@ -2919,7 +3177,7 @@ namespace SelfContainedDeployment
                 ["rootPath"] = rootPath ?? string.Empty,
             });
             NativeAutomationDiagnostics.IncrementCounter("inspectorFileScan.count");
-            List<EditorPaneFileEntry> files = EditorPaneControl.EnumerateProjectFilesForRoot(rootPath);
+            List<EditorPaneFileEntry> files = EditorPaneControl.EnumerateProjectFilesForRoot(rootPath, bypassCache, cancellationToken);
             Dictionary<string, InspectorDirectoryDecoration> decorationsByPath = BuildInspectorDirectoryDecorations(changedFiles);
             Dictionary<string, InspectorDirectoryNodeModel> rootNodes = new(StringComparer.OrdinalIgnoreCase);
             foreach (EditorPaneFileEntry file in files)
@@ -3520,6 +3778,16 @@ namespace SelfContainedDeployment
             {
                 InspectorDeleteNoteButton.IsEnabled = ResolveSelectedThreadNote(_activeThread) is not null;
             }
+
+            if (InspectorInlineAddNoteButton is not null)
+            {
+                InspectorInlineAddNoteButton.IsEnabled = _activeThread is not null;
+            }
+
+            if (InspectorInlineDeleteNoteButton is not null)
+            {
+                InspectorInlineDeleteNoteButton.IsEnabled = ResolveSelectedThreadNote(_activeThread) is not null;
+            }
         }
 
         private static void CollapseInspectorDirectoryNode(TreeViewNode node)
@@ -3552,102 +3820,36 @@ namespace SelfContainedDeployment
 
         private void RefreshInspectorNotes()
         {
-            if (InspectorNotesTextBox is null ||
-                InspectorNotesMetaText is null ||
-                InspectorNotesListView is null ||
+            if (InspectorNotesMetaText is null ||
+                InspectorNotesGroupsItemsControl is null ||
                 InspectorNotesEmptyText is null ||
-                InspectorNoteTitleTextBox is null ||
-                InspectorNoteScopeComboBox is null ||
                 InspectorNotesThreadScopeButton is null ||
                 InspectorNotesProjectScopeButton is null)
             {
                 return;
             }
 
-            WorkspaceThreadNote selectedNote = ResolveSelectedThreadNote(_activeThread);
-            List<ProjectNoteListItem> noteItems = BuildInspectorNoteListItems(_activeProject, _activeThread, _activeNotesListScope).ToList();
-
-            _suppressInspectorNotesSelectionChanged = true;
-            try
-            {
-                InspectorNotesListView.ItemsSource = noteItems;
-                InspectorNotesListView.SelectedItem = noteItems.FirstOrDefault(candidate =>
-                    string.Equals(candidate.ThreadId, _activeThread?.Id, StringComparison.Ordinal) &&
-                    string.Equals(candidate.NoteId, selectedNote?.Id, StringComparison.Ordinal));
-            }
-            finally
-            {
-                _suppressInspectorNotesSelectionChanged = false;
-            }
+            List<InspectorNoteGroupItem> noteGroups = BuildInspectorNoteGroups(_activeProject, _activeThread, _activeNotesListScope).ToList();
+            InspectorNotesGroupsItemsControl.ItemsSource = noteGroups;
 
             InspectorNotesEmptyText.Text = _activeNotesListScope == NotesListScope.Thread
-                ? "No notes in this thread."
-                : "No notes in this project.";
-            InspectorNotesEmptyText.Visibility = noteItems.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-
-            string noteText = selectedNote?.Text ?? string.Empty;
-            _suppressInspectorNotesSync = true;
-            try
-            {
-                if (!string.Equals(InspectorNotesTextBox.Text, noteText, StringComparison.Ordinal))
-                {
-                    InspectorNotesTextBox.Text = noteText;
-                }
-            }
-            finally
-            {
-                _suppressInspectorNotesSync = false;
-            }
-
-            _suppressInspectorNoteTitleSync = true;
-            try
-            {
-                string noteTitle = selectedNote?.Title ?? string.Empty;
-                if (!string.Equals(InspectorNoteTitleTextBox.Text, noteTitle, StringComparison.Ordinal))
-                {
-                    InspectorNoteTitleTextBox.Text = noteTitle;
-                }
-            }
-            finally
-            {
-                _suppressInspectorNoteTitleSync = false;
-            }
-
-            _suppressInspectorNoteScopeSelectionChanged = true;
-            try
-            {
-                List<NoteScopeOption> scopeOptions = BuildNoteScopeOptions(_activeThread).ToList();
-                InspectorNoteScopeComboBox.ItemsSource = scopeOptions;
-                InspectorNoteScopeComboBox.DisplayMemberPath = nameof(NoteScopeOption.Label);
-                InspectorNoteScopeComboBox.SelectedItem = scopeOptions.FirstOrDefault(candidate =>
-                    string.Equals(candidate.PaneId, selectedNote?.PaneId, StringComparison.Ordinal))
-                    ?? scopeOptions.FirstOrDefault();
-            }
-            finally
-            {
-                _suppressInspectorNoteScopeSelectionChanged = false;
-            }
-
-            InspectorNotesTextBox.IsEnabled = _activeThread is not null;
-            InspectorNoteTitleTextBox.IsEnabled = _activeThread is not null;
-            InspectorNoteScopeComboBox.IsEnabled = selectedNote is not null;
+                ? "No thread notes yet. Add a note to pin context here."
+                : "No project notes yet.";
+            InspectorNotesEmptyText.Visibility = noteGroups.Sum(candidate => candidate.ActiveNotes.Count + candidate.ArchivedNotes.Count) == 0
+                ? Visibility.Visible
+                : Visibility.Collapsed;
             InspectorNotesThreadScopeButton.IsEnabled = _activeThread is not null;
             InspectorNotesProjectScopeButton.IsEnabled = _activeProject is not null;
             ApplyNotesListScopeButtonState(InspectorNotesThreadScopeButton, _activeNotesListScope == NotesListScope.Thread);
             ApplyNotesListScopeButtonState(InspectorNotesProjectScopeButton, _activeNotesListScope == NotesListScope.Project);
             if (InspectorDeleteNoteButton is not null)
             {
-                InspectorDeleteNoteButton.IsEnabled = selectedNote is not null;
+                InspectorDeleteNoteButton.IsEnabled = ResolveSelectedThreadNote(_activeThread) is not null;
             }
-
-            string stateBrushKey = ResolveThreadNotesStateBrushKey(_activeThread);
-
-            InspectorNotesTextBox.Background = selectedNote is null
-                ? AppBrush(InspectorNotesTextBox, "ShellMutedSurfaceBrush")
-                : CreateSidebarTintedBrush(AppBrush(InspectorNotesTextBox, stateBrushKey), 0x0D, Windows.UI.Color.FromArgb(0xFF, 0x14, 0x16, 0x1B));
-            InspectorNotesTextBox.BorderBrush = selectedNote is null
-                ? AppBrush(InspectorNotesTextBox, "ShellBorderBrush")
-                : CreateSidebarTintedBrush(AppBrush(InspectorNotesTextBox, stateBrushKey), 0x32, Windows.UI.Color.FromArgb(0xFF, 0xFB, 0xBF, 0x24));
+            if (InspectorInlineDeleteNoteButton is not null)
+            {
+                InspectorInlineDeleteNoteButton.IsEnabled = ResolveSelectedThreadNote(_activeThread) is not null;
+            }
 
             InspectorNotesMetaText.Text = BuildNotesMeta(_activeProject, _activeThread, _activeNotesListScope);
             InspectorNotesMetaText.Foreground = AppBrush(InspectorNotesMetaText, "ShellTextSecondaryBrush");
@@ -3660,8 +3862,11 @@ namespace SelfContainedDeployment
                 return;
             }
 
+            WorkspaceThreadNote noteToFocus = focusEditor ? ResolveSelectedThreadNote(thread) : null;
+
             if (!ReferenceEquals(_activeThread, thread) || !ReferenceEquals(_activeProject, FindProjectForThread(thread)))
             {
+                ClearInspectorNoteDraft();
                 ActivateThread(thread);
             }
 
@@ -3683,16 +3888,7 @@ namespace SelfContainedDeployment
 
             if (focusEditor)
             {
-                DispatcherQueue.TryEnqueue(() =>
-                {
-                    if (InspectorNotesTextBox is null)
-                    {
-                        return;
-                    }
-
-                    InspectorNotesTextBox.Focus(FocusState.Programmatic);
-                    InspectorNotesTextBox.Select(InspectorNotesTextBox.Text?.Length ?? 0, 0);
-                });
+                FocusInspectorNoteEditor(noteToFocus?.Id);
             }
         }
 
@@ -3737,15 +3933,29 @@ namespace SelfContainedDeployment
             }
 
             WorkspaceThreadNote note = thread.NoteEntries.FirstOrDefault(candidate => string.Equals(candidate.Id, thread.SelectedNoteId, StringComparison.Ordinal))
-                ?? thread.NoteEntries[0];
+                ?? ResolvePreferredThreadNote(thread);
             thread.SelectedNoteId = note.Id;
             return note;
+        }
+
+        private static WorkspaceThreadNote ResolvePreferredThreadNote(WorkspaceThread thread)
+        {
+            if (thread is null)
+            {
+                return null;
+            }
+
+            return thread.NoteEntries
+                .Where(candidate => !candidate.IsArchived)
+                .OrderByDescending(candidate => candidate.UpdatedAt)
+                .FirstOrDefault()
+                ?? thread.NoteEntries.OrderByDescending(candidate => candidate.UpdatedAt).FirstOrDefault();
         }
 
         private static string BuildDefaultThreadNoteTitle(WorkspaceThread thread)
         {
             int nextIndex = Math.Max(1, (thread?.NoteEntries.Count ?? 0) + 1);
-            return nextIndex == 1 ? "Handoff" : $"Note {nextIndex}";
+            return nextIndex == 1 ? "Note" : $"Note {nextIndex}";
         }
 
         private string ResolveNotePaneId(WorkspaceThread thread, string requestedPaneId = null, bool preferSelectedPane = true)
@@ -3897,7 +4107,7 @@ namespace SelfContainedDeployment
             }
 
             thread.NoteEntries.Remove(note);
-            thread.SelectedNoteId = thread.NoteEntries.FirstOrDefault()?.Id;
+            thread.SelectedNoteId = ResolvePreferredThreadNote(thread)?.Id;
             AfterThreadNotesChanged(thread);
             return true;
         }
@@ -3921,6 +4131,10 @@ namespace SelfContainedDeployment
             }
 
             thread.SelectedNoteId = note.Id;
+            if (note.IsArchived)
+            {
+                _expandedArchivedNoteThreadIds.Add(thread.Id);
+            }
             if (navigateToAttachment && !string.IsNullOrWhiteSpace(note.PaneId))
             {
                 SelectTab(note.PaneId);
@@ -3957,6 +4171,33 @@ namespace SelfContainedDeployment
             return true;
         }
 
+        private bool SetThreadNoteArchived(WorkspaceThread thread, WorkspaceThreadNote note, bool archived)
+        {
+            if (thread is null || note is null || note.IsArchived == archived)
+            {
+                return false;
+            }
+
+            note.ArchivedAt = archived ? DateTimeOffset.UtcNow : null;
+            note.UpdatedAt = DateTimeOffset.UtcNow;
+            thread.NoteEntries.Remove(note);
+            if (archived)
+            {
+                thread.NoteEntries.Add(note);
+                _expandedArchivedNoteThreadIds.Add(thread.Id);
+            }
+            else
+            {
+                thread.NoteEntries.Insert(0, note);
+            }
+
+            thread.SelectedNoteId = archived
+                ? ResolvePreferredThreadNote(thread)?.Id ?? note.Id
+                : note.Id;
+            AfterThreadNotesChanged(thread);
+            return true;
+        }
+
         private void ClearPaneNoteAttachments(WorkspaceThread thread, string paneId)
         {
             if (thread is null || string.IsNullOrWhiteSpace(paneId))
@@ -3983,10 +4224,22 @@ namespace SelfContainedDeployment
             QueueProjectTreeRefresh();
             QueueSessionSave();
 
-            if (ReferenceEquals(thread, _activeThread) && refreshInspector)
+            if (refreshInspector && ShouldRefreshInspectorNotesForThread(thread))
             {
                 RefreshInspectorNotes();
             }
+        }
+
+        private bool ShouldRefreshInspectorNotesForThread(WorkspaceThread thread)
+        {
+            if (thread is null || _activeInspectorSection != InspectorSection.Notes)
+            {
+                return false;
+            }
+
+            return _activeNotesListScope == NotesListScope.Project
+                ? ReferenceEquals(thread.Project, _activeProject)
+                : ReferenceEquals(thread, _activeThread);
         }
 
         private EditorPaneRecord ResolveInspectorEditorPane(bool createIfNeeded)
@@ -4068,6 +4321,7 @@ namespace SelfContainedDeployment
                             PaneId = note.PaneId,
                             CreatedAt = note.CreatedAt.ToString("O"),
                             UpdatedAt = note.UpdatedAt.ToString("O"),
+                            ArchivedAt = note.ArchivedAt?.ToString("O"),
                         }).ToList(),
                         SelectedDiffPath = thread.SelectedDiffPath,
                         DiffReviewSource = FormatDiffReviewSource(thread.DiffReviewSource),
@@ -4423,6 +4677,9 @@ namespace SelfContainedDeployment
                                 UpdatedAt = DateTimeOffset.TryParse(noteSnapshot.UpdatedAt, out DateTimeOffset updatedAt)
                                     ? updatedAt
                                     : DateTimeOffset.UtcNow,
+                                ArchivedAt = DateTimeOffset.TryParse(noteSnapshot.ArchivedAt, out DateTimeOffset archivedAt)
+                                    ? archivedAt
+                                    : null,
                             };
                             thread.NoteEntries.Add(note);
                         }
@@ -4435,7 +4692,7 @@ namespace SelfContainedDeployment
                         if (thread.NoteEntries.Count > 0 &&
                             !thread.NoteEntries.Any(candidate => string.Equals(candidate.Id, thread.SelectedNoteId, StringComparison.Ordinal)))
                         {
-                            thread.SelectedNoteId = thread.NoteEntries[0].Id;
+                            thread.SelectedNoteId = ResolvePreferredThreadNote(thread)?.Id;
                         }
 
                         foreach (GitCheckpointSessionSnapshot checkpointSnapshot in threadSnapshot.DiffCheckpoints ?? new List<GitCheckpointSessionSnapshot>())
@@ -6467,10 +6724,11 @@ namespace SelfContainedDeployment
                     PaneId = null,
                     CreatedAt = note.CreatedAt,
                     UpdatedAt = note.UpdatedAt,
+                    ArchivedAt = note.ArchivedAt,
                 };
                 duplicate.NoteEntries.Add(clonedNote);
             }
-            duplicate.SelectedNoteId = duplicate.NoteEntries.FirstOrDefault()?.Id;
+            duplicate.SelectedNoteId = ResolvePreferredThreadNote(duplicate)?.Id;
             ClearThreadPanes(project, duplicate);
 
             foreach (WorkspacePaneRecord pane in source.Panes)
@@ -6764,7 +7022,7 @@ namespace SelfContainedDeployment
                 bool showProjectThreads = isOpen && ReferenceEquals(project, _activeProject);
                 StackPanel group = new()
                 {
-                    Spacing = 2,
+                    Spacing = 3,
                     HorizontalAlignment = HorizontalAlignment.Stretch,
                 };
                 AutomationProperties.SetAutomationId(group, $"shell-project-group-{project.Id}");
@@ -6783,7 +7041,7 @@ namespace SelfContainedDeployment
 
                 Grid projectLayout = new()
                 {
-                    ColumnSpacing = 3,
+                    ColumnSpacing = 5,
                 };
                 AutomationProperties.SetAutomationId(projectLayout, $"shell-project-layout-{project.Id}");
                 projectLayout.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -6804,7 +7062,7 @@ namespace SelfContainedDeployment
                     projectButton.Height = double.NaN;
                     projectButton.MinHeight = 28;
                     projectButton.Width = double.NaN;
-                    projectButton.Padding = new Thickness(4, 3, 4, 3);
+                    projectButton.Padding = new Thickness(4, 4, 4, 4);
                     projectButton.HorizontalAlignment = HorizontalAlignment.Stretch;
                     projectButton.HorizontalContentAlignment = HorizontalAlignment.Stretch;
                     StackPanel textStack = new()
@@ -6841,8 +7099,9 @@ namespace SelfContainedDeployment
                     projectButton.Height = 32;
                     projectButton.Width = 32;
                     projectButton.Padding = new Thickness(0);
-                    projectButton.HorizontalAlignment = HorizontalAlignment.Center;
+                    projectButton.HorizontalAlignment = HorizontalAlignment.Left;
                     projectButton.HorizontalContentAlignment = HorizontalAlignment.Center;
+                    projectButton.Margin = new Thickness(6, 0, 0, 0);
                     projectButton.PointerEntered += OnProjectHeaderPointerEntered;
                     projectButton.PointerExited += OnProjectHeaderPointerExited;
                     projectButton.Content = new Border
@@ -6924,7 +7183,7 @@ namespace SelfContainedDeployment
                         new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) },
                         new ColumnDefinition { Width = GridLength.Auto },
                     },
-                    ColumnSpacing = 2,
+                    ColumnSpacing = 4,
                 };
                 AutomationProperties.SetAutomationId(projectHeader, $"shell-project-header-{project.Id}");
                 projectHeader.Children.Add(projectButton);
@@ -6935,7 +7194,7 @@ namespace SelfContainedDeployment
                 Border projectHeaderChrome = new()
                 {
                     Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x00, 0x00, 0x00, 0x00)),
-                    CornerRadius = new CornerRadius(4),
+                    CornerRadius = new CornerRadius(2),
                     Child = projectHeader,
                     Tag = project.Id,
                 };
@@ -6950,8 +7209,8 @@ namespace SelfContainedDeployment
                 {
                     StackPanel threadStack = new()
                     {
-                        Spacing = 0,
-                        Margin = new Thickness(4, 0, 0, 0),
+                        Spacing = 2,
+                        Margin = new Thickness(6, 2, 0, 2),
                         HorizontalAlignment = HorizontalAlignment.Stretch,
                     };
                     AutomationProperties.SetAutomationId(threadStack, $"shell-thread-list-{project.Id}");
@@ -6967,7 +7226,7 @@ namespace SelfContainedDeployment
                             HorizontalAlignment = HorizontalAlignment.Stretch,
                             Height = double.NaN,
                             MinHeight = 28,
-                            Padding = new Thickness(4, 3, 4, 3),
+                            Padding = new Thickness(3, 3, 3, 3),
                         };
                         AutomationProperties.SetAutomationId(threadButton, $"shell-thread-{thread.Id}");
                         AutomationProperties.SetName(threadButton, BuildThreadAutomationLabel(project, thread, activitySummary));
@@ -7024,7 +7283,7 @@ namespace SelfContainedDeployment
 
                         Grid threadLayout = new()
                         {
-                            ColumnSpacing = 3,
+                            ColumnSpacing = 5,
                         };
                         AutomationProperties.SetAutomationId(threadLayout, $"shell-thread-layout-{thread.Id}");
                         threadLayout.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -7042,7 +7301,7 @@ namespace SelfContainedDeployment
 
                         StackPanel threadText = new()
                         {
-                            Spacing = 0,
+                            Spacing = 1,
                         };
                         AutomationProperties.SetAutomationId(threadText, $"shell-thread-text-{thread.Id}");
                         Grid.SetColumn(threadText, 1);
@@ -7064,7 +7323,7 @@ namespace SelfContainedDeployment
                                 new ColumnDefinition { Width = GridLength.Auto },
                                 new ColumnDefinition { Width = GridLength.Auto },
                             },
-                            ColumnSpacing = 2,
+                            ColumnSpacing = 4,
                         };
                         TextBlock threadMeta = new()
                         {
@@ -7077,7 +7336,7 @@ namespace SelfContainedDeployment
                         AutomationProperties.SetAutomationId(threadMeta, $"shell-thread-meta-{thread.Id}");
                         threadFooter.Children.Add(threadMeta);
 
-                        bool showPaneStrip = ReferenceEquals(thread, _activeThread);
+                        bool showPaneStrip = thread.Panes.Count > 0;
                         if (showPaneStrip)
                         {
                             StackPanel threadAdornments = new()
@@ -7110,6 +7369,7 @@ namespace SelfContainedDeployment
                         threadButton.Content = threadLayout;
                         ApplySidebarThreadButtonState(
                             threadButton,
+                            thread,
                             thread == _activeThread && !_showingSettings,
                             activitySummary,
                             _hoveredThreadIds.Contains(thread.Id));
@@ -7149,8 +7409,10 @@ namespace SelfContainedDeployment
                 foreach ((string threadId, Button threadButton) in _threadButtonsById)
                 {
                     _threadActivitySummariesById.TryGetValue(threadId, out ThreadActivitySummary summary);
+                    WorkspaceThread thread = FindThread(threadId);
                     ApplySidebarThreadButtonState(
                         threadButton,
+                        thread,
                         activeShellView && string.Equals(threadId, _activeThread?.Id, StringComparison.Ordinal),
                         summary,
                         _hoveredThreadIds.Contains(threadId));
@@ -7192,8 +7454,10 @@ namespace SelfContainedDeployment
             }
 
             _threadActivitySummariesById.TryGetValue(threadId, out ThreadActivitySummary summary);
+            WorkspaceThread thread = FindThread(threadId);
             ApplySidebarThreadButtonState(
                 threadButton,
+                thread,
                 activeShellView && string.Equals(threadId, _activeThread?.Id, StringComparison.Ordinal),
                 summary,
                 _hoveredThreadIds.Contains(threadId));
@@ -7255,11 +7519,12 @@ namespace SelfContainedDeployment
             if (_projectHeaderBordersById.TryGetValue(projectId, out Border projectHeaderChrome))
             {
                 projectHeaderChrome.Background = active
-                    ? CreateSidebarTintedBrush(AppBrush(projectHeaderChrome, "ShellPaneActiveBorderBrush"), hovered ? (byte)0x24 : (byte)0x18, Windows.UI.Color.FromArgb(0xFF, 0x2C, 0x2D, 0x31))
+                    ? CreateSidebarTintedBrush(AppBrush(projectHeaderChrome, "ShellPaneActiveBorderBrush"), hovered ? (byte)0x18 : (byte)0x12, Windows.UI.Color.FromArgb(0xFF, 0x33, 0x41, 0x55))
                     : hovered
                         ? AppBrush(projectHeaderChrome, "ShellNavHoverBrush")
                         : new SolidColorBrush(Windows.UI.Color.FromArgb(0x00, 0x00, 0x00, 0x00));
-                projectHeaderChrome.BorderBrush = null;
+                projectHeaderChrome.BorderThickness = new Thickness(0);
+                projectHeaderChrome.BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(0x00, 0x00, 0x00, 0x00));
                 projectButton.Background = null;
                 projectButton.BorderBrush = null;
                 projectButton.Foreground = AppBrush(projectButton, "ShellTextPrimaryBrush");
@@ -7398,6 +7663,7 @@ namespace SelfContainedDeployment
             {
                 item.Header = BuildPaneTabHeader(pane);
             }
+            UpdatePaneTabChrome(item, pane);
             item.IsClosable = true;
             return item;
         }
@@ -7414,6 +7680,7 @@ namespace SelfContainedDeployment
             {
                 item.Header = BuildPaneTabHeader(pane);
             }
+            UpdatePaneTabChrome(item, pane);
         }
 
         private void SyncTabViewItemWithPane(WorkspacePaneRecord pane)
@@ -7449,16 +7716,15 @@ namespace SelfContainedDeployment
                 return false;
             }
 
-            if (item.Header is not Grid header ||
-                header.Children.Count < 2 ||
-                header.Children[0] is not FontIcon kindIcon ||
-                header.Children[1] is not TextBlock titleText)
+            if (!TryGetPaneTabHeaderParts(item, out Grid header, out Border accentDot, out FontIcon kindIcon, out TextBlock titleText))
             {
                 return false;
             }
 
             kindIcon.Glyph = ResolvePaneKindGlyph(pane.Kind);
-            kindIcon.Foreground = AppBrush(header, ResolvePaneKindBrushKey(pane.Kind));
+            Brush accentBrush = AppBrush(header, ResolvePaneAccentBrushKey(pane.Kind));
+            kindIcon.Foreground = accentBrush;
+            accentDot.Background = CreateSidebarTintedBrush(accentBrush, 0xD4, Windows.UI.Color.FromArgb(0xFF, 0x33, 0x41, 0x55));
             titleText.Text = FormatTabHeader(pane.Title, pane.Kind, pane.IsExited);
             return true;
         }
@@ -7475,22 +7741,14 @@ namespace SelfContainedDeployment
             renameItem.Click += OnRenamePaneMenuClicked;
             menu.Items.Add(renameItem);
             menu.Items.Add(new MenuFlyoutSeparator());
-            MenuFlyoutItem editNoteItem = new()
+            MenuFlyoutItem noteItem = new()
             {
-                Text = "Notes",
+                Text = "Note",
                 Tag = pane.Id,
             };
-            AutomationProperties.SetAutomationId(editNoteItem, $"shell-tab-thread-note-{pane.Id}");
-            editNoteItem.Click += OnEditPaneThreadNotesMenuClicked;
-            menu.Items.Add(editNoteItem);
-            MenuFlyoutItem newPaneNoteItem = new()
-            {
-                Text = "New note for this pane",
-                Tag = pane.Id,
-            };
-            AutomationProperties.SetAutomationId(newPaneNoteItem, $"shell-tab-pane-note-{pane.Id}");
-            newPaneNoteItem.Click += OnNewPaneNoteMenuClicked;
-            menu.Items.Add(newPaneNoteItem);
+            AutomationProperties.SetAutomationId(noteItem, $"shell-tab-pane-note-{pane.Id}");
+            noteItem.Click += OnEditPaneThreadNotesMenuClicked;
+            menu.Items.Add(noteItem);
             return menu;
         }
 
@@ -7506,32 +7764,48 @@ namespace SelfContainedDeployment
                 string title = FormatTabHeader(pane.Title, pane.Kind, pane.IsExited);
                 Grid header = new()
                 {
-                    ColumnSpacing = 5,
+                    ColumnSpacing = 6,
                     MinWidth = 0,
+                    Margin = new Thickness(6, 3, 6, 3),
                 };
+                header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
                 header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
                 header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
                 AutomationProperties.SetAutomationId(header, $"shell-tab-header-{pane.Id}");
+
+                Border accentDot = new()
+                {
+                    Width = 6,
+                    Height = 6,
+                    CornerRadius = new CornerRadius(3),
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Background = CreateSidebarTintedBrush(AppBrush(header, ResolvePaneAccentBrushKey(pane.Kind)), 0xD4, Windows.UI.Color.FromArgb(0xFF, 0x33, 0x41, 0x55)),
+                };
+                AutomationProperties.SetAutomationId(accentDot, $"shell-tab-accent-{pane.Id}");
+                header.Children.Add(accentDot);
 
                 FontIcon kindIcon = new()
                 {
                     Glyph = ResolvePaneKindGlyph(pane.Kind),
                     FontSize = 10.5,
-                    Foreground = AppBrush(header, ResolvePaneKindBrushKey(pane.Kind)),
+                    Foreground = AppBrush(header, ResolvePaneAccentBrushKey(pane.Kind)),
                     VerticalAlignment = VerticalAlignment.Center,
                 };
                 AutomationProperties.SetAutomationId(kindIcon, $"shell-tab-kind-{pane.Id}");
+                Grid.SetColumn(kindIcon, 1);
                 header.Children.Add(kindIcon);
 
                 TextBlock titleText = new()
                 {
                     Text = title,
                     FontSize = 10.9,
+                    FontWeight = Microsoft.UI.Text.FontWeights.Medium,
+                    Foreground = AppBrush(header, "ShellTextSecondaryBrush"),
                     TextTrimming = TextTrimming.CharacterEllipsis,
                     VerticalAlignment = VerticalAlignment.Center,
                 };
                 AutomationProperties.SetAutomationId(titleText, $"shell-tab-title-{pane.Id}");
-                Grid.SetColumn(titleText, 1);
+                Grid.SetColumn(titleText, 2);
                 header.Children.Add(titleText);
                 return header;
             }
@@ -7565,6 +7839,50 @@ namespace SelfContainedDeployment
             return editor;
         }
 
+        private bool TryGetPaneTabHeaderParts(TabViewItem item, out Grid header, out Border accentDot, out FontIcon kindIcon, out TextBlock titleText)
+        {
+            header = null;
+            accentDot = null;
+            kindIcon = null;
+            titleText = null;
+
+            if (item?.Header is not Grid headerGrid || headerGrid.Children.Count < 3)
+            {
+                return false;
+            }
+
+            if (headerGrid.Children[0] is not Border accent ||
+                headerGrid.Children[1] is not FontIcon icon ||
+                headerGrid.Children[2] is not TextBlock title)
+            {
+                return false;
+            }
+
+            header = headerGrid;
+            accentDot = accent;
+            kindIcon = icon;
+            titleText = title;
+            return true;
+        }
+
+        private void UpdatePaneTabChrome(TabViewItem item, WorkspacePaneRecord pane)
+        {
+            if (item is null || pane is null || !TryGetPaneTabHeaderParts(item, out Grid header, out Border accentDot, out FontIcon kindIcon, out TextBlock titleText))
+            {
+                return;
+            }
+
+            bool selected = string.Equals(_activeThread?.SelectedPaneId, pane.Id, StringComparison.Ordinal);
+            Brush accentBrush = AppBrush(header, ResolvePaneAccentBrushKey(pane.Kind));
+            accentDot.Background = selected
+                ? accentBrush
+                : CreateSidebarTintedBrush(accentBrush, 0xD4, Windows.UI.Color.FromArgb(0xFF, 0x33, 0x41, 0x55));
+            kindIcon.Foreground = accentBrush;
+            kindIcon.Opacity = selected ? 1 : 0.84;
+            titleText.Foreground = AppBrush(header, selected ? "ShellTextPrimaryBrush" : "ShellTextSecondaryBrush");
+            titleText.FontWeight = selected ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Medium;
+        }
+
         private static string ResolvePaneKindGlyph(WorkspacePaneKind kind)
         {
             return kind switch
@@ -7576,14 +7894,14 @@ namespace SelfContainedDeployment
             };
         }
 
-        private static string ResolvePaneKindBrushKey(WorkspacePaneKind kind)
+        private static string ResolvePaneAccentBrushKey(WorkspacePaneKind kind)
         {
             return kind switch
             {
                 WorkspacePaneKind.Browser => "ShellInfoBrush",
                 WorkspacePaneKind.Editor => "ShellSuccessBrush",
                 WorkspacePaneKind.Diff => "ShellWarningBrush",
-                _ => "ShellTextTertiaryBrush",
+                _ => "ShellTerminalBrush",
             };
         }
 
@@ -7832,19 +8150,25 @@ namespace SelfContainedDeployment
 
             zoomButton.Tag = pane;
             bool isZoomed = string.Equals(_activeThread?.ZoomedPaneId, pane.Id, StringComparison.Ordinal);
+            bool isSelected = string.Equals(_activeThread?.SelectedPaneId, pane.Id, StringComparison.Ordinal);
+            Brush accentBrush = AppBrush(border, ResolvePaneAccentBrushKey(pane.Kind));
             zoomButton.Content = new FontIcon
             {
                 FontSize = 10.5,
                 Glyph = isZoomed ? "\uE73F" : "\uE740",
             };
             zoomButton.Opacity = isZoomed ? 1.0 : 0.78;
-            zoomButton.Background = isZoomed
-                ? CreateSidebarTintedBrush(AppBrush(border, "ShellPaneActiveBorderBrush"), 0x0A, Windows.UI.Color.FromArgb(0xFF, 0x2C, 0x2D, 0x31))
+            zoomButton.Background = isZoomed || isSelected
+                ? CreateSidebarTintedBrush(accentBrush, isZoomed ? (byte)0x12 : (byte)0x0C, Windows.UI.Color.FromArgb(0xFF, 0x33, 0x41, 0x55))
                 : new SolidColorBrush(Windows.UI.Color.FromArgb(0x00, 0x00, 0x00, 0x00));
-            zoomButton.BorderBrush = isZoomed
-                ? CreateSidebarTintedBrush(AppBrush(border, "ShellPaneActiveBorderBrush"), 0x38, Windows.UI.Color.FromArgb(0xFF, 0x2C, 0x2D, 0x31))
+            zoomButton.BorderBrush = isZoomed || isSelected
+                ? CreateSidebarTintedBrush(accentBrush, isZoomed ? (byte)0x46 : (byte)0x2E, Windows.UI.Color.FromArgb(0xFF, 0x33, 0x41, 0x55))
                 : new SolidColorBrush(Windows.UI.Color.FromArgb(0x00, 0x00, 0x00, 0x00));
-            zoomButton.Foreground = AppBrush(border, isZoomed ? "ShellTextPrimaryBrush" : "ShellTextTertiaryBrush");
+            zoomButton.Foreground = isZoomed
+                ? AppBrush(border, "ShellTextPrimaryBrush")
+                : isSelected
+                    ? accentBrush
+                    : AppBrush(border, "ShellTextTertiaryBrush");
             AutomationProperties.SetAutomationId(zoomButton, $"shell-pane-zoom-{pane.Id}");
             AutomationProperties.SetName(zoomButton, isZoomed ? "Restore pane layout" : "Focus pane");
             ToolTipService.SetToolTip(zoomButton, isZoomed ? "Restore pane layout" : "Focus this pane");
@@ -8320,19 +8644,31 @@ namespace SelfContainedDeployment
             WorkspacePaneRecord selectedPane = GetSelectedPane(_activeThread);
             foreach ((string paneId, Border border) in _paneContainersById)
             {
-                if (border.Tag is WorkspacePaneRecord pane)
+                if (border.Tag is WorkspacePaneRecord taggedPane)
                 {
-                    UpdatePaneZoomButtonState(border, pane);
+                    UpdatePaneZoomButtonState(border, taggedPane);
                 }
 
                 bool isSelected = string.Equals(selectedPane?.Id, paneId, StringComparison.Ordinal);
+                string accentKey = border.Tag is WorkspacePaneRecord chromePane
+                    ? ResolvePaneAccentBrushKey(chromePane.Kind)
+                    : "ShellPaneActiveBorderBrush";
+                Brush accentBrush = AppBrush(border, accentKey);
                 border.Background = isSelected
-                    ? CreateSidebarTintedBrush(AppBrush(border, "ShellPaneActiveBorderBrush"), 0x06, Windows.UI.Color.FromArgb(0xFF, 0x2C, 0x2D, 0x31))
+                    ? CreateSidebarTintedBrush(accentBrush, ResolveTheme(SampleConfig.CurrentTheme) == ElementTheme.Light ? (byte)0x14 : (byte)0x10, Windows.UI.Color.FromArgb(0xFF, 0x33, 0x41, 0x55))
                     : AppBrush(border, "ShellSurfaceBackgroundBrush");
                 border.BorderBrush = isSelected
-                    ? CreateSidebarTintedBrush(AppBrush(border, "ShellPaneActiveBorderBrush"), 0x46, Windows.UI.Color.FromArgb(0xFF, 0x2C, 0x2D, 0x31))
+                    ? CreateSidebarTintedBrush(accentBrush, ResolveTheme(SampleConfig.CurrentTheme) == ElementTheme.Light ? (byte)0x5A : (byte)0x62, Windows.UI.Color.FromArgb(0xFF, 0x33, 0x41, 0x55))
                     : AppBrush(border, "ShellBorderBrush");
                 border.BorderThickness = new Thickness(1);
+            }
+
+            foreach ((_, TabViewItem item) in _tabItemsById)
+            {
+                if (item.Tag is WorkspacePaneRecord pane)
+                {
+                    UpdatePaneTabChrome(item, pane);
+                }
             }
         }
 
@@ -9567,7 +9903,15 @@ namespace SelfContainedDeployment
         {
             ApplyActionButtonState(SettingsNavButton, SettingsNavText, _showingSettings);
             ApplyActionButtonState(NewProjectButton, NewProjectText, false);
-            ApplyChromeButtonState(FitPanesButton, _activeThread?.AutoFitPaneContentLocked == true);
+            ApplyPaneStripButtonState(AddBrowserPaneButton, "ShellInfoBrush");
+            ApplyPaneStripButtonState(AddEditorPaneButton, "ShellSuccessBrush");
+            ApplyPaneStripButtonState(
+                FitPanesButton,
+                _activeThread?.AutoFitPaneContentLocked == true
+                    ? ResolvePaneAccentBrushKey(GetSelectedPane(_activeThread)?.Kind ?? WorkspacePaneKind.Terminal)
+                    : "ShellTextSecondaryBrush",
+                _activeThread?.AutoFitPaneContentLocked == true);
+            ApplyPaneStripButtonState(ToggleInspectorButton, _inspectorOpen ? "ShellTextSecondaryBrush" : "ShellTextTertiaryBrush");
             if (FitPanesButton is not null)
             {
                 ToolTipService.SetToolTip(
@@ -9621,6 +9965,8 @@ namespace SelfContainedDeployment
             {
                 icon.Glyph = _inspectorOpen ? "\uE7F8" : "\uE7F7";
             }
+
+            ApplyPaneStripButtonState(ToggleInspectorButton, _inspectorOpen ? "ShellTextSecondaryBrush" : "ShellTextTertiaryBrush");
         }
 
         private void UpdatePaneLayout()
@@ -9963,7 +10309,7 @@ namespace SelfContainedDeployment
                 .Append(paneSummary);
 
             int noteCount = thread?.NoteEntries.Count ?? 0;
-            string notePreview = BuildThreadNotePreview(thread?.Notes, maxLength: 120);
+            string notePreview = BuildThreadNotePreview(ResolvePreferredThreadNote(thread)?.Text, maxLength: 120);
             if (noteCount > 0)
             {
                 builder.Append(Environment.NewLine)
@@ -9977,13 +10323,14 @@ namespace SelfContainedDeployment
             return builder.ToString();
         }
 
-        private IEnumerable<ProjectNoteListItem> BuildInspectorNoteListItems(WorkspaceProject project, WorkspaceThread thread, NotesListScope scope)
+        private IEnumerable<InspectorNoteGroupItem> BuildInspectorNoteGroups(WorkspaceProject project, WorkspaceThread thread, NotesListScope scope)
         {
             if (scope == NotesListScope.Thread)
             {
-                foreach (ProjectNoteListItem item in BuildThreadNoteListItems(thread))
+                InspectorNoteGroupItem group = BuildInspectorNoteGroup(thread, scope);
+                if (group is not null)
                 {
-                    yield return item;
+                    yield return group;
                 }
 
                 yield break;
@@ -9994,70 +10341,138 @@ namespace SelfContainedDeployment
                 yield break;
             }
 
-            foreach ((WorkspaceThread ownerThread, WorkspaceThreadNote note) in project.Threads
-                         .SelectMany(candidate => candidate.NoteEntries.Select(note => (candidate, note)))
-                         .OrderByDescending(candidate => candidate.note.UpdatedAt))
+            foreach (WorkspaceThread ownerThread in project.Threads
+                         .Where(candidate => candidate.NoteEntries.Count > 0)
+                         .OrderByDescending(candidate => ReferenceEquals(candidate, _activeThread))
+                         .ThenByDescending(GetLatestThreadNoteActivity))
             {
-                yield return BuildNoteListItem(ownerThread, note, scope);
+                InspectorNoteGroupItem group = BuildInspectorNoteGroup(ownerThread, scope);
+                if (group is not null)
+                {
+                    yield return group;
+                }
             }
         }
 
-        private IEnumerable<ProjectNoteListItem> BuildThreadNoteListItems(WorkspaceThread thread)
+        private InspectorNoteGroupItem BuildInspectorNoteGroup(WorkspaceThread thread, NotesListScope scope)
         {
             if (thread is null)
             {
-                yield break;
+                return null;
             }
 
-            foreach (WorkspaceThreadNote note in thread.NoteEntries.OrderByDescending(candidate => candidate.UpdatedAt))
+            List<WorkspaceThreadNote> activeNotes = thread.NoteEntries
+                .Where(candidate => !candidate.IsArchived)
+                .OrderByDescending(candidate => candidate.UpdatedAt)
+                .ToList();
+            List<WorkspaceThreadNote> archivedNotes = thread.NoteEntries
+                .Where(candidate => candidate.IsArchived)
+                .OrderByDescending(candidate => candidate.ArchivedAt ?? candidate.UpdatedAt)
+                .ToList();
+            if (activeNotes.Count == 0 && archivedNotes.Count == 0)
             {
-                yield return BuildNoteListItem(thread, note, NotesListScope.Thread);
+                return null;
             }
-        }
 
-        private ProjectNoteListItem BuildNoteListItem(WorkspaceThread thread, WorkspaceThreadNote note, NotesListScope scope)
-        {
-            WorkspacePaneRecord attachedPane = thread?.Panes.FirstOrDefault(candidate => string.Equals(candidate.Id, note?.PaneId, StringComparison.Ordinal));
-            return new ProjectNoteListItem
+            bool showHeader = scope == NotesListScope.Project || archivedNotes.Count > 0;
+            bool archivedExpanded = _expandedArchivedNoteThreadIds.Contains(thread.Id) || (scope == NotesListScope.Thread && activeNotes.Count == 0);
+            return new InspectorNoteGroupItem
             {
-                NoteId = note?.Id,
-                ThreadId = thread?.Id,
-                Title = string.IsNullOrWhiteSpace(note?.Title) ? "Note" : note.Title.Trim(),
-                Preview = string.IsNullOrWhiteSpace(note?.Text) ? "Empty note" : BuildThreadNotePreview(note.Text, maxLength: 84),
-                ScopeLabel = ResolveNoteScopeLabel(attachedPane),
-                Meta = BuildNoteListMeta(thread, attachedPane, scope),
-                AccentBrush = ResolveNoteAccentBrush(attachedPane),
+                ThreadId = thread.Id,
+                Title = thread.Name,
+                Meta = showHeader ? BuildNoteGroupMeta(thread, activeNotes.Count, archivedNotes.Count, scope) : string.Empty,
+                HeaderVisibility = showHeader ? Visibility.Visible : Visibility.Collapsed,
+                ArchivedToggleText = archivedExpanded
+                    ? "Hide archived"
+                    : $"Archived ({archivedNotes.Count})",
+                ArchivedSectionVisibility = archivedNotes.Count > 0 ? Visibility.Visible : Visibility.Collapsed,
+                ArchivedItemsVisibility = archivedExpanded ? Visibility.Visible : Visibility.Collapsed,
+                ActiveNotes = activeNotes.Select(note => BuildInspectorNoteCardItem(thread, note)).ToList(),
+                ArchivedNotes = archivedNotes.Select(note => BuildInspectorNoteCardItem(thread, note)).ToList(),
             };
         }
 
-        private string BuildNoteListMeta(WorkspaceThread thread, WorkspacePaneRecord attachedPane, NotesListScope scope)
+        private string BuildNoteGroupMeta(WorkspaceThread thread, int activeCount, int archivedCount, NotesListScope scope)
         {
-            if (scope == NotesListScope.Thread)
+            int totalCount = activeCount + archivedCount;
+            List<string> parts = new();
+            parts.Add(totalCount == 1 ? "1 note" : $"{totalCount} notes");
+
+            if (archivedCount > 0)
             {
-                return attachedPane is null
-                    ? "Thread note"
-                    : FormatTabHeader(attachedPane.Title, attachedPane.Kind);
+                parts.Add($"{archivedCount} archived");
             }
 
+            if (scope == NotesListScope.Project && ReferenceEquals(thread, _activeThread))
+            {
+                parts.Add("Current");
+            }
+
+            return string.Join(" · ", parts);
+        }
+
+        private static string ResolveNoteAccentBrushKey(WorkspacePaneRecord attachedPane)
+        {
             return attachedPane is null
-                ? thread?.Name ?? "Thread"
-                : $"{thread?.Name ?? "Thread"} · {FormatTabHeader(attachedPane.Title, attachedPane.Kind)}";
+                ? "ShellWarningBrush"
+                : ResolvePaneAccentBrushKey(attachedPane.Kind);
         }
 
         private Brush ResolveNoteAccentBrush(WorkspacePaneRecord attachedPane)
         {
-            string brushKey = attachedPane?.Kind switch
-            {
-                WorkspacePaneKind.Browser => "ShellInfoBrush",
-                WorkspacePaneKind.Editor => "ShellSuccessBrush",
-                WorkspacePaneKind.Diff => "ShellWarningBrush",
-                WorkspacePaneKind.Terminal => "ShellTextSecondaryBrush",
-                _ => "ShellWarningBrush",
-            };
-            return AppBrush(InspectorNotesListView, brushKey);
+            return AppBrush(InspectorNotesGroupsItemsControl, ResolveNoteAccentBrushKey(attachedPane));
         }
 
-        private static string ResolveNoteScopeLabel(WorkspacePaneRecord attachedPane)
+        private InspectorNoteCardItem BuildInspectorNoteCardItem(WorkspaceThread thread, WorkspaceThreadNote note)
+        {
+            WorkspacePaneRecord attachedPane = thread?.Panes.FirstOrDefault(candidate => string.Equals(candidate.Id, note?.PaneId, StringComparison.Ordinal));
+            Brush accentBrush = ResolveNoteAccentBrush(attachedPane);
+            bool selected = string.Equals(thread?.SelectedNoteId, note?.Id, StringComparison.Ordinal);
+            bool archived = note?.IsArchived == true;
+            string noteText = note?.Text;
+            return new InspectorNoteCardItem
+            {
+                NoteId = note?.Id,
+                ThreadId = thread?.Id,
+                Title = ResolveNoteListTitle(note),
+                Text = noteText,
+                Meta = BuildNoteCardMeta(attachedPane),
+                TimestampText = archived
+                    ? $"Archived {FormatNoteTimestamp(note?.ArchivedAt ?? note?.UpdatedAt ?? DateTimeOffset.UtcNow)}"
+                    : $"Updated {FormatNoteTimestamp(note?.UpdatedAt ?? DateTimeOffset.UtcNow)}",
+                ScopeButtonLabel = BuildNoteScopeLabel(attachedPane),
+                ScopeToolTip = "Attach this note to the thread or a pane",
+                ArchiveButtonLabel = archived ? "Restore" : "Archive",
+                ArchiveToolTip = archived ? "Restore this note to the active list" : "Archive this note",
+                DeleteToolTip = "Delete this note",
+                PlaceholderText = archived ? string.Empty : "Empty note",
+                EditorAutomationId = BuildNoteEditorAutomationId(note?.Id),
+                AccentBrush = accentBrush,
+                CardBackground = CreateSidebarTintedBrush(
+                    accentBrush,
+                    selected
+                        ? archived ? (byte)0x05 : (byte)0x09
+                        : (byte)0x00,
+                    Windows.UI.Color.FromArgb(0xFF, 0x14, 0x16, 0x1B)),
+                CardBorderBrush = CreateSidebarTintedBrush(
+                    AppBrush(InspectorNotesGroupsItemsControl, "ShellBorderBrush"),
+                    (byte)0x00,
+                    Windows.UI.Color.FromArgb(0xFF, 0x14, 0x16, 0x1B)),
+                ArchiveButtonVisibility = string.IsNullOrWhiteSpace(note?.Text) && !archived
+                    ? Visibility.Collapsed
+                    : Visibility.Visible,
+                IsArchived = archived,
+            };
+        }
+
+        private string BuildNoteCardMeta(WorkspacePaneRecord attachedPane)
+        {
+            return attachedPane is null
+                ? _activeNotesListScope == NotesListScope.Project ? "Thread note" : "Current thread"
+                : BuildPaneContextTitle(attachedPane);
+        }
+
+        private static string BuildNoteScopeLabel(WorkspacePaneRecord attachedPane)
         {
             return attachedPane?.Kind switch
             {
@@ -10069,23 +10484,71 @@ namespace SelfContainedDeployment
             };
         }
 
-        private static string BuildNotesMeta(WorkspaceProject project, WorkspaceThread thread, NotesListScope scope)
+        private static string BuildPaneContextTitle(WorkspacePaneRecord pane)
         {
-            int noteCount = scope == NotesListScope.Thread
-                ? thread?.NoteEntries.Count ?? 0
-                : project?.Threads.Sum(candidate => candidate.NoteEntries.Count) ?? 0;
-            string noteText = noteCount == 0
-                ? "No notes"
-                : $"{noteCount} note{(noteCount == 1 ? string.Empty : "s")}";
-            return scope == NotesListScope.Thread
-                ? $"{thread?.Name ?? "Thread"} · {noteText}"
-                : $"Project · {noteText}";
+            if (pane is null)
+            {
+                return string.Empty;
+            }
+
+            string title = string.IsNullOrWhiteSpace(pane.Title) ? string.Empty : pane.Title.Trim();
+            if (string.IsNullOrWhiteSpace(title))
+            {
+                return BuildOverviewPaneLabel(pane);
+            }
+
+            string normalized = pane.Kind switch
+            {
+                WorkspacePaneKind.Browser when title.StartsWith("Web ", StringComparison.OrdinalIgnoreCase) => title[4..],
+                WorkspacePaneKind.Editor when title.StartsWith("Edit ", StringComparison.OrdinalIgnoreCase) => title[5..],
+                WorkspacePaneKind.Diff when title.StartsWith("Diff ", StringComparison.OrdinalIgnoreCase) => title[5..],
+                _ => title,
+            };
+
+            normalized = normalized.Trim().TrimEnd('\\', '/');
+            int separatorIndex = Math.Max(normalized.LastIndexOf('\\'), normalized.LastIndexOf('/'));
+            if (separatorIndex >= 0 && separatorIndex < normalized.Length - 1)
+            {
+                normalized = normalized[(separatorIndex + 1)..];
+            }
+
+            return normalized.Length > 32
+                ? normalized[..29] + "..."
+                : normalized;
         }
 
-        private static IEnumerable<NoteScopeOption> BuildNoteScopeOptions(WorkspaceThread thread)
+        private static string BuildNotesMeta(WorkspaceProject project, WorkspaceThread thread, NotesListScope scope)
+        {
+            IEnumerable<WorkspaceThreadNote> notes = scope == NotesListScope.Thread
+                ? thread?.NoteEntries ?? Enumerable.Empty<WorkspaceThreadNote>()
+                : project?.Threads.SelectMany(candidate => candidate.NoteEntries) ?? Enumerable.Empty<WorkspaceThreadNote>();
+            int activeCount = notes.Count(candidate => !candidate.IsArchived);
+            int archivedCount = notes.Count(candidate => candidate.IsArchived);
+            if (activeCount == 0 && archivedCount == 0)
+            {
+                return "No notes";
+            }
+
+            List<string> parts = new();
+            if (activeCount > 0)
+            {
+                parts.Add($"{activeCount} active");
+            }
+
+            if (archivedCount > 0)
+            {
+                parts.Add($"{archivedCount} archived");
+            }
+
+            return string.Join(" · ", parts);
+        }
+
+        private static IEnumerable<NoteScopeOption> BuildNoteScopeOptions(WorkspaceThread thread, string noteId)
         {
             yield return new NoteScopeOption
             {
+                ThreadId = thread?.Id,
+                NoteId = noteId,
                 PaneId = null,
                 Label = "Thread",
             };
@@ -10099,17 +10562,31 @@ namespace SelfContainedDeployment
             {
                 yield return new NoteScopeOption
                 {
+                    ThreadId = thread.Id,
+                    NoteId = noteId,
                     PaneId = pane.Id,
-                    Label = $"Pane · {FormatTabHeader(pane.Title, pane.Kind)}",
+                    Label = FormatTabHeader(pane.Title, pane.Kind),
                 };
             }
         }
 
-        private static string ResolveThreadNotesStateBrushKey(WorkspaceThread thread)
+        private static DateTimeOffset GetLatestThreadNoteActivity(WorkspaceThread thread)
         {
-            return (thread?.NoteEntries.Count ?? 0) == 0
-                ? "ShellTextTertiaryBrush"
-                : "ShellWarningBrush";
+            return thread?.NoteEntries.Count > 0
+                ? thread.NoteEntries.Max(candidate => candidate.UpdatedAt)
+                : DateTimeOffset.MinValue;
+        }
+
+        private static string FormatNoteTimestamp(DateTimeOffset timestamp)
+        {
+            return timestamp.ToLocalTime().ToString("MMM d · h:mm tt");
+        }
+
+        private static string BuildNoteEditorAutomationId(string noteId)
+        {
+            return string.IsNullOrWhiteSpace(noteId)
+                ? "shell-thread-note-editor"
+                : $"shell-thread-note-editor-{noteId}";
         }
 
         private static string BuildThreadNotePreview(string notes, int maxLength = 72)
@@ -10156,6 +10633,99 @@ namespace SelfContainedDeployment
             return truncated
                 ? preview[..Math.Max(0, maxLength - 3)].TrimEnd() + "..."
                 : preview;
+        }
+
+        private static string ResolveNoteListTitle(WorkspaceThreadNote note)
+        {
+            string normalizedTitle = note?.Title?.Trim();
+            if (!IsSystemGeneratedNoteTitle(normalizedTitle))
+            {
+                return normalizedTitle;
+            }
+
+            string firstLine = ExtractFirstNoteLine(note?.Text);
+            if (!string.IsNullOrWhiteSpace(firstLine))
+            {
+                return BuildThreadNotePreview(firstLine, maxLength: 56);
+            }
+
+            return "Note";
+        }
+
+        private static bool IsSystemGeneratedNoteTitle(string title)
+        {
+            string normalized = title?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(normalized))
+            {
+                return true;
+            }
+
+            if (string.Equals(normalized, "Handoff", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(normalized, "Note", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (!normalized.StartsWith("Note ", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            return int.TryParse(normalized["Note ".Length..], out _);
+        }
+
+        private static string ExtractFirstNoteLine(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return string.Empty;
+            }
+
+            string normalized = text.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
+            foreach (string line in normalized.Split('\n'))
+            {
+                string trimmed = line.Trim();
+                if (trimmed.Length > 0)
+                {
+                    return trimmed;
+                }
+            }
+
+            return string.Empty;
+        }
+
+        private static string RemoveFirstNoteLine(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return string.Empty;
+            }
+
+            string normalized = text.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
+            bool removed = false;
+            StringBuilder builder = new();
+            foreach (string line in normalized.Split('\n'))
+            {
+                if (!removed)
+                {
+                    if (string.IsNullOrWhiteSpace(line))
+                    {
+                        continue;
+                    }
+
+                    removed = true;
+                    continue;
+                }
+
+                if (builder.Length > 0)
+                {
+                    builder.AppendLine();
+                }
+
+                builder.Append(line);
+            }
+
+            return builder.ToString().Trim();
         }
 
         private string ResolveProjectRailIconBrushKey(WorkspaceProject project)
@@ -10224,7 +10794,7 @@ namespace SelfContainedDeployment
             StackPanel strip = new()
             {
                 Orientation = Orientation.Horizontal,
-                Spacing = 3,
+                Spacing = 4,
                 VerticalAlignment = VerticalAlignment.Center,
             };
 
@@ -10255,23 +10825,16 @@ namespace SelfContainedDeployment
 
         private static FrameworkElement BuildThreadPaneBadge(WorkspacePaneRecord pane, bool selected)
         {
-            string brushKey = selected
-                ? "ShellTextPrimaryBrush"
-                : "ShellTextSecondaryBrush";
-            TextBlock badge = new()
+            string accentKey = ResolvePaneAccentBrushKey(pane.Kind);
+            Brush accentBrush = AppBrush(null, accentKey);
+            FontIcon badge = new()
             {
+                Glyph = ResolvePaneKindGlyph(pane.Kind),
                 VerticalAlignment = VerticalAlignment.Center,
-                Text = pane.Kind switch
-                {
-                    WorkspacePaneKind.Browser => "W",
-                    WorkspacePaneKind.Editor => "E",
-                    WorkspacePaneKind.Diff => "D",
-                    _ => "T",
-                },
-                FontFamily = new FontFamily("Consolas"),
-                FontSize = 9.6,
-                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                Foreground = (Brush)Application.Current.Resources[brushKey],
+                FontSize = 9.8,
+                Foreground = accentBrush,
+                Opacity = selected ? 1 : 0.76,
+                Margin = new Thickness(0, 0, 4, 0),
             };
             ToolTipService.SetToolTip(badge, BuildOverviewPaneLabel(pane));
             return badge;
@@ -10298,12 +10861,38 @@ namespace SelfContainedDeployment
             return label;
         }
 
-        private static void ApplySidebarThreadButtonState(Button button, bool active, ThreadActivitySummary summary, bool hovered)
+        private static string ResolveThreadSelectionBrushKey(WorkspaceThread thread, ThreadActivitySummary summary)
         {
+            WorkspacePaneRecord selectedPane = thread?.Panes.FirstOrDefault(candidate => string.Equals(candidate.Id, thread.SelectedPaneId, StringComparison.Ordinal))
+                ?? thread?.Panes.FirstOrDefault();
+            if (selectedPane is not null)
+            {
+                return ResolvePaneAccentBrushKey(selectedPane.Kind);
+            }
+
+            if (summary?.RequiresAttention == true)
+            {
+                return "ShellSuccessBrush";
+            }
+
+            if (summary?.IsRunning == true)
+            {
+                return "ShellInfoBrush";
+            }
+
+            return "ShellPaneActiveBorderBrush";
+        }
+
+        private static void ApplySidebarThreadButtonState(Button button, WorkspaceThread thread, bool active, ThreadActivitySummary summary, bool hovered)
+        {
+            string accentKey = ResolveThreadSelectionBrushKey(thread, summary);
+            Brush accentBrush = AppBrush(button, accentKey);
+            button.BorderThickness = new Thickness(0);
+            button.BorderBrush = null;
+
             if (active)
             {
-                button.Background = CreateSidebarTintedBrush(AppBrush(button, "ShellPaneActiveBorderBrush"), hovered ? (byte)0x24 : (byte)0x18, Windows.UI.Color.FromArgb(0xFF, 0x2C, 0x2D, 0x31));
-                button.BorderBrush = null;
+                button.Background = CreateSidebarTintedBrush(accentBrush, hovered ? (byte)0x18 : (byte)0x12, Windows.UI.Color.FromArgb(0xFF, 0x33, 0x41, 0x55));
                 button.Foreground = AppBrush(button, "ShellTextPrimaryBrush");
                 return;
             }
@@ -10311,7 +10900,6 @@ namespace SelfContainedDeployment
             if (hovered)
             {
                 button.Background = AppBrush(button, "ShellNavHoverBrush");
-                button.BorderBrush = null;
                 button.Foreground = AppBrush(button, "ShellTextPrimaryBrush");
                 return;
             }
@@ -10320,6 +10908,7 @@ namespace SelfContainedDeployment
             {
                 button.Background = null;
                 button.BorderBrush = null;
+                button.BorderThickness = new Thickness(0);
                 button.Foreground = AppBrush(button, "ShellTextPrimaryBrush");
                 return;
             }
@@ -10328,12 +10917,14 @@ namespace SelfContainedDeployment
             {
                 button.Background = null;
                 button.BorderBrush = null;
+                button.BorderThickness = new Thickness(0);
                 button.Foreground = AppBrush(button, "ShellTextPrimaryBrush");
                 return;
             }
 
             button.Background = null;
             button.BorderBrush = null;
+            button.BorderThickness = new Thickness(0);
             button.Foreground = AppBrush(button, "ShellTextPrimaryBrush");
         }
 
@@ -11332,9 +11923,12 @@ namespace SelfContainedDeployment
                         if (note is not null)
                         {
                             thread.SelectedNoteId = note.Id;
+                            ClearInspectorNoteDraft();
+                            OpenThreadNotes(thread, scope: NotesListScope.Thread);
+                            return true;
                         }
 
-                        OpenThreadNotes(thread, scope: NotesListScope.Thread);
+                        StartInspectorNoteDraft(thread, targetId, scope: NotesListScope.Thread);
                         return true;
                     }
                     default:
@@ -11346,6 +11940,9 @@ namespace SelfContainedDeployment
             {
                 switch (action)
                 {
+                    case "note":
+                    case "notes":
+                    case "attach note":
                     case "new note":
                     case "new note for this pane":
                     {
@@ -11355,8 +11952,16 @@ namespace SelfContainedDeployment
                             return false;
                         }
 
-                        AddThreadNote(thread, title: null, text: null, selectAfterCreate: true, paneId: targetId);
-                        OpenThreadNotes(thread, scope: NotesListScope.Thread);
+                        WorkspaceThreadNote note = thread.NoteEntries.FirstOrDefault(candidate => string.Equals(candidate.PaneId, targetId, StringComparison.Ordinal));
+                        if (note is not null)
+                        {
+                            thread.SelectedNoteId = note.Id;
+                            ClearInspectorNoteDraft();
+                            OpenThreadNotes(thread, scope: NotesListScope.Thread);
+                            return true;
+                        }
+
+                        StartInspectorNoteDraft(thread, targetId, scope: NotesListScope.Thread);
                         return true;
                     }
                     default:
@@ -11373,8 +11978,23 @@ namespace SelfContainedDeployment
                 case "open notes":
                 case "edit note":
                 case "note":
-                    OpenThreadNotes(FindThread(targetId), scope: NotesListScope.Thread);
+                {
+                    WorkspaceThread thread = FindThread(targetId);
+                    if (thread is null)
+                    {
+                        return false;
+                    }
+
+                    if (thread.NoteEntries.Count == 0)
+                    {
+                        StartInspectorNoteDraft(thread, scope: NotesListScope.Thread);
+                        return true;
+                    }
+
+                    ClearInspectorNoteDraft();
+                    OpenThreadNotes(thread, scope: NotesListScope.Thread);
                     return true;
+                }
                 case "duplicate":
                     DuplicateThread(targetId);
                     return true;
@@ -11390,8 +12010,7 @@ namespace SelfContainedDeployment
                         return false;
                     }
 
-                    AddThreadNote(thread, title: null, text: null, selectAfterCreate: true, paneId: null);
-                    OpenThreadNotes(thread, scope: NotesListScope.Thread);
+                    StartInspectorNoteDraft(thread, scope: NotesListScope.Thread);
                     return true;
                 }
                 default:
@@ -11416,8 +12035,23 @@ namespace SelfContainedDeployment
                 case "open notes":
                 case "edit note":
                 case "note":
-                    OpenThreadNotes(FindThread(threadId), scope: NotesListScope.Thread);
+                {
+                    WorkspaceThread thread = FindThread(threadId);
+                    if (thread is null)
+                    {
+                        return false;
+                    }
+
+                    if (thread.NoteEntries.Count == 0)
+                    {
+                        StartInspectorNoteDraft(thread, scope: NotesListScope.Thread);
+                        return true;
+                    }
+
+                    ClearInspectorNoteDraft();
+                    OpenThreadNotes(thread, scope: NotesListScope.Thread);
                     return true;
+                }
                 case "new note":
                 {
                     WorkspaceThread thread = FindThread(threadId);
@@ -11426,8 +12060,7 @@ namespace SelfContainedDeployment
                         return false;
                     }
 
-                    AddThreadNote(thread, title: null, text: null, selectAfterCreate: true, paneId: null);
-                    OpenThreadNotes(thread, scope: NotesListScope.Thread);
+                    StartInspectorNoteDraft(thread, scope: NotesListScope.Thread);
                     return true;
                 }
                 case "duplicate":
@@ -11497,7 +12130,7 @@ namespace SelfContainedDeployment
                 HasNotes = thread.NoteEntries.Count > 0,
                 NoteCount = thread.NoteEntries.Count,
                 SelectedNoteId = thread.SelectedNoteId,
-                NotePreview = BuildThreadNotePreview(thread.Notes),
+                NotePreview = BuildThreadNotePreview(ResolvePreferredThreadNote(thread)?.Text),
                 DiffReviewSource = FormatDiffReviewSource(thread.DiffReviewSource),
                 SelectedCheckpointId = thread.SelectedCheckpointId,
                 CheckpointCount = thread.DiffCheckpoints.Count,
@@ -11530,7 +12163,9 @@ namespace SelfContainedDeployment
                     PaneId = note.PaneId,
                     PaneTitle = attachedPane is null ? null : FormatTabHeader(attachedPane.Title, attachedPane.Kind),
                     Selected = string.Equals(thread.SelectedNoteId, note.Id, StringComparison.Ordinal),
+                    Archived = note.IsArchived,
                     UpdatedAt = note.UpdatedAt.ToString("O"),
+                    ArchivedAt = note.ArchivedAt?.ToString("O"),
                 };
             }
         }
@@ -11564,24 +12199,26 @@ namespace SelfContainedDeployment
 
             Windows.UI.Color color = (effectiveTheme, key) switch
             {
-                (ElementTheme.Light, "ShellPageBackgroundBrush") => Windows.UI.Color.FromArgb(0xFF, 0xF5, 0xF6, 0xF8),
-                (ElementTheme.Light, "ShellPaneBackgroundBrush") => Windows.UI.Color.FromArgb(0xFF, 0xF5, 0xF6, 0xF8),
-                (ElementTheme.Light, "ShellSurfaceBackgroundBrush") => Windows.UI.Color.FromArgb(0xFF, 0xFB, 0xFC, 0xFD),
-                (ElementTheme.Light, "ShellMutedSurfaceBrush") => Windows.UI.Color.FromArgb(0xFF, 0xEE, 0xF1, 0xF4),
-                (ElementTheme.Light, "ShellBrandMarkBackgroundBrush") => Windows.UI.Color.FromArgb(0xFF, 0xFC, 0xFD, 0xFE),
-                (ElementTheme.Light, "ShellBrandMarkBorderBrush") => Windows.UI.Color.FromArgb(0xFF, 0xD7, 0xDD, 0xE5),
-                (ElementTheme.Light, "ShellPaneDividerBrush") => Windows.UI.Color.FromArgb(0xFF, 0xE5, 0xE9, 0xEE),
-                (ElementTheme.Light, "ShellNavHoverBrush") => Windows.UI.Color.FromArgb(0xFF, 0xE8, 0xED, 0xF2),
-                (ElementTheme.Light, "ShellNavActiveBrush") => Windows.UI.Color.FromArgb(0xFF, 0xDD, 0xE4, 0xEB),
-                (ElementTheme.Light, "ShellBorderBrush") => Windows.UI.Color.FromArgb(0xFF, 0xE1, 0xE5, 0xEA),
-                (ElementTheme.Light, "ShellPaneActiveBorderBrush") => Windows.UI.Color.FromArgb(0xFF, 0x2C, 0x2D, 0x31),
-                (ElementTheme.Light, "ShellTextPrimaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0x1B, 0x1F, 0x24),
-                (ElementTheme.Light, "ShellTextSecondaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0x48, 0x50, 0x5A),
-                (ElementTheme.Light, "ShellTextTertiaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0x66, 0x6F, 0x7B),
+                (ElementTheme.Light, "ShellPageBackgroundBrush") => Windows.UI.Color.FromArgb(0xFF, 0xF2, 0xF5, 0xF8),
+                (ElementTheme.Light, "ShellPaneBackgroundBrush") => Windows.UI.Color.FromArgb(0xFF, 0xF2, 0xF5, 0xF8),
+                (ElementTheme.Light, "ShellSurfaceBackgroundBrush") => Windows.UI.Color.FromArgb(0xFF, 0xF9, 0xFB, 0xFD),
+                (ElementTheme.Light, "ShellMutedSurfaceBrush") => Windows.UI.Color.FromArgb(0xFF, 0xE7, 0xEC, 0xF2),
+                (ElementTheme.Light, "ShellBrandMarkBackgroundBrush") => Windows.UI.Color.FromArgb(0xFF, 0xF9, 0xFB, 0xFD),
+                (ElementTheme.Light, "ShellBrandMarkBorderBrush") => Windows.UI.Color.FromArgb(0xFF, 0xCB, 0xD5, 0xE0),
+                (ElementTheme.Light, "ShellPaneDividerBrush") => Windows.UI.Color.FromArgb(0xFF, 0xDC, 0xE5, 0xEE),
+                (ElementTheme.Light, "ShellNavHoverBrush") => Windows.UI.Color.FromArgb(0xFF, 0xE2, 0xEA, 0xF2),
+                (ElementTheme.Light, "ShellNavActiveBrush") => Windows.UI.Color.FromArgb(0xFF, 0xD6, 0xE1, 0xEC),
+                (ElementTheme.Light, "ShellBorderBrush") => Windows.UI.Color.FromArgb(0xFF, 0xD6, 0xDE, 0xE7),
+                (ElementTheme.Light, "ShellPaneActiveBorderBrush") => Windows.UI.Color.FromArgb(0xFF, 0x33, 0x41, 0x55),
+                (ElementTheme.Light, "ShellTextPrimaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0x1A, 0x1E, 0x23),
+                (ElementTheme.Light, "ShellTextSecondaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0x39, 0x42, 0x4D),
+                (ElementTheme.Light, "ShellTextTertiaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0x55, 0x60, 0x6D),
                 (ElementTheme.Light, "ShellSuccessBrush") => Windows.UI.Color.FromArgb(0xFF, 0x16, 0xA3, 0x4A),
                 (ElementTheme.Light, "ShellWarningBrush") => Windows.UI.Color.FromArgb(0xFF, 0xCA, 0x8A, 0x04),
                 (ElementTheme.Light, "ShellDangerBrush") => Windows.UI.Color.FromArgb(0xFF, 0xDC, 0x26, 0x26),
                 (ElementTheme.Light, "ShellInfoBrush") => Windows.UI.Color.FromArgb(0xFF, 0x25, 0x63, 0xEB),
+                (ElementTheme.Light, "ShellTerminalBrush") => Windows.UI.Color.FromArgb(0xFF, 0x0F, 0x76, 0x6E),
+                (ElementTheme.Light, "ShellConfigBrush") => Windows.UI.Color.FromArgb(0xFF, 0x47, 0x55, 0x69),
                 (ElementTheme.Dark, "ShellPageBackgroundBrush") => Windows.UI.Color.FromArgb(0xFF, 0x0C, 0x0D, 0x10),
                 (ElementTheme.Dark, "ShellPaneBackgroundBrush") => Windows.UI.Color.FromArgb(0xFF, 0x0C, 0x0D, 0x10),
                 (ElementTheme.Dark, "ShellSurfaceBackgroundBrush") => Windows.UI.Color.FromArgb(0xFF, 0x10, 0x12, 0x16),
@@ -11600,6 +12237,8 @@ namespace SelfContainedDeployment
                 (ElementTheme.Dark, "ShellWarningBrush") => Windows.UI.Color.FromArgb(0xFF, 0xFB, 0xBF, 0x24),
                 (ElementTheme.Dark, "ShellDangerBrush") => Windows.UI.Color.FromArgb(0xFF, 0xF8, 0x71, 0x71),
                 (ElementTheme.Dark, "ShellInfoBrush") => Windows.UI.Color.FromArgb(0xFF, 0x60, 0xA5, 0xFA),
+                (ElementTheme.Dark, "ShellTerminalBrush") => Windows.UI.Color.FromArgb(0xFF, 0x2D, 0xD4, 0xBF),
+                (ElementTheme.Dark, "ShellConfigBrush") => Windows.UI.Color.FromArgb(0xFF, 0x94, 0xA3, 0xB8),
                 _ => default,
             };
 
@@ -11720,6 +12359,26 @@ namespace SelfContainedDeployment
             button.Foreground = active ? AppBrush(button, "ShellTextPrimaryBrush") : AppBrush(button, "ShellTextSecondaryBrush");
         }
 
+        private static void ApplyPaneStripButtonState(Button button, string accentKey, bool active = false)
+        {
+            if (button is null)
+            {
+                return;
+            }
+
+            Brush accentBrush = AppBrush(button, accentKey);
+            button.Background = active
+                ? CreateSidebarTintedBrush(accentBrush, 0x12, Windows.UI.Color.FromArgb(0xFF, 0x33, 0x41, 0x55))
+                : null;
+            button.BorderBrush = null;
+            button.BorderThickness = new Thickness(0);
+            button.Foreground = accentBrush;
+            if (button.Content is FontIcon icon)
+            {
+                icon.Foreground = accentBrush;
+            }
+        }
+
         private static void ApplySidebarActionLayout(Button button, bool isOpen)
         {
             if (button is null)
@@ -11729,26 +12388,30 @@ namespace SelfContainedDeployment
 
             button.Width = isOpen ? double.NaN : 32;
             button.Padding = isOpen ? new Thickness(5, 3, 5, 3) : new Thickness(0);
-            button.HorizontalAlignment = isOpen ? HorizontalAlignment.Stretch : HorizontalAlignment.Center;
+            button.HorizontalAlignment = isOpen ? HorizontalAlignment.Stretch : HorizontalAlignment.Left;
             button.HorizontalContentAlignment = isOpen ? HorizontalAlignment.Stretch : HorizontalAlignment.Center;
+            button.Margin = isOpen ? new Thickness(0) : new Thickness(6, 0, 0, 0);
         }
 
         private static void ApplyProjectButtonState(Button button, bool active, bool hovered)
         {
             if (active)
             {
-                button.Background = CreateSidebarTintedBrush(AppBrush(button, "ShellPaneActiveBorderBrush"), hovered ? (byte)0x22 : (byte)0x16, Windows.UI.Color.FromArgb(0xFF, 0x2C, 0x2D, 0x31));
+                button.Background = CreateSidebarTintedBrush(AppBrush(button, "ShellPaneActiveBorderBrush"), hovered ? (byte)0x14 : (byte)0x0E, Windows.UI.Color.FromArgb(0xFF, 0x33, 0x41, 0x55));
                 button.BorderBrush = null;
+                button.BorderThickness = new Thickness(0);
             }
             else if (hovered)
             {
                 button.Background = AppBrush(button, "ShellNavHoverBrush");
                 button.BorderBrush = null;
+                button.BorderThickness = new Thickness(0);
             }
             else
             {
                 button.Background = null;
                 button.BorderBrush = null;
+                button.BorderThickness = new Thickness(0);
             }
             button.Foreground = AppBrush(button, "ShellTextPrimaryBrush");
         }
@@ -11777,7 +12440,8 @@ namespace SelfContainedDeployment
         private static void ApplyThreadButtonState(Button button, bool active)
         {
             button.Background = active ? AppBrush(button, "ShellNavActiveBrush") : null;
-            button.BorderBrush = active ? AppBrush(button, "ShellBorderBrush") : null;
+            button.BorderBrush = null;
+            button.BorderThickness = new Thickness(0);
             button.Foreground = active ? AppBrush(button, "ShellTextPrimaryBrush") : AppBrush(button, "ShellTextSecondaryBrush");
         }
 

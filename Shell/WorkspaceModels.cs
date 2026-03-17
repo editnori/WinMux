@@ -400,6 +400,10 @@ namespace SelfContainedDeployment.Shell
         public DateTimeOffset CreatedAt { get; set; }
 
         public DateTimeOffset UpdatedAt { get; set; }
+
+        public DateTimeOffset? ArchivedAt { get; set; }
+
+        public bool IsArchived => ArchivedAt.HasValue;
     }
 
     public sealed class WorkspaceThread
@@ -439,7 +443,7 @@ namespace SelfContainedDeployment.Shell
                     return;
                 }
 
-                WorkspaceThreadNote note = new("Handoff", value);
+                WorkspaceThreadNote note = new("Note", value);
                 NoteEntries.Add(note);
                 SelectedNoteId = note.Id;
             }
@@ -492,6 +496,7 @@ namespace SelfContainedDeployment.Shell
         private WorkspaceThreadNote ResolveSelectedNote()
         {
             return NoteEntries.FirstOrDefault(candidate => string.Equals(candidate.Id, SelectedNoteId, StringComparison.Ordinal))
+                ?? NoteEntries.FirstOrDefault(candidate => !candidate.IsArchived)
                 ?? NoteEntries.FirstOrDefault();
         }
     }

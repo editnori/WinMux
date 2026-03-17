@@ -292,6 +292,7 @@ namespace SelfContainedDeployment.Terminal
                     ApplyBackgroundColor();
                     PostCurrentTheme();
                     PostToolSessionState();
+                    PostSurfaceContext();
                     PostMessage(new HostMessage { Type = "setTitle", Title = _sessionTitle });
                     FlushPendingRendererOutput();
                     RequestFit();
@@ -1225,6 +1226,15 @@ namespace SelfContainedDeployment.Terminal
             });
         }
 
+        private void PostSurfaceContext()
+        {
+            PostMessage(new HostMessage
+            {
+                Type = "setSurfaceContext",
+                ShellKind = ResolveTerminalShellKind(),
+            });
+        }
+
         private static string BuildReplayCommand(string tool, string sessionId, string arguments)
         {
             string suffix = string.IsNullOrWhiteSpace(arguments) ? string.Empty : " " + arguments.Trim();
@@ -1713,6 +1723,7 @@ namespace SelfContainedDeployment.Terminal
                 TerminalHeaderTitleText.Text = _headerTitleOverride;
             }
             TerminalHeaderMetaText.Text = ResolveTerminalHeaderMeta();
+            PostSurfaceContext();
         }
 
         private string ResolveTerminalHeaderMeta()
@@ -1734,6 +1745,32 @@ namespace SelfContainedDeployment.Terminal
             }
 
             return string.IsNullOrWhiteSpace(detail) ? "Interactive shell" : detail;
+        }
+
+        private string ResolveTerminalShellKind()
+        {
+            if (string.IsNullOrWhiteSpace(ShellCommand))
+            {
+                return "terminal";
+            }
+
+            string command = ShellCommand;
+            if (command.Contains("wsl.exe", StringComparison.OrdinalIgnoreCase))
+            {
+                return "wsl";
+            }
+
+            if (command.Contains("powershell", StringComparison.OrdinalIgnoreCase))
+            {
+                return "powershell";
+            }
+
+            if (command.Contains("cmd.exe", StringComparison.OrdinalIgnoreCase))
+            {
+                return "cmd";
+            }
+
+            return "terminal";
         }
 
         private sealed class RendererMessage
@@ -1765,6 +1802,7 @@ namespace SelfContainedDeployment.Terminal
             public string RequestId { get; set; }
             public string ToolSession { get; set; }
             public bool ToolSurfaceVisible { get; set; }
+            public string ShellKind { get; set; }
         }
     }
 }

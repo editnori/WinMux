@@ -10,8 +10,16 @@ It combines terminals, browser panes, editor panes, patch review, worktree-aware
 
 - [Latest Windows installer (.exe)](https://github.com/editnori/WinMux/releases/latest/download/WinMux-win-x64-installer.exe)
 - [Latest release notes and assets](https://github.com/editnori/WinMux/releases/latest)
+- [Project changelog](CHANGELOG.md)
 
 The release asset is a real installer `.exe` that installs WinMux under `%LocalAppData%\Programs\WinMux` and can launch it immediately after setup.
+
+## New in alpha-v0.1.4
+
+- Notes now edit directly in-place inside the inspector, support archive and restore, and stay grouped by thread when you switch to project scope.
+- Sidebar thread rows, pane tabs, and pane-strip actions now share the same pane-type iconography and color language across browser, editor, diff, and terminal surfaces.
+- Terminal surfaces now adapt their accent treatment to the active shell context while keeping the shell chrome flatter and less boxed-in.
+- Release packaging is cleaner: self-contained RID builds carry the right assets forward and the build excludes stray generated artifacts.
 
 ## Demo
 
@@ -33,6 +41,7 @@ The overview clip shows:
 - Native WinUI 3 shell with a dense multi-pane workspace.
 - Project and thread model with worktree-aware terminals and overflow-thread behavior when a pane set is already full.
 - Terminal, browser, editor, and diff panes in the same workspace.
+- Inline thread and project notes with pane attachments, archive state, and native automation support.
 - Patch review with live/baseline/checkpoint sources and structured diff automation.
 - Session persistence across app relaunches, including restored pane layouts and replay metadata.
 - Native automation routes for shell state, UI tree, UI actions, browser state, terminal state, diff state, editor state, screenshots, recordings, render traces, events, desktop window control, and desktop UIA fallback.
@@ -143,12 +152,12 @@ Install Inno Setup 6 so `ISCC.exe` is available on your machine, then build the 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-winmux-installer.ps1 `
   -PublishDirectory .\bin\Release\net8.0-windows10.0.19041.0\win-x64\publish `
-  -AppVersion 0.1.3
+  -AppVersion 0.1.4
 ```
 
 The installer now bundles a WebView2 bootstrapper for machines that do not already have the runtime, excludes release `.pdb` files, uses a branded wizard header, and defaults to a faster non-solid compression profile so installation feels smoother.
 
-Tagged pushes like `alpha-v0.1.3` run `.github/workflows/windows-release.yml`, publish the x64 build, compile the installer, and attach `WinMux-win-x64-installer.exe` directly to the GitHub Release.
+Tagged pushes like `alpha-v0.1.4` run `.github/workflows/windows-release.yml`, publish the x64 build, compile the installer, and attach `WinMux-win-x64-installer.exe` directly to the GitHub Release.
 
 ## Repo structure
 

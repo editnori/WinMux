@@ -74,22 +74,22 @@
                                       VerticalScrollMode="Auto">
                             <StackPanel Margin="0,6,0,8">
                                 <TextBlock x:Name="ProjectSectionText"
-                                           Margin="6,0,6,4"
+                                           Margin="8,0,8,6"
                                            Style="{StaticResource ShellSidebarSectionTextStyle}"
                                            Text="Projects" />
 
                                 <StackPanel x:Name="ProjectListPanel"
                                             AutomationProperties.AutomationId="shell-project-list"
                                             HorizontalAlignment="Stretch"
-                                            Margin="2,0,2,0"
-                                            Spacing="3" />
+                                            Margin="4,0,4,0"
+                                            Spacing="4" />
                             </StackPanel>
                         </ScrollViewer>
 
                         <StackPanel Grid.Row="2"
                                     AutomationProperties.AutomationId="shell-sidebar-footer"
-                                    Margin="2,6,3,4"
-                                    Spacing="2">
+                                    Margin="4,8,4,6"
+                                    Spacing="3">
                             <Button x:Name="NewProjectButton"
                                     AutomationProperties.AutomationId="shell-new-project"
                                     Style="{StaticResource ShellSidebarPrimaryButtonStyle}"
@@ -216,7 +216,7 @@
                                                 Spacing="4">
                                         <Button x:Name="AddBrowserPaneButton"
                                                 AutomationProperties.AutomationId="shell-add-browser-pane"
-                                                Style="{StaticResource ShellToolbarButtonStyle}"
+                                                Style="{StaticResource ShellPaneStripButtonStyle}"
                                                 Click="OnAddBrowserPaneClicked"
                                                 ToolTipService.ToolTip="Add browser pane">
                                             <FontIcon FontSize="11" Glyph="&#xE774;" />
@@ -224,7 +224,7 @@
 
                                         <Button x:Name="AddEditorPaneButton"
                                                 AutomationProperties.AutomationId="shell-add-editor-pane"
-                                                Style="{StaticResource ShellToolbarButtonStyle}"
+                                                Style="{StaticResource ShellPaneStripButtonStyle}"
                                                 Click="OnAddEditorPaneClicked"
                                                 ToolTipService.ToolTip="Add editor pane">
                                             <FontIcon FontSize="11" Glyph="&#xE70F;" />
@@ -232,7 +232,7 @@
 
                                         <Button x:Name="FitPanesButton"
                                                 AutomationProperties.AutomationId="shell-fit-panes"
-                                                Style="{StaticResource ShellToolbarButtonStyle}"
+                                                Style="{StaticResource ShellPaneStripButtonStyle}"
                                                 Click="OnFitPanesClicked"
                                                 DoubleTapped="OnFitPanesDoubleTapped"
                                                 ToolTipService.ToolTip="Fit visible panes">
@@ -241,7 +241,7 @@
 
                                         <Button x:Name="ToggleInspectorButton"
                                                 AutomationProperties.AutomationId="shell-toggle-inspector"
-                                                Style="{StaticResource ShellToolbarButtonStyle}"
+                                                Style="{StaticResource ShellPaneStripButtonStyle}"
                                                 Click="OnToggleInspectorClicked"
                                                 ToolTipService.ToolTip="Hide inspector">
                                             <FontIcon FontSize="11" Glyph="&#xE7F8;" />
@@ -609,9 +609,9 @@
                                                   Visibility="Collapsed"
                                                   VerticalScrollBarVisibility="Auto"
                                                   HorizontalScrollBarVisibility="Disabled">
-                                        <StackPanel Padding="10,10,10,12"
-                                                    Spacing="6">
-                                            <Grid ColumnDefinitions="Auto,Auto,*,Auto"
+                                        <StackPanel Padding="10,9,10,12"
+                                                    Spacing="8">
+                                            <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto"
                                                   ColumnSpacing="4">
                                                 <Button x:Name="InspectorNotesThreadScopeButton"
                                                         AutomationProperties.AutomationId="shell-thread-notes-scope-thread"
@@ -629,75 +629,34 @@
                                                         Content="Project" />
 
                                                 <TextBlock x:Name="InspectorNotesMetaText"
-                                                           Grid.Column="3"
+                                                           Grid.Column="2"
                                                            AutomationProperties.AutomationId="shell-thread-notes-meta"
                                                            Style="{StaticResource ShellHintTextStyle}"
                                                            Text="No notes"
                                                            TextAlignment="Right"
                                                            TextTrimming="CharacterEllipsis"
                                                            VerticalAlignment="Center" />
+
+                                                <Button x:Name="InspectorInlineAddNoteButton"
+                                                        AutomationProperties.AutomationId="shell-thread-note-add-inline"
+                                                        Grid.Column="3"
+                                                        Click="OnInspectorAddNoteClicked"
+                                                        Style="{StaticResource ShellGhostToolbarButtonStyle}"
+                                                           ToolTipService.ToolTip="Create a new note">
+                                                    <FontIcon FontSize="10.5"
+                                                              Glyph="&#xE710;" />
+                                                </Button>
+
+                                                <Button x:Name="InspectorInlineDeleteNoteButton"
+                                                        AutomationProperties.AutomationId="shell-thread-note-delete-inline"
+                                                        Grid.Column="4"
+                                                        Click="OnInspectorDeleteNoteClicked"
+                                                        Style="{StaticResource ShellGhostToolbarButtonStyle}"
+                                                        ToolTipService.ToolTip="Delete selected note">
+                                                    <FontIcon FontSize="10.5"
+                                                              Glyph="&#xE74D;" />
+                                                </Button>
                                             </Grid>
-
-                                            <ListView x:Name="InspectorNotesListView"
-                                                      AutomationProperties.AutomationId="shell-thread-note-list"
-                                                      HorizontalContentAlignment="Stretch"
-                                                      MaxHeight="148"
-                                                      ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                                                      ScrollViewer.VerticalScrollBarVisibility="Auto"
-                                                      SelectionChanged="OnInspectorNotesListSelectionChanged"
-                                                      SelectionMode="Single">
-                                                <ListView.ItemContainerStyle>
-                                                    <Style TargetType="ListViewItem">
-                                                        <Setter Property="Padding" Value="0" />
-                                                        <Setter Property="Margin" Value="0,0,0,2" />
-                                                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                                                    </Style>
-                                                </ListView.ItemContainerStyle>
-                                                <ListView.ItemTemplate>
-                                                    <DataTemplate>
-                                                        <Grid Padding="6,6,4,6"
-                                                              ColumnSpacing="7">
-                                                            <Grid.ColumnDefinitions>
-                                                                <ColumnDefinition Width="Auto" />
-                                                                <ColumnDefinition Width="*" />
-                                                            </Grid.ColumnDefinitions>
-
-                                                            <Border Width="2"
-                                                                    Margin="0,1,0,1"
-                                                                    Background="{Binding AccentBrush}"
-                                                                    CornerRadius="1" />
-
-                                                            <StackPanel Grid.Column="1"
-                                                                        Spacing="1">
-                                                                <TextBlock Text="{Binding Title}"
-                                                                           FontSize="11.25"
-                                                                           FontWeight="SemiBold"
-                                                                           MaxLines="2"
-                                                                           TextTrimming="CharacterEllipsis"
-                                                                           TextWrapping="WrapWholeWords" />
-
-                                                                <StackPanel Orientation="Horizontal"
-                                                                            Spacing="6">
-                                                                    <TextBlock Text="{Binding ScopeLabel}"
-                                                                               FontSize="9.25"
-                                                                               FontWeight="SemiBold"
-                                                                               Foreground="{Binding AccentBrush}" />
-                                                                    <TextBlock Text="{Binding Meta}"
-                                                                               Style="{StaticResource ShellHintTextStyle}"
-                                                                               MaxLines="1"
-                                                                               TextTrimming="CharacterEllipsis" />
-                                                                </StackPanel>
-
-                                                                <TextBlock Text="{Binding Preview}"
-                                                                           Style="{StaticResource ShellHintTextStyle}"
-                                                                           MaxLines="2"
-                                                                           TextTrimming="CharacterEllipsis"
-                                                                           TextWrapping="WrapWholeWords" />
-                                                            </StackPanel>
-                                                        </Grid>
-                                                    </DataTemplate>
-                                                </ListView.ItemTemplate>
-                                            </ListView>
 
                                             <TextBlock x:Name="InspectorNotesEmptyText"
                                                        AutomationProperties.AutomationId="shell-thread-note-empty"
@@ -706,32 +665,210 @@
                                                        Visibility="Collapsed"
                                                        TextWrapping="WrapWholeWords" />
 
-                                            <Grid ColumnDefinitions="*,Auto"
-                                                  ColumnSpacing="6">
-                                                <TextBox x:Name="InspectorNoteTitleTextBox"
-                                                         AutomationProperties.AutomationId="shell-thread-note-title"
-                                                         PlaceholderText="Title"
-                                                         Style="{StaticResource ShellInlineTextBoxStyle}"
-                                                         TextChanged="OnInspectorNoteTitleTextChanged" />
+                                            <ItemsControl x:Name="InspectorNotesGroupsItemsControl"
+                                                          AutomationProperties.AutomationId="shell-thread-notes">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <StackPanel Margin="0,0,0,12"
+                                                                    Spacing="6">
+                                                            <Grid Visibility="{Binding HeaderVisibility}"
+                                                                  ColumnDefinitions="*,Auto"
+                                                                  ColumnSpacing="8">
+                                                                <StackPanel Spacing="1">
+                                                                    <TextBlock Text="{Binding Title}"
+                                                                               Style="{StaticResource ShellSectionTextStyle}"
+                                                                               TextTrimming="CharacterEllipsis" />
 
-                                                <ComboBox x:Name="InspectorNoteScopeComboBox"
-                                                          AutomationProperties.AutomationId="shell-thread-note-scope"
-                                                          Grid.Column="1"
-                                                          HorizontalAlignment="Right"
-                                                          MinWidth="132"
-                                                          SelectionChanged="OnInspectorNoteScopeSelectionChanged"
-                                                          Style="{StaticResource ShellNoteScopeComboBoxStyle}" />
-                                            </Grid>
+                                                                    <TextBlock Text="{Binding Meta}"
+                                                                               Style="{StaticResource ShellMetaTextStyle}"
+                                                                               TextWrapping="WrapWholeWords" />
+                                                                </StackPanel>
 
-                                            <TextBox x:Name="InspectorNotesTextBox"
-                                                     AutomationProperties.AutomationId="shell-thread-notes"
-                                                     AcceptsReturn="True"
-                                                     HorizontalAlignment="Stretch"
-                                                     MinHeight="184"
-                                                     PlaceholderText="Leave a handoff or memory."
-                                                     Style="{StaticResource ShellInspectorNotesTextBoxStyle}"
-                                                     TextChanged="OnInspectorNotesTextChanged"
-                                                     TextWrapping="Wrap" />
+                                                                <Button Grid.Column="1"
+                                                                        HorizontalAlignment="Right"
+                                                                        VerticalAlignment="Top"
+                                                                        Visibility="{Binding ArchivedSectionVisibility}"
+                                                                        Tag="{Binding}"
+                                                                        Click="OnInspectorArchivedNotesToggleClicked"
+                                                                        Style="{StaticResource ShellInlineActionButtonStyle}"
+                                                                        Content="{Binding ArchivedToggleText}" />
+                                                            </Grid>
+
+                                                            <ItemsControl ItemsSource="{Binding ActiveNotes}">
+                                                                <ItemsControl.ItemTemplate>
+                                                                    <DataTemplate>
+                                                                        <Border Margin="0,0,0,8"
+                                                                                Tag="{Binding}"
+                                                                                Tapped="OnInspectorNoteCardTapped"
+                                                                                DoubleTapped="OnInspectorNoteCardDoubleTapped"
+                                                                                Padding="0,2,0,6"
+                                                                                Background="{Binding CardBackground}"
+                                                                                BorderThickness="0"
+                                                                                CornerRadius="0">
+                                                                            <Grid ColumnDefinitions="Auto,*"
+                                                                                  ColumnSpacing="8">
+                                                                                <Border Width="2"
+                                                                                        Margin="0,1,0,1"
+                                                                                        Background="{Binding AccentBrush}"
+                                                                                        CornerRadius="999" />
+
+                                                                                <StackPanel Grid.Column="1"
+                                                                                            Spacing="3">
+                                                                                    <TextBlock Text="{Binding Title}"
+                                                                                               FontSize="12"
+                                                                                               FontWeight="SemiBold"
+                                                                                               MaxLines="2"
+                                                                                               TextTrimming="CharacterEllipsis"
+                                                                                               TextWrapping="WrapWholeWords" />
+
+                                                                                    <StackPanel Orientation="Horizontal"
+                                                                                                Spacing="6">
+                                                                                        <Button Tag="{Binding}"
+                                                                                                Click="OnInspectorNoteScopeButtonClicked"
+                                                                                                Style="{StaticResource ShellNoteTypeButtonStyle}"
+                                                                                                Foreground="{Binding AccentBrush}"
+                                                                                                ToolTipService.ToolTip="{Binding ScopeToolTip}"
+                                                                                                Content="{Binding ScopeButtonLabel}" />
+
+                                                                                        <TextBlock Text="{Binding Meta}"
+                                                                                                   Style="{StaticResource ShellMetaTextStyle}"
+                                                                                                   TextWrapping="WrapWholeWords"
+                                                                                                   VerticalAlignment="Center" />
+                                                                                    </StackPanel>
+
+                                                                                    <TextBox Tag="{Binding}"
+                                                                                             AutomationProperties.AutomationId="{Binding EditorAutomationId}"
+                                                                                             AcceptsReturn="True"
+                                                                                             HorizontalAlignment="Stretch"
+                                                                                             IsReadOnly="{Binding IsArchived}"
+                                                                                             PlaceholderText="{Binding PlaceholderText}"
+                                                                                             Style="{StaticResource ShellInspectorNoteCardTextBoxStyle}"
+                                                                                             Text="{Binding Text}"
+                                                                                             TextChanged="OnInspectorNoteCardTextChanged"
+                                                                                             GotFocus="OnInspectorNoteCardTextBoxGotFocus"
+                                                                                             KeyDown="OnInspectorNoteCardTextBoxKeyDown"
+                                                                                             TextWrapping="Wrap" />
+
+                                                                                    <Grid ColumnDefinitions="*,Auto,Auto"
+                                                                                          ColumnSpacing="8">
+                                                                                        <TextBlock Text="{Binding TimestampText}"
+                                                                                                   Style="{StaticResource ShellHintTextStyle}"
+                                                                                                   VerticalAlignment="Center" />
+
+                                                                                        <Button Grid.Column="1"
+                                                                                                Tag="{Binding}"
+                                                                                                Click="OnInspectorArchiveNoteButtonClicked"
+                                                                                                Style="{StaticResource ShellInlineActionButtonStyle}"
+                                                                                                Foreground="{Binding AccentBrush}"
+                                                                                                ToolTipService.ToolTip="{Binding ArchiveToolTip}"
+                                                                                                Visibility="{Binding ArchiveButtonVisibility}"
+                                                                                                Content="{Binding ArchiveButtonLabel}" />
+
+                                                                                        <Button Grid.Column="2"
+                                                                                                Tag="{Binding}"
+                                                                                                Click="OnInspectorDeleteNoteCardClicked"
+                                                                                                Style="{StaticResource ShellInlineActionButtonStyle}"
+                                                                                                ToolTipService.ToolTip="{Binding DeleteToolTip}"
+                                                                                                Content="Delete" />
+                                                                                    </Grid>
+                                                                                </StackPanel>
+                                                                            </Grid>
+                                                                        </Border>
+                                                                    </DataTemplate>
+                                                                </ItemsControl.ItemTemplate>
+                                                            </ItemsControl>
+
+                                                            <StackPanel Visibility="{Binding ArchivedItemsVisibility}"
+                                                                        Spacing="6">
+                                                                <ItemsControl ItemsSource="{Binding ArchivedNotes}">
+                                                                    <ItemsControl.ItemTemplate>
+                                                                        <DataTemplate>
+                                                                            <Border Margin="0,0,0,8"
+                                                                                    Tag="{Binding}"
+                                                                                    Tapped="OnInspectorNoteCardTapped"
+                                                                                    DoubleTapped="OnInspectorNoteCardDoubleTapped"
+                                                                                    Padding="0,2,0,6"
+                                                                                    Background="{Binding CardBackground}"
+                                                                                    BorderThickness="0"
+                                                                                    CornerRadius="0"
+                                                                                    Opacity="0.76">
+                                                                                <Grid ColumnDefinitions="Auto,*"
+                                                                                      ColumnSpacing="8">
+                                                                                    <Border Width="2"
+                                                                                            Margin="0,1,0,1"
+                                                                                            Background="{Binding AccentBrush}"
+                                                                                            CornerRadius="999" />
+
+                                                                                    <StackPanel Grid.Column="1"
+                                                                                                Spacing="3">
+                                                                                        <TextBlock Text="{Binding Title}"
+                                                                                                   FontSize="12"
+                                                                                                   FontWeight="SemiBold"
+                                                                                                   MaxLines="2"
+                                                                                                   TextTrimming="CharacterEllipsis"
+                                                                                                   TextWrapping="WrapWholeWords" />
+
+                                                                                        <StackPanel Orientation="Horizontal"
+                                                                                                    Spacing="6">
+                                                                                            <Button Tag="{Binding}"
+                                                                                                    Click="OnInspectorNoteScopeButtonClicked"
+                                                                                                    Style="{StaticResource ShellNoteTypeButtonStyle}"
+                                                                                                    Foreground="{Binding AccentBrush}"
+                                                                                                    ToolTipService.ToolTip="{Binding ScopeToolTip}"
+                                                                                                    Content="{Binding ScopeButtonLabel}" />
+
+                                                                                            <TextBlock Text="{Binding Meta}"
+                                                                                                       Style="{StaticResource ShellMetaTextStyle}"
+                                                                                                       TextWrapping="WrapWholeWords"
+                                                                                                       VerticalAlignment="Center" />
+                                                                                        </StackPanel>
+
+                                                                                        <TextBox Tag="{Binding}"
+                                                                                                 AutomationProperties.AutomationId="{Binding EditorAutomationId}"
+                                                                                                 AcceptsReturn="True"
+                                                                                                 HorizontalAlignment="Stretch"
+                                                                                                 IsReadOnly="{Binding IsArchived}"
+                                                                                                 PlaceholderText="{Binding PlaceholderText}"
+                                                                                                 Style="{StaticResource ShellInspectorNoteCardTextBoxStyle}"
+                                                                                                 Text="{Binding Text}"
+                                                                                                 TextChanged="OnInspectorNoteCardTextChanged"
+                                                                                                 GotFocus="OnInspectorNoteCardTextBoxGotFocus"
+                                                                                                 KeyDown="OnInspectorNoteCardTextBoxKeyDown"
+                                                                                                 TextWrapping="Wrap" />
+
+                                                                                        <Grid ColumnDefinitions="*,Auto,Auto"
+                                                                                              ColumnSpacing="8">
+                                                                                            <TextBlock Text="{Binding TimestampText}"
+                                                                                                       Style="{StaticResource ShellHintTextStyle}"
+                                                                                                       VerticalAlignment="Center" />
+
+                                                                                            <Button Grid.Column="1"
+                                                                                                    Tag="{Binding}"
+                                                                                                    Click="OnInspectorArchiveNoteButtonClicked"
+                                                                                                    Style="{StaticResource ShellInlineActionButtonStyle}"
+                                                                                                    Foreground="{Binding AccentBrush}"
+                                                                                                    ToolTipService.ToolTip="{Binding ArchiveToolTip}"
+                                                                                                    Visibility="{Binding ArchiveButtonVisibility}"
+                                                                                                    Content="{Binding ArchiveButtonLabel}" />
+
+                                                                                            <Button Grid.Column="2"
+                                                                                                    Tag="{Binding}"
+                                                                                                    Click="OnInspectorDeleteNoteCardClicked"
+                                                                                                    Style="{StaticResource ShellInlineActionButtonStyle}"
+                                                                                                    ToolTipService.ToolTip="{Binding DeleteToolTip}"
+                                                                                                    Content="Delete" />
+                                                                                        </Grid>
+                                                                                    </StackPanel>
+                                                                                </Grid>
+                                                                            </Border>
+                                                                        </DataTemplate>
+                                                                    </ItemsControl.ItemTemplate>
+                                                                </ItemsControl>
+                                                            </StackPanel>
+                                                        </StackPanel>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
                                         </StackPanel>
                                     </ScrollViewer>
                                 </Grid>

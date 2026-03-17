@@ -46,50 +46,31 @@
                     AutomationProperties.AutomationId="terminal-startup-mask"
                     Background="{ThemeResource ShellSurfaceBackgroundBrush}">
                 <Grid>
-                    <Border MaxWidth="380"
-                            Margin="18,18,18,0"
-                            Padding="14,13,14,12"
-                            HorizontalAlignment="Left"
-                            VerticalAlignment="Top"
-                            Background="{ThemeResource ShellPageBackgroundBrush}"
-                            BorderBrush="{ThemeResource ShellBorderBrush}"
-                            BorderThickness="1"
-                            CornerRadius="4">
-                        <StackPanel Spacing="10">
-                            <Grid ColumnDefinitions="Auto,*"
-                                  ColumnSpacing="10">
-                                <Border VerticalAlignment="Top"
-                                        Background="{ThemeResource ShellMutedSurfaceBrush}"
-                                        Style="{StaticResource ShellMarkBorderStyle}">
-                                    <TextBlock Style="{StaticResource ShellMarkTextStyle}" />
-                                </Border>
-
-                                <StackPanel Grid.Column="1"
-                                            Spacing="3">
-                                    <TextBlock x:Name="StartupKickerText"
-                                               Style="{StaticResource ShellInspectorLabelTextStyle}"
-                                               Text="Terminal workspace" />
-                                    <TextBlock x:Name="StartupTitleText"
-                                               Style="{StaticResource ShellSectionTextStyle}"
-                                               Text="Starting terminal" />
-                                    <TextBlock x:Name="StartupDetailText"
-                                               Style="{StaticResource ShellHintTextStyle}"
-                                               TextWrapping="WrapWholeWords"
-                                               Text="/mnt/c/Users/lqassem/native-terminal-starter" />
-                                </StackPanel>
-                            </Grid>
-
-                            <StackPanel Spacing="6">
-                                <ProgressBar x:Name="StartupProgressBar"
-                                             IsIndeterminate="True"
-                                             Height="2"
-                                             HorizontalAlignment="Stretch" />
-                                <TextBlock x:Name="StartupMetaText"
-                                           Style="{StaticResource ShellInteractiveHintTextStyle}"
-                                           Text="Preparing terminal host, shell bridge, and replay state." />
-                            </StackPanel>
+                    <StackPanel MaxWidth="420"
+                                Margin="18,18,18,0"
+                                HorizontalAlignment="Left"
+                                VerticalAlignment="Top"
+                                Spacing="9">
+                        <TextBlock x:Name="StartupKickerText"
+                                   Style="{StaticResource ShellInspectorLabelTextStyle}"
+                                   Text="Terminal workspace" />
+                        <StackPanel Spacing="3">
+                            <TextBlock x:Name="StartupTitleText"
+                                       Style="{StaticResource ShellSectionTextStyle}"
+                                       Text="Starting terminal" />
+                            <TextBlock x:Name="StartupDetailText"
+                                       Style="{StaticResource ShellHintTextStyle}"
+                                       TextWrapping="WrapWholeWords"
+                                       Text="/mnt/c/Users/lqassem/native-terminal-starter" />
                         </StackPanel>
-                    </Border>
+                        <Border Height="1"
+                                Width="88"
+                                HorizontalAlignment="Left"
+                                Background="{ThemeResource ShellBorderBrush}" />
+                        <TextBlock x:Name="StartupMetaText"
+                                   Style="{StaticResource ShellInteractiveHintTextStyle}"
+                                   Text="Preparing terminal host, shell bridge, and replay state." />
+                    </StackPanel>
                 </Grid>
             </Border>
 

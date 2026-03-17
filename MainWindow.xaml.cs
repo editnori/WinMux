@@ -699,8 +699,13 @@ namespace SelfContainedDeployment
         {
             const int ICON_SMALL = 0;
             const int ICON_BIG = 1;
+            string iconPath = ResolveIconPath(iconName);
+            if (string.IsNullOrWhiteSpace(iconPath))
+            {
+                return;
+            }
 
-            fixed (char* nameLocal = iconName)
+            fixed (char* nameLocal = iconPath)
             {
                 HANDLE smallIcon = LoadImage(default,
                     nameLocal,
@@ -708,19 +713,52 @@ namespace SelfContainedDeployment
                     GetSystemMetrics(SYSTEM_METRICS_INDEX.SM_CXSMICON),
                     GetSystemMetrics(SYSTEM_METRICS_INDEX.SM_CYSMICON),
                     IMAGE_FLAGS.LR_LOADFROMFILE | IMAGE_FLAGS.LR_SHARED);
-                SendMessage(hwnd, WM_SETICON, ICON_SMALL, smallIcon.Value);
+                if (!smallIcon.IsNull)
+                {
+                    SendMessage(hwnd, WM_SETICON, ICON_SMALL, smallIcon.Value);
+                }
             }
 
-            fixed (char* nameLocal = iconName)
+            fixed (char* nameLocal = iconPath)
             {
                 HANDLE bigIcon = LoadImage(default,
                     nameLocal,
                     GDI_IMAGE_TYPE.IMAGE_ICON,
-                    GetSystemMetrics(SYSTEM_METRICS_INDEX.SM_CXSMICON),
-                    GetSystemMetrics(SYSTEM_METRICS_INDEX.SM_CYSMICON),
+                    GetSystemMetrics(SYSTEM_METRICS_INDEX.SM_CXICON),
+                    GetSystemMetrics(SYSTEM_METRICS_INDEX.SM_CYICON),
                     IMAGE_FLAGS.LR_LOADFROMFILE | IMAGE_FLAGS.LR_SHARED);
-                SendMessage(hwnd, WM_SETICON, ICON_BIG, bigIcon.Value);
+                if (!bigIcon.IsNull)
+                {
+                    SendMessage(hwnd, WM_SETICON, ICON_BIG, bigIcon.Value);
+                }
             }
+        }
+
+        private static string ResolveIconPath(string iconName)
+        {
+            if (string.IsNullOrWhiteSpace(iconName))
+            {
+                return null;
+            }
+
+            if (Path.IsPathRooted(iconName) && File.Exists(iconName))
+            {
+                return iconName;
+            }
+
+            string baseDirectoryCandidate = Path.Combine(AppContext.BaseDirectory, iconName);
+            if (File.Exists(baseDirectoryCandidate))
+            {
+                return baseDirectoryCandidate;
+            }
+
+            string workingDirectoryCandidate = Path.GetFullPath(iconName);
+            if (File.Exists(workingDirectoryCandidate))
+            {
+                return workingDirectoryCandidate;
+            }
+
+            return null;
         }
 
         private void SetWindowSize(HWND hwnd, int width, int height)

@@ -103,6 +103,11 @@ namespace SelfContainedDeployment.Panes
         private const int MaxProjectFileCacheEntries = 12;
         private static readonly object ProjectFileCacheGate = new();
         private static readonly Dictionary<string, CachedProjectFileSnapshot> ProjectFileCache = new(StringComparer.OrdinalIgnoreCase);
+        private static readonly EnumerationOptions ProjectFileEnumerationOptions = new()
+        {
+            IgnoreInaccessible = true,
+            RecurseSubdirectories = false,
+        };
 
         private sealed class EditorWebMessage
         {
@@ -1514,7 +1519,7 @@ namespace SelfContainedDeployment.Panes
                 string current = stack.Pop();
                 try
                 {
-                    foreach (string directory in Directory.EnumerateDirectories(current))
+                    foreach (string directory in EnumerateDirectoriesSafely(current))
                     {
                         cancellationToken.ThrowIfCancellationRequested();
                         string name = Path.GetFileName(directory);
@@ -1526,7 +1531,7 @@ namespace SelfContainedDeployment.Panes
                         stack.Push(directory);
                     }
 
-                    foreach (string file in Directory.EnumerateFiles(current))
+                    foreach (string file in EnumerateFilesSafely(current))
                     {
                         cancellationToken.ThrowIfCancellationRequested();
                         if (!IsProbablyEditableFile(file))
@@ -1563,6 +1568,30 @@ namespace SelfContainedDeployment.Panes
             }
 
             return ordered;
+        }
+
+        private static IEnumerable<string> EnumerateDirectoriesSafely(string path)
+        {
+            try
+            {
+                return Directory.EnumerateDirectories(path, "*", ProjectFileEnumerationOptions);
+            }
+            catch
+            {
+                return Array.Empty<string>();
+            }
+        }
+
+        private static IEnumerable<string> EnumerateFilesSafely(string path)
+        {
+            try
+            {
+                return Directory.EnumerateFiles(path, "*", ProjectFileEnumerationOptions);
+            }
+            catch
+            {
+                return Array.Empty<string>();
+            }
         }
 
         private static void PruneProjectFileCache(DateTimeOffset now)

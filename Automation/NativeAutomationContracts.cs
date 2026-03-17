@@ -143,7 +143,11 @@ namespace SelfContainedDeployment.Automation
 
         public bool Selected { get; set; }
 
+        public bool Archived { get; set; }
+
         public string UpdatedAt { get; set; }
+
+        public string ArchivedAt { get; set; }
     }
 
     public sealed class NativeAutomationTabState
