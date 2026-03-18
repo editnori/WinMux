@@ -8,6 +8,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+. (Join-Path $PSScriptRoot "native-automation-client.ps1")
+
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $projectPath = Join-Path $repoRoot "SelfContainedDeployment.csproj"
 $dotnetPath = "C:\Program Files\dotnet\dotnet.exe"
@@ -20,7 +22,8 @@ if ([string]::IsNullOrWhiteSpace($targetFramework)) {
 }
 
 try {
-    Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:$AutomationPort/action" -ContentType "application/json" -Body (@{ action = "saveSession" } | ConvertTo-Json -Compress) -TimeoutSec 2 | Out-Null
+    Initialize-WinMuxAutomationClient -Port $AutomationPort | Out-Null
+    Invoke-AutomationPost "/action" @{ action = "saveSession" } -TimeoutSec 2 -CompressJson | Out-Null
 }
 catch {
 }
@@ -58,9 +61,18 @@ if (-not (Test-Path $exePath)) {
     throw "Could not find built app at $exePath"
 }
 
-$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=$Port --remote-debugging-address=0.0.0.0"
+$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=$Port --remote-debugging-address=127.0.0.1"
 $env:NATIVE_TERMINAL_WEB_ROOT = $webRoot
 $env:NATIVE_TERMINAL_AUTOMATION_PORT = "$AutomationPort"
+$tokenBytes = [byte[]]::new(32)
+$rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+$rng.GetBytes($tokenBytes)
+$rng.Dispose()
+$automationToken = [Convert]::ToBase64String($tokenBytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
+$env:NATIVE_TERMINAL_AUTOMATION_TOKEN = $automationToken
+$env:WINMUX_AUTOMATION_TOKEN = $automationToken
+$env:WINMUX_ENABLE_WEBVIEW_DEVTOOLS = "1"
+$env:WINMUX_ENABLE_BROWSER_DEVTOOLS = "1"
 
 $process = Start-Process -FilePath $exePath -WorkingDirectory $repoRoot -PassThru
 
@@ -74,10 +86,11 @@ Write-Host "  chromium.connectOverCDP('http://127.0.0.1:$Port')"
 Write-Host ""
 
 $targetsUrl = "http://127.0.0.1:$Port/json/list"
-$automationHealthUrl = "http://127.0.0.1:$AutomationPort/health"
 $lastTargets = $null
 $rendererReady = $false
 $automationReady = $false
+
+Initialize-WinMuxAutomationClient -Port $AutomationPort | Out-Null
 
 for ($i = 0; $i -lt 40; $i++) {
     Start-Sleep -Milliseconds 250
@@ -109,7 +122,7 @@ for ($i = 0; $i -lt 40; $i++) {
 
     if (-not $automationReady) {
         try {
-            $null = Invoke-RestMethod -Uri $automationHealthUrl -TimeoutSec 2
+            $null = Invoke-AutomationGet "/health" -TimeoutSec 2
             $automationReady = $true
         }
         catch {

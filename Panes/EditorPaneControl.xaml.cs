@@ -603,7 +603,7 @@ namespace SelfContainedDeployment.Panes
             {
                 settings.AreDefaultContextMenusEnabled = true;
                 settings.IsStatusBarEnabled = false;
-                settings.AreDevToolsEnabled = true;
+                settings.AreDevToolsEnabled = AreWebViewDevToolsEnabled();
                 settings.AreBrowserAcceleratorKeysEnabled = true;
             }
 
@@ -611,6 +611,15 @@ namespace SelfContainedDeployment.Panes
             core.NavigationCompleted -= OnNavigationCompleted;
             core.WebMessageReceived += OnWebMessageReceived;
             core.NavigationCompleted += OnNavigationCompleted;
+        }
+
+        private static bool AreWebViewDevToolsEnabled()
+        {
+            string value = Environment.GetEnvironmentVariable("WINMUX_ENABLE_WEBVIEW_DEVTOOLS");
+            return string.Equals(value, "1", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(value, "true", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(value, "yes", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(value, "on", StringComparison.OrdinalIgnoreCase);
         }
 
         private async Task<CoreWebView2> WaitForCoreWebView2Async()

@@ -12,6 +12,7 @@ namespace SelfContainedDeployment
     {
         private Window mainWindow;
         private NativeAutomationServer automationServer;
+        private NativeAutomationSessionInfo automationSession;
 
         internal MainWindow MainWindowInstance => mainWindow as MainWindow;
 
@@ -41,7 +42,8 @@ namespace SelfContainedDeployment
                 return;
             }
 
-            automationServer = new NativeAutomationServer(MainWindowInstance, port);
+            automationSession = NativeAutomationAccess.CreateSession(port);
+            automationServer = new NativeAutomationServer(MainWindowInstance, port, automationSession.Token);
             automationServer.Start();
         }
 
@@ -55,6 +57,8 @@ namespace SelfContainedDeployment
 
             automationServer?.Dispose();
             automationServer = null;
+            NativeAutomationAccess.DeleteSession(automationSession);
+            automationSession = null;
             mainWindow = null;
         }
 
@@ -68,13 +72,30 @@ namespace SelfContainedDeployment
                     "WinMux");
                 Directory.CreateDirectory(directory);
                 path = Path.Combine(directory, "startup-error.log");
-                File.AppendAllText(path, $"{DateTimeOffset.UtcNow:O}{Environment.NewLine}{e.Message}{Environment.NewLine}{e.Exception}{Environment.NewLine}{new string('-', 80)}{Environment.NewLine}");
+                string detail = ShouldWriteVerboseStartupErrorLog()
+                    ? e.Exception?.ToString() ?? e.Message
+                    : $"{e.Exception?.GetType().FullName ?? "Exception"}: {e.Message}";
+                File.AppendAllText(path, $"{DateTimeOffset.UtcNow:O}{Environment.NewLine}{detail}{Environment.NewLine}{new string('-', 80)}{Environment.NewLine}");
             }
             catch
             {
             }
 
             NativeAutomationDiagnostics.RecordUnhandledException(e.Message, e.Exception?.ToString(), path);
+        }
+
+        private static bool ShouldWriteVerboseStartupErrorLog()
+        {
+            string value = Environment.GetEnvironmentVariable("WINMUX_ENABLE_VERBOSE_STARTUP_ERROR_LOG");
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value.Equals("1", StringComparison.OrdinalIgnoreCase) ||
+                    value.Equals("true", StringComparison.OrdinalIgnoreCase) ||
+                    value.Equals("yes", StringComparison.OrdinalIgnoreCase) ||
+                    value.Equals("on", StringComparison.OrdinalIgnoreCase);
+            }
+
+            return !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("NATIVE_TERMINAL_AUTOMATION_PORT"));
         }
     }
 }

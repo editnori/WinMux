@@ -4,7 +4,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$baseUrl = "http://127.0.0.1:$Port"
+. (Join-Path $PSScriptRoot "native-automation-client.ps1")
+Initialize-WinMuxAutomationClient -Port $Port | Out-Null
 $metrics = [System.Collections.Generic.List[object]]::new()
 $tempProjectPath = Join-Path $env:TEMP ("winmux-stress-" + [Guid]::NewGuid().ToString("N"))
 $initialProjectId = $null
@@ -20,22 +21,6 @@ function Assert-True {
     if (-not $Condition) {
         throw $Message
     }
-}
-
-function Invoke-AutomationGet {
-    param([string]$Path)
-
-    return Invoke-RestMethod -Uri "$baseUrl$Path" -TimeoutSec 20
-}
-
-function Invoke-AutomationPost {
-    param(
-        [string]$Path,
-        [object]$Body
-    )
-
-    $json = if ($null -eq $Body) { "" } else { $Body | ConvertTo-Json -Depth 20 -Compress }
-    return Invoke-RestMethod -Method Post -Uri "$baseUrl$Path" -ContentType "application/json" -Body $json -TimeoutSec 25
 }
 
 function Wait-Until {
@@ -294,12 +279,12 @@ try {
         $layout = $layouts[($iteration - 1) % $layouts.Count]
         $diffTarget = $diffTargets[($iteration - 1) % $diffTargets.Count]
 
-        $null = Measure-Step -Name "showOverview" -Iteration $iteration -Action {
-            $response = Invoke-AutomationPost "/action" @{ action = "showOverview" }
-            Assert-True ($response.ok -eq $true) "showOverview failed."
-            Wait-Until -FailureMessage "Overview view did not become active." -Condition {
+        $null = Measure-Step -Name "showSettings" -Iteration $iteration -Action {
+            $response = Invoke-AutomationPost "/action" @{ action = "showSettings" }
+            Assert-True ($response.ok -eq $true) "showSettings failed."
+            Wait-Until -FailureMessage "Settings view did not become active." -Condition {
                 $latestState = Invoke-AutomationGet "/state"
-                if ($latestState.activeView -eq "overview") {
+                if ($latestState.activeView -eq "settings") {
                     return $latestState
                 }
 

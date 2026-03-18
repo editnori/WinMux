@@ -3,7 +3,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$baseUrl = "http://127.0.0.1:$Port"
+. (Join-Path $PSScriptRoot "native-automation-client.ps1")
+Initialize-WinMuxAutomationClient -Port $Port | Out-Null
 $results = [System.Collections.Generic.List[object]]::new()
 
 function Add-Check {
@@ -28,22 +29,6 @@ function Assert-True {
     if (-not $Condition) {
         throw $Message
     }
-}
-
-function Invoke-AutomationGet {
-    param([string]$Path)
-
-    Invoke-RestMethod -Uri "$baseUrl$Path" -TimeoutSec 10
-}
-
-function Invoke-AutomationPost {
-    param(
-        [string]$Path,
-        [object]$Body
-    )
-
-    $json = if ($null -eq $Body) { "" } else { $Body | ConvertTo-Json -Depth 20 }
-    Invoke-RestMethod -Method Post -Uri "$baseUrl$Path" -ContentType "application/json" -Body $json -TimeoutSec 10
 }
 
 function Wait-Until {

@@ -1237,7 +1237,7 @@ namespace SelfContainedDeployment
                     case "selectdifffile":
                         if (!string.IsNullOrWhiteSpace(request.Value))
                         {
-                            SelectDiffPathInCurrentReview(request.Value);
+                            _ = SelectDiffPathInCurrentReviewAsync(request.Value);
                         }
 
                         ShowTerminalShell(queueGitRefresh: false);
@@ -1378,7 +1378,7 @@ namespace SelfContainedDeployment
 
             if (_projects.SelectMany(project => project.Threads).SelectMany(thread => thread.Panes).Any(pane => pane.Kind == WorkspacePaneKind.Browser))
             {
-                BrowserPaneControl.PreloadSharedEnvironmentIfAvailable();
+                BrowserPaneControl.PreloadBrowserEnvironmentIfAvailable();
             }
 
             if (EnableSettingsPagePreload)
@@ -1763,7 +1763,7 @@ namespace SelfContainedDeployment
                 return;
             }
 
-            SelectDiffPathInCurrentReview(changedFile.Path);
+            _ = SelectDiffPathInCurrentReviewAsync(changedFile.Path);
         }
 
         private void OnDiffFileItemButtonLoaded(object sender, RoutedEventArgs e)
@@ -1844,7 +1844,7 @@ namespace SelfContainedDeployment
                 return;
             }
 
-            WorkspaceProject project = GetOrCreateProject(Environment.CurrentDirectory, null, SampleConfig.DefaultShellProfileId);
+            WorkspaceProject project = GetOrCreateProject(ResolveWorkspaceBootstrapPath(), null, SampleConfig.DefaultShellProfileId);
             if (project.Threads.Count == 0)
             {
                 CreateThread(project);
@@ -4388,7 +4388,7 @@ namespace SelfContainedDeployment
                     EditorFilePath = deferredPane.EditorFilePath,
                     ReplayTool = pane.ReplayTool,
                     ReplaySessionId = pane.ReplaySessionId,
-                    ReplayCommand = pane.ReplayCommand,
+                    ReplayArguments = pane.ReplayArguments,
                 };
             }
 
@@ -4414,7 +4414,7 @@ namespace SelfContainedDeployment
                 EditorFilePath = pane is EditorPaneRecord editorPane ? editorPane.Editor.SelectedFilePath : null,
                 ReplayTool = pane.ReplayTool,
                 ReplaySessionId = pane.ReplaySessionId,
-                ReplayCommand = pane.ReplayCommand,
+                ReplayArguments = pane.ReplayArguments,
             };
         }
 
@@ -4623,6 +4623,7 @@ namespace SelfContainedDeployment
                 SampleConfig.DefaultShellProfileId = ShellProfiles.Resolve(snapshot.DefaultShellProfileId).Id;
                 SampleConfig.MaxPaneCountPerThread = Math.Clamp(snapshot.MaxPaneCountPerThread, 2, 4);
                 _threadSequence = Math.Max(1, snapshot.ThreadSequence);
+                int skippedMissingProjectCount = 0;
 
                 foreach (ProjectSessionSnapshot projectSnapshot in snapshot.Projects)
                 {
@@ -4631,15 +4632,27 @@ namespace SelfContainedDeployment
                         continue;
                     }
 
-                    WorkspaceProject project = new(projectSnapshot.RootPath, projectSnapshot.ShellProfileId, projectSnapshot.Name, projectSnapshot.Id);
-                    ShellProfiles.EnsureProjectDirectory(project.RootPath, out _);
+                    if (!TryResolveRestorableProjectPath(projectSnapshot.RootPath, out string restorableProjectPath, out string unavailableProjectPath))
+                    {
+                        skippedMissingProjectCount++;
+                        LogAutomationEvent("shell", "workspace.restore_project_skipped", "Skipped restoring a project because its root path is unavailable on this machine.", new Dictionary<string, string>
+                        {
+                            ["projectId"] = projectSnapshot.Id ?? string.Empty,
+                            ["projectName"] = projectSnapshot.Name ?? string.Empty,
+                            ["projectPath"] = projectSnapshot.RootPath ?? string.Empty,
+                            ["unavailablePath"] = unavailableProjectPath ?? string.Empty,
+                        });
+                        continue;
+                    }
+
+                    WorkspaceProject project = new(restorableProjectPath, projectSnapshot.ShellProfileId, projectSnapshot.Name, projectSnapshot.Id);
                     _projects.Add(project);
 
                     foreach (ThreadSessionSnapshot threadSnapshot in projectSnapshot.Threads ?? new List<ThreadSessionSnapshot>())
                     {
                         WorkspaceThread thread = new(project, string.IsNullOrWhiteSpace(threadSnapshot.Name) ? $"Thread {_threadSequence++}" : threadSnapshot.Name, threadSnapshot.Id)
                         {
-                            WorktreePath = string.IsNullOrWhiteSpace(threadSnapshot.WorktreePath) ? project.RootPath : threadSnapshot.WorktreePath,
+                            WorktreePath = ResolveRequestedPath(string.IsNullOrWhiteSpace(threadSnapshot.WorktreePath) ? project.RootPath : threadSnapshot.WorktreePath),
                             BranchName = threadSnapshot.BranchName,
                             ChangedFileCount = 0,
                             SelectedNoteId = threadSnapshot.SelectedNoteId,
@@ -4751,6 +4764,20 @@ namespace SelfContainedDeployment
                         : project.Threads.FirstOrDefault()?.Id;
                 }
 
+                if (_projects.Count == 0)
+                {
+                    if (skippedMissingProjectCount > 0)
+                    {
+                        LogAutomationEvent("shell", "workspace.restore_empty", "Skipped all saved projects because their roots were unavailable on this machine.", new Dictionary<string, string>
+                        {
+                            ["skippedProjectCount"] = skippedMissingProjectCount.ToString(),
+                            ["sessionPath"] = WorkspaceSessionStore.GetSessionPath(),
+                        });
+                    }
+
+                    return false;
+                }
+
                 _activeProject = _projects.FirstOrDefault(project => string.Equals(project.Id, snapshot.ActiveProjectId, StringComparison.Ordinal))
                     ?? _projects.FirstOrDefault();
                 _activeThread = _projects
@@ -4824,7 +4851,7 @@ namespace SelfContainedDeployment
             return project;
         }
 
-        private WorkspaceThread CreateThread(WorkspaceProject project, string threadName = null, bool ensureInitialPane = true, WorkspaceThread inheritFromThread = null)
+        private WorkspaceThread CreateThread(WorkspaceProject project, string threadName = null, bool ensureInitialPane = true, WorkspaceThread inheritFromThread = null, bool deferUiWork = false)
         {
             project ??= _activeProject ?? GetOrCreateProject(Environment.CurrentDirectory);
 
@@ -4859,7 +4886,12 @@ namespace SelfContainedDeployment
                 ["projectId"] = project.Id,
                 ["threadName"] = thread.Name,
             });
-            QueueSessionSave();
+            if (!deferUiWork)
+            {
+                QueueProjectTreeRefresh(immediate: true);
+                QueueSessionSave();
+            }
+
             return thread;
         }
 
@@ -4930,7 +4962,7 @@ namespace SelfContainedDeployment
                 return thread;
             }
 
-            WorkspaceThread overflowThread = CreateThread(project, ensureInitialPane: false, inheritFromThread: thread);
+            WorkspaceThread overflowThread = CreateThread(project, ensureInitialPane: false, inheritFromThread: thread, deferUiWork: true);
             LogAutomationEvent("shell", "thread.overflow_created", $"Created overflow thread {overflowThread.Name} for {paneKind.ToString().ToLowerInvariant()} pane", new Dictionary<string, string>
             {
                 ["projectId"] = project.Id,
@@ -4955,7 +4987,10 @@ namespace SelfContainedDeployment
 
             if (thread == _activeThread)
             {
-                RefreshTabView();
+                if (!TryAppendSelectedPaneToActiveTabStrip(pane))
+                {
+                    RefreshTabView();
+                }
                 SetInspectorSection(InspectorSection.Files);
                 RequestLayoutForVisiblePanes();
             }
@@ -5153,7 +5188,10 @@ namespace SelfContainedDeployment
 
             if (thread == _activeThread)
             {
-                RefreshTabView();
+                if (!TryAppendSelectedPaneToActiveTabStrip(pane))
+                {
+                    RefreshTabView();
+                }
                 RequestLayoutForVisiblePanes();
             }
             else if (thread.Panes.Count == 1)
@@ -5452,6 +5490,7 @@ namespace SelfContainedDeployment
                 pane.ReplayTool = terminal.ReplayTool;
                 pane.ReplaySessionId = terminal.ReplaySessionId;
                 pane.ReplayCommand = terminal.ReplayCommand;
+                pane.ReplayArguments = terminal.ReplayArguments;
                 QueueProjectTreeRefresh();
                 QueueSessionSave();
             };
@@ -5752,6 +5791,21 @@ namespace SelfContainedDeployment
                 return new DeferredPaneRecord(snapshot);
             }
 
+            bool hasReplayMetadata = HasReplayRestoreMetadata(snapshot);
+            bool replayRestoreRejected = false;
+            string restoreReplayCommand = null;
+            if (!snapshot.IsExited && hasReplayMetadata)
+            {
+                replayRestoreRejected = !TryResolveRestoreReplayCommand(snapshot, out restoreReplayCommand);
+            }
+
+            bool autoStartSession = !snapshot.IsExited && !replayRestoreRejected;
+            string suspendedStatusText = snapshot.IsExited && snapshot.ReplayRestoreFailed
+                ? "Replay restore failed last time. Close the tab or reopen the saved session manually."
+                : replayRestoreRejected
+                    ? "Saved replay metadata could not be restored automatically. Resume the saved session manually."
+                    : null;
+
             WorkspacePaneRecord pane = snapshot.Kind?.Trim().ToLowerInvariant() switch
             {
                 "browser" => CreateBrowserPane(project, thread, snapshot.BrowserUri, string.IsNullOrWhiteSpace(snapshot.Title) ? "Preview" : snapshot.Title, snapshot.Id),
@@ -5770,11 +5824,9 @@ namespace SelfContainedDeployment
                     startupInput: null,
                     initialTitle: string.IsNullOrWhiteSpace(snapshot.Title) ? FormatThreadPath(project, thread) : snapshot.Title,
                     paneId: snapshot.Id,
-                    restoreReplayCommand: snapshot.IsExited ? null : snapshot.ReplayCommand,
-                    autoStartSession: !snapshot.IsExited,
-                    suspendedStatusText: snapshot.IsExited && snapshot.ReplayRestoreFailed
-                        ? "Replay restore failed last time. Close the tab or reopen the saved session manually."
-                        : null),
+                    restoreReplayCommand: restoreReplayCommand,
+                    autoStartSession: autoStartSession,
+                    suspendedStatusText: suspendedStatusText),
             };
 
             pane.HasCustomTitle = snapshot.HasCustomTitle;
@@ -5788,17 +5840,23 @@ namespace SelfContainedDeployment
             }
             pane.ReplayTool = snapshot.ReplayTool;
             pane.ReplaySessionId = snapshot.ReplaySessionId;
-            pane.ReplayCommand = snapshot.ReplayCommand;
+            pane.ReplayCommand = restoreReplayCommand;
+            pane.ReplayArguments = snapshot.ReplayArguments;
             pane.RestoredFromSession = true;
-            pane.ReplayRestoreFailed = snapshot.ReplayRestoreFailed;
-            pane.PersistExitedState = snapshot.IsExited && snapshot.ReplayRestoreFailed;
+            pane.ReplayRestoreFailed = snapshot.ReplayRestoreFailed || replayRestoreRejected;
+            pane.PersistExitedState = snapshot.IsExited && snapshot.ReplayRestoreFailed || replayRestoreRejected;
             if (snapshot.IsExited && pane is TerminalPaneRecord exitedPane)
             {
                 exitedPane.MarkExited();
             }
-            else if (!string.IsNullOrWhiteSpace(snapshot.ReplayCommand) && pane is TerminalPaneRecord replayPane)
+            else if (!string.IsNullOrWhiteSpace(restoreReplayCommand) && pane is TerminalPaneRecord replayPane)
             {
                 replayPane.MarkReplayRestorePending();
+            }
+            else if (replayRestoreRejected && pane is TerminalPaneRecord rejectedReplayPane)
+            {
+                rejectedReplayPane.MarkExited();
+                rejectedReplayPane.MarkReplayRestoreFailed();
             }
             if (pane is BrowserPaneRecord browserPane && snapshot.BrowserTabs?.Count > 0)
             {
@@ -5812,6 +5870,37 @@ namespace SelfContainedDeployment
                     snapshot.SelectedBrowserTabId);
             }
             return pane;
+        }
+
+        private static bool HasReplayRestoreMetadata(PaneSessionSnapshot snapshot)
+        {
+            return !string.IsNullOrWhiteSpace(snapshot?.ReplayTool) ||
+                !string.IsNullOrWhiteSpace(snapshot?.ReplaySessionId) ||
+                !string.IsNullOrWhiteSpace(snapshot?.ReplayCommand);
+        }
+
+        private static bool TryResolveRestoreReplayCommand(PaneSessionSnapshot snapshot, out string restoreReplayCommand)
+        {
+            restoreReplayCommand = null;
+            if (snapshot is null)
+            {
+                return false;
+            }
+
+            if (TerminalControl.TryBuildReplayRestoreCommand(snapshot.ReplayTool, snapshot.ReplaySessionId, snapshot.ReplayArguments, out restoreReplayCommand))
+            {
+                return true;
+            }
+
+            if (!TerminalControl.TryExtractReplayCommandMetadata(snapshot.ReplayCommand, out string replayTool, out string replaySessionId, out string replayArguments))
+            {
+                return false;
+            }
+
+            snapshot.ReplayTool = replayTool;
+            snapshot.ReplaySessionId = replaySessionId;
+            snapshot.ReplayArguments = replayArguments;
+            return TerminalControl.TryBuildReplayRestoreCommand(replayTool, replaySessionId, replayArguments, out restoreReplayCommand);
         }
 
         private void EnsureThreadHasSelectedDiffPane(WorkspaceProject project, WorkspaceThread thread)
@@ -8796,6 +8885,16 @@ namespace SelfContainedDeployment
             }
 
             _settingsPagePreloadStarted = true;
+            if (DispatcherQueue?.HasThreadAccess == true)
+            {
+                if (!_showingSettings)
+                {
+                    EnsureSettingsPageLoaded(refreshExisting: false, preloadOnly: true);
+                }
+
+                return;
+            }
+
             DispatcherQueue.TryEnqueue(() =>
             {
                 if (_showingSettings)
@@ -9226,38 +9325,50 @@ namespace SelfContainedDeployment
             };
         }
 
-        private async void SelectDiffPathInCurrentReview(string selectedPath)
+        private async System.Threading.Tasks.Task SelectDiffPathInCurrentReviewAsync(string selectedPath)
         {
             if (_activeThread is null || string.IsNullOrWhiteSpace(selectedPath))
             {
                 return;
             }
 
-            GitThreadSnapshot displayedSnapshot = ResolveDisplayedGitSnapshot();
-            if (displayedSnapshot is null)
+            try
             {
-                return;
-            }
-
-            GitStatusService.SelectDiffPath(displayedSnapshot, selectedPath);
-            if (ReferenceEquals(displayedSnapshot, _activeGitSnapshot))
-            {
-                _activeThread.SelectedDiffPath = displayedSnapshot.SelectedPath;
-                UpdateDiffFileSelection();
-                if (HasSelectedDiffAvailable(displayedSnapshot, displayedSnapshot.SelectedPath))
+                GitThreadSnapshot displayedSnapshot = ResolveDisplayedGitSnapshot();
+                if (displayedSnapshot is null)
                 {
-                    AddOrSelectDiffPane(_activeProject, _activeThread, displayedSnapshot.SelectedPath, null, displayedSnapshot, DiffPaneDisplayMode.FileCompare);
+                    return;
+                }
+
+                GitStatusService.SelectDiffPath(displayedSnapshot, selectedPath);
+                if (ReferenceEquals(displayedSnapshot, _activeGitSnapshot))
+                {
+                    _activeThread.SelectedDiffPath = displayedSnapshot.SelectedPath;
+                    UpdateDiffFileSelection();
+                    if (HasSelectedDiffAvailable(displayedSnapshot, displayedSnapshot.SelectedPath))
+                    {
+                        AddOrSelectDiffPane(_activeProject, _activeThread, displayedSnapshot.SelectedPath, null, displayedSnapshot, DiffPaneDisplayMode.FileCompare);
+                    }
+                    else
+                    {
+                        AddOrSelectDiffPane(_activeProject, _activeThread, displayedSnapshot.SelectedPath, null, displayedSnapshot, DiffPaneDisplayMode.FileCompare);
+                        await EnsureSelectedDiffReadyAsync(_activeThread, _activeProject, displayedSnapshot.SelectedPath).ConfigureAwait(true);
+                    }
                 }
                 else
                 {
-                    AddOrSelectDiffPane(_activeProject, _activeThread, displayedSnapshot.SelectedPath, null, displayedSnapshot, DiffPaneDisplayMode.FileCompare);
-                    await EnsureSelectedDiffReadyAsync(_activeThread, _activeProject, displayedSnapshot.SelectedPath).ConfigureAwait(true);
+                    UpdateDiffFileSelection();
+                    AddOrSelectDiffPane(_activeProject, _activeThread, displayedSnapshot.SelectedPath, displayedSnapshot.SelectedDiff, displayedSnapshot, DiffPaneDisplayMode.FileCompare);
                 }
             }
-            else
+            catch (Exception ex)
             {
-                UpdateDiffFileSelection();
-                AddOrSelectDiffPane(_activeProject, _activeThread, displayedSnapshot.SelectedPath, displayedSnapshot.SelectedDiff, displayedSnapshot, DiffPaneDisplayMode.FileCompare);
+                LogAutomationEvent("shell", "diff.select_failed", $"Could not select diff path {selectedPath}: {ex.Message}", new Dictionary<string, string>
+                {
+                    ["threadId"] = _activeThread?.Id ?? string.Empty,
+                    ["projectId"] = _activeProject?.Id ?? string.Empty,
+                    ["selectedPath"] = selectedPath ?? string.Empty,
+                });
             }
         }
 
@@ -12448,6 +12559,72 @@ namespace SelfContainedDeployment
         private static string ResolveRequestedPath(string rootPath)
         {
             return ShellProfiles.NormalizeProjectPath(rootPath);
+        }
+
+        private static bool TryResolveRestorableProjectPath(string rootPath, out string normalizedPath, out string unavailablePath)
+        {
+            normalizedPath = ResolveRequestedPath(rootPath);
+            unavailablePath = null;
+            if (string.IsNullOrWhiteSpace(normalizedPath))
+            {
+                unavailablePath = rootPath;
+                return false;
+            }
+
+            string pathToCheck = normalizedPath;
+            if (ShellProfiles.TryResolveLocalStoragePath(normalizedPath, out string localStoragePath))
+            {
+                pathToCheck = localStoragePath;
+            }
+
+            if (Directory.Exists(pathToCheck))
+            {
+                return true;
+            }
+
+            unavailablePath = pathToCheck;
+            return false;
+        }
+
+        private static string ResolveWorkspaceBootstrapPath()
+        {
+            string currentDirectory = ResolveRequestedPath(Environment.CurrentDirectory);
+            if (!LooksLikeInstalledAppDirectory(currentDirectory))
+            {
+                return currentDirectory;
+            }
+
+            string documentsDirectory = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+            if (!string.IsNullOrWhiteSpace(documentsDirectory) && Directory.Exists(documentsDirectory))
+            {
+                return ResolveRequestedPath(documentsDirectory);
+            }
+
+            string homeDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            if (!string.IsNullOrWhiteSpace(homeDirectory) && Directory.Exists(homeDirectory))
+            {
+                return ResolveRequestedPath(homeDirectory);
+            }
+
+            return currentDirectory;
+        }
+
+        private static bool LooksLikeInstalledAppDirectory(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return false;
+            }
+
+            string normalizedPath = ResolveRequestedPath(path);
+            string baseDirectory = ResolveRequestedPath(AppContext.BaseDirectory);
+            if (string.Equals(normalizedPath, baseDirectory, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            return File.Exists(Path.Combine(normalizedPath, "WinMux.exe")) ||
+                File.Exists(Path.Combine(normalizedPath, "SelfContainedDeployment.exe"));
         }
 
         private static bool LooksLikePath(string value)

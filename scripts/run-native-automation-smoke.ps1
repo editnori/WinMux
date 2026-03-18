@@ -3,7 +3,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$baseUrl = "http://127.0.0.1:$Port"
+. (Join-Path $PSScriptRoot "native-automation-client.ps1")
+Initialize-WinMuxAutomationClient -Port $Port | Out-Null
 $desktopUiaScript = Join-Path $PSScriptRoot "run-desktop-uia.ps1"
 $results = [System.Collections.Generic.List[object]]::new()
 $tempProjectPath = Join-Path $env:TEMP ("winmux-smoke-" + [Guid]::NewGuid().ToString("N"))
@@ -30,22 +31,6 @@ function Assert-True {
     if (-not $Condition) {
         throw $Message
     }
-}
-
-function Invoke-AutomationGet {
-    param([string]$Path)
-
-    return Invoke-RestMethod -Uri "$baseUrl$Path" -TimeoutSec 20
-}
-
-function Invoke-AutomationPost {
-    param(
-        [string]$Path,
-        [object]$Body
-    )
-
-    $json = if ($null -eq $Body) { "" } else { $Body | ConvertTo-Json -Depth 20 }
-    return Invoke-RestMethod -Method Post -Uri "$baseUrl$Path" -ContentType "application/json" -Body $json -TimeoutSec 20
 }
 
 function Invoke-DesktopUiaTree {
@@ -149,6 +134,37 @@ function Get-ThreadById {
     )
 
     return @($Project.threads) | Where-Object { $_.id -eq $ThreadId } | Select-Object -First 1
+}
+
+function Get-SelectedThreadPaneKind {
+    param([object]$Thread)
+
+    if ($null -eq $Thread) {
+        return "terminal"
+    }
+
+    $selectedTab = @($Thread.tabs) | Where-Object { $_.id -eq $Thread.selectedTabId } | Select-Object -First 1
+    if ($null -eq $selectedTab) {
+        $selectedTab = @($Thread.tabs) | Select-Object -First 1
+    }
+
+    if ($null -eq $selectedTab -or [string]::IsNullOrWhiteSpace($selectedTab.kind)) {
+        return "terminal"
+    }
+
+    return [string]$selectedTab.kind
+}
+
+function Get-ExpectedLightThreadSelectionBackground {
+    param([string]$PaneKind)
+
+    $resolvedPaneKind = if ([string]::IsNullOrWhiteSpace($PaneKind)) { "terminal" } else { $PaneKind.ToLowerInvariant() }
+    switch ($resolvedPaneKind) {
+        "browser" { return "#122563EB" }
+        "editor" { return "#1216A34A" }
+        "diff" { return "#12CA8A04" }
+        default { return "#120F766E" }
+    }
 }
 
 function Invoke-Git {
@@ -329,13 +345,13 @@ try {
             $latestProject = Get-ProjectById -State $latestState -ProjectId $latestState.projectId
             $latestThread = Get-ThreadById -Project $latestProject -ThreadId $latestState.activeThreadId
             $activePane = @($latestThread.panes) | Where-Object { $_.id -eq $latestState.activeTabId } | Select-Object -First 1
-            if ($null -ne $activePane -and $activePane.kind -eq "diff" -and $latestThread.layout -eq "dual") {
+            if ($null -ne $activePane -and $activePane.kind -eq "diff") {
                 return $latestState
             }
 
             return $null
         }
-        Add-Check "diff-pane" "diff pane opened for '$($state.selectedDiffPath)' in dual layout"
+        Add-Check "diff-pane" "diff pane opened for '$($state.selectedDiffPath)' in $((Get-ThreadById -Project (Get-ProjectById -State $state -ProjectId $state.projectId) -ThreadId $state.activeThreadId).layout) layout"
     }
 
     $activeProject = Get-ProjectById -State $state -ProjectId $state.projectId
@@ -433,19 +449,22 @@ try {
     Assert-True ($showTerminalResponse.ok -eq $true) "Could not return to terminal view."
 
     $state = Invoke-AutomationGet "/state"
+    $activeProject = Get-ProjectById -State $state -ProjectId $state.projectId
+    $activeThread = Get-ThreadById -Project $activeProject -ThreadId $state.activeThreadId
+    $selectedPaneKind = Get-SelectedThreadPaneKind -Thread $activeThread
+    $expectedLightThreadBackground = Get-ExpectedLightThreadSelectionBackground -PaneKind $selectedPaneKind
     $lightTerminalTree = Wait-Until -FailureMessage "Selected thread did not expose a light-theme selected state." -Condition {
         $tree = Invoke-AutomationGet "/ui-tree"
         $selectedThread = @($tree.interactiveNodes) | Where-Object { $_.automationId -eq "shell-thread-$($state.activeThreadId)" -and $_.selected -eq $true } | Select-Object -First 1
-        if ($null -ne $selectedThread -and $selectedThread.background -eq "#FFE7E7EB") {
+        if ($null -ne $selectedThread -and $selectedThread.background -eq $expectedLightThreadBackground) {
             return $selectedThread
         }
 
         return $null
     }
-    Assert-True ($lightTerminalTree.background -eq "#FFE7E7EB") "Selected light-theme thread row used the wrong background color."
-    Add-Check "light-thread-selection" $lightTerminalTree.background
+    Assert-True ($lightTerminalTree.background -eq $expectedLightThreadBackground) "Selected light-theme thread row used the wrong background color."
+    Add-Check "light-thread-selection" "$($lightTerminalTree.background) ($selectedPaneKind)"
 
-    $activeProject = Get-ProjectById -State $state -ProjectId $state.projectId
     $duplicateSourceThreadId = $state.activeThreadId
     $threadCountBeforeDuplicate = @($activeProject.threads).Count
     $invokeDuplicate = Invoke-AutomationPost "/ui-action" @{
@@ -623,8 +642,7 @@ try {
         $activePane = @($latestThread.panes) | Where-Object { $_.id -eq $latestState.activeTabId } | Select-Object -First 1
         if ($latestState.projectPath -eq $tempProjectPath -and
             $null -ne $activePane -and
-            $activePane.kind -eq "diff" -and
-            $latestThread.layout -eq "dual") {
+            $activePane.kind -eq "diff") {
             return $latestState
         }
 

@@ -49,6 +49,8 @@
     "native:screenshot:annotated": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-automation.ps1\")\" screenshot \"\" true",
     "native:smoke": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-automation-smoke.ps1\")\"",
     "native:stress": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-interaction-stress.ps1\")\"",
+    "desktop:install-dev": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/install-local-dev-shortcut.ps1\")\"",
+    "native:sign-local": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/sign-local-dev.ps1\")\"",
     "native:demo-recording": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-demo-recording.ps1\")\" -Mode standard",
     "native:demo-recording:cinematic": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-demo-recording.ps1\")\" -Mode cinematic",
     "native:feature-tour-recording": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-feature-tour-recording.ps1\")\"",

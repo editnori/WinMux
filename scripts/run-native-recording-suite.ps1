@@ -7,7 +7,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path $PSScriptRoot -Parent
-$baseUrl = "http://127.0.0.1:$Port"
+. (Join-Path $PSScriptRoot "native-automation-client.ps1")
+Initialize-WinMuxAutomationClient -Port $Port | Out-Null
 $startScriptPath = Join-Path $PSScriptRoot "start-webview2-debug.ps1"
 $fps = if ($Mode -eq "cinematic") { 16 } else { 12 }
 $windowWidth = if ($Mode -eq "cinematic") { 1560 } else { 1240 }
@@ -19,22 +20,6 @@ if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
 }
 
 New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
-
-function Invoke-AutomationGet {
-    param([string]$Path)
-
-    return Invoke-RestMethod -Uri "$baseUrl$Path" -TimeoutSec 20
-}
-
-function Invoke-AutomationPost {
-    param(
-        [string]$Path,
-        [object]$Body
-    )
-
-    $json = if ($null -eq $Body) { "" } else { $Body | ConvertTo-Json -Depth 20 }
-    return Invoke-RestMethod -Method Post -Uri "$baseUrl$Path" -ContentType "application/json" -Body $json -TimeoutSec 25
-}
 
 function Ensure-WinMuxReady {
     try {

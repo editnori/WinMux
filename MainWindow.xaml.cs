@@ -490,18 +490,25 @@ namespace SelfContainedDeployment
                     return;
                 }
 
-                string dumpDirectory = Path.Combine(
-                    Path.GetTempPath(),
-                    "winmux-hang-dumps",
-                    $"{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}-{perfSnapshot.ActiveCorrelationId}");
-                Directory.CreateDirectory(dumpDirectory);
+                bool captureSensitiveArtifacts = ShouldCaptureSensitiveDiagnostics();
+                string message = captureSensitiveArtifacts
+                    ? $"UI watchdog captured a dump for '{perfSnapshot.ActiveAction}' after heartbeat stalled."
+                    : $"UI watchdog recorded a hang report for '{perfSnapshot.ActiveAction}' after heartbeat stalled.";
+                string screenshotPath = null;
+                string eventsPath = null;
+                if (captureSensitiveArtifacts)
+                {
+                    string dumpDirectory = Path.Combine(
+                        Path.GetTempPath(),
+                        "winmux-hang-dumps",
+                        $"{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}-{perfSnapshot.ActiveCorrelationId}");
+                    Directory.CreateDirectory(dumpDirectory);
 
-                string screenshotPath = Path.Combine(dumpDirectory, "hang.png");
-                string eventsPath = Path.Combine(dumpDirectory, "events.json");
-                string message = $"UI watchdog captured a dump for '{perfSnapshot.ActiveAction}' after heartbeat stalled.";
-
-                CaptureAutomationScreenshotInternal(screenshotPath);
-                File.WriteAllText(eventsPath, JsonSerializer.Serialize(NativeAutomationEventLog.Snapshot(), AutomationJsonOptions));
+                    screenshotPath = Path.Combine(dumpDirectory, "hang.png");
+                    eventsPath = Path.Combine(dumpDirectory, "events.json");
+                    CaptureAutomationScreenshotInternal(screenshotPath);
+                    File.WriteAllText(eventsPath, JsonSerializer.Serialize(NativeAutomationEventLog.Snapshot(), AutomationJsonOptions));
+                }
 
                 NativeAutomationDiagnostics.RecordHangDump(
                     perfSnapshot.ActiveCorrelationId,
@@ -520,6 +527,20 @@ namespace SelfContainedDeployment
                 _lastWatchdogCorrelationId = perfSnapshot.ActiveCorrelationId;
                 _lastWatchdogCapturedAt = DateTimeOffset.UtcNow;
             }
+        }
+
+        private static bool ShouldCaptureSensitiveDiagnostics()
+        {
+            string value = Environment.GetEnvironmentVariable("WINMUX_ENABLE_DIAGNOSTIC_DUMPS");
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value.Equals("1", StringComparison.OrdinalIgnoreCase) ||
+                    value.Equals("true", StringComparison.OrdinalIgnoreCase) ||
+                    value.Equals("yes", StringComparison.OrdinalIgnoreCase) ||
+                    value.Equals("on", StringComparison.OrdinalIgnoreCase);
+            }
+
+            return !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("NATIVE_TERMINAL_AUTOMATION_PORT"));
         }
 
         private NativeAutomationState GetCachedAutomationState()

@@ -10,7 +10,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$baseUrl = "http://127.0.0.1:$Port"
+. (Join-Path $PSScriptRoot "native-automation-client.ps1")
+Initialize-WinMuxAutomationClient -Port $Port | Out-Null
 $repoRoot = Split-Path $PSScriptRoot -Parent
 $delayMultiplier = if ($Mode -eq "cinematic") { 1.85 } else { 1.0 }
 $defaultFps = if ($Fps -gt 0) { $Fps } elseif ($Mode -eq "cinematic") { 16 } else { 12 }
@@ -25,22 +26,6 @@ if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
 $tempProjectPath = Join-Path $env:TEMP ("winmux-demo-" + [Guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $tempProjectPath -Force | Out-Null
 New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
-
-function Invoke-AutomationGet {
-    param([string]$Path)
-
-    return Invoke-RestMethod -Uri "$baseUrl$Path" -TimeoutSec 20
-}
-
-function Invoke-AutomationPost {
-    param(
-        [string]$Path,
-        [object]$Body
-    )
-
-    $json = if ($null -eq $Body) { "" } else { $Body | ConvertTo-Json -Depth 20 }
-    return Invoke-RestMethod -Method Post -Uri "$baseUrl$Path" -ContentType "application/json" -Body $json -TimeoutSec 25
-}
 
 function Pause-Step {
     param([int]$Milliseconds = 900)

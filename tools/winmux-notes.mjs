@@ -1,7 +1,10 @@
 #!/usr/bin/env bun
 
-const port = Number(process.env.NATIVE_TERMINAL_AUTOMATION_PORT || 9331);
-const baseUrl = `http://127.0.0.1:${port}`;
+import path from "node:path";
+import process from "node:process";
+
+const cwd = process.cwd();
+let nativeAutomationScriptWindowsPathPromise = null;
 
 const [command = "help", ...rest] = process.argv.slice(2);
 const args = parseArgs(rest);
@@ -161,32 +164,74 @@ function buildActionPayload(commandName, rawArgs) {
 }
 
 async function getState() {
-  return requestJson("/state");
+  return runNativeAutomationTool("state");
 }
 
 async function postAction(payload) {
-  return requestJson("/action", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(payload),
-  });
+  return runNativeAutomationTool("action", [JSON.stringify(payload)]);
 }
 
-async function requestJson(path, init = {}) {
-  let response;
-  try {
-    response = await fetch(`${baseUrl}${path}`, init);
-  } catch (error) {
-    throw new Error(
-      `WinMux automation is not reachable at ${baseUrl}. Launch 'bun run webview2:start' first.`,
-    );
+async function getWindowsPath(localPath) {
+  const proc = Bun.spawn({
+    cmd: ["wslpath", "-w", localPath],
+    stdout: "pipe",
+    stderr: "pipe",
+    cwd,
+    env: process.env,
+  });
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
+  if (exitCode !== 0) {
+    throw new Error(`Could not resolve Windows path for ${localPath}: ${stderr || stdout}`.trim());
   }
 
-  const bodyText = await response.text();
-  const body = parseJsonSafely(bodyText);
-  if (!response.ok) {
-    const message = body?.message || body?.error || bodyText || `HTTP ${response.status}`;
+  return stdout.trim();
+}
+
+async function getNativeAutomationScriptWindowsPath() {
+  if (!nativeAutomationScriptWindowsPathPromise) {
+    nativeAutomationScriptWindowsPathPromise = getWindowsPath(path.resolve(cwd, "scripts", "run-native-automation.ps1"));
+  }
+
+  return nativeAutomationScriptWindowsPathPromise;
+}
+
+async function runNativeAutomationTool(tool, forwardArgs = []) {
+  const scriptPath = await getNativeAutomationScriptWindowsPath();
+  const proc = Bun.spawn({
+    cmd: [
+      "powershell.exe",
+      "-NoProfile",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-File",
+      scriptPath,
+      tool,
+      ...forwardArgs.filter((value) => value != null).map((value) => String(value)),
+    ],
+    stdout: "pipe",
+    stderr: "pipe",
+    cwd,
+    env: process.env,
+  });
+
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
+
+  if (exitCode !== 0) {
+    const message = stderr.trim() || stdout.trim() || `native automation tool '${tool}' failed`;
     throw new Error(message);
+  }
+
+  const body = parseJsonSafely(stdout.trim());
+  if (!body) {
+    throw new Error(`No JSON output returned from native automation tool '${tool}'.`);
   }
 
   return body;

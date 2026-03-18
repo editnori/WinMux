@@ -8,6 +8,13 @@ import urllib.error
 import urllib.request
 
 
+def resolve_token() -> str:
+    return (
+        os.environ.get("WINMUX_AUTOMATION_TOKEN", "").strip()
+        or os.environ.get("NATIVE_TERMINAL_AUTOMATION_TOKEN", "").strip()
+    )
+
+
 def resolve_url(env_name: str, path: str) -> str:
     value = os.environ.get(env_name, "").strip()
     if value:
@@ -18,10 +25,15 @@ def resolve_url(env_name: str, path: str) -> str:
 
 
 def post_json(url: str, payload: dict) -> dict:
+    headers = {"Content-Type": "application/json"}
+    token = resolve_token()
+    if token:
+        headers["X-WinMux-Automation-Token"] = token
+
     request = urllib.request.Request(
         url,
         data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        headers=headers,
         method="POST",
     )
 
@@ -32,6 +44,7 @@ def post_json(url: str, payload: dict) -> dict:
 def post_json_via_powershell(path: str, payload: dict) -> dict:
     automation_port = os.environ.get("WINMUX_AUTOMATION_PORT", "").strip() or "9331"
     uri = f"http://127.0.0.1:{automation_port}{path}"
+    token = resolve_token()
     payload_text = json.dumps(payload)
     command = (
         "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; "
@@ -39,7 +52,8 @@ def post_json_via_powershell(path: str, payload: dict) -> dict:
         "$json = @'\n"
         f"{payload_text}\n"
         "'@; "
-        f"Invoke-RestMethod -Method Post -Uri '{uri}' -ContentType 'application/json' -Body $json | ConvertTo-Json -Depth 20"
+        f"$headers = @{{ 'X-WinMux-Automation-Token' = '{token}' }}; "
+        f"Invoke-RestMethod -Method Post -Uri '{uri}' -Headers $headers -ContentType 'application/json' -Body $json | ConvertTo-Json -Depth 20"
     )
 
     result = subprocess.run(

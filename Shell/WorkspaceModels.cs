@@ -522,6 +522,8 @@ namespace SelfContainedDeployment.Shell
 
         public string ReplayCommand { get; set; }
 
+        public string ReplayArguments { get; set; }
+
         public bool RestoredFromSession { get; set; }
 
         public bool ReplayRestorePending { get; set; }
@@ -561,6 +563,7 @@ namespace SelfContainedDeployment.Shell
             ReplayTool = snapshot?.ReplayTool;
             ReplaySessionId = snapshot?.ReplaySessionId;
             ReplayCommand = snapshot?.ReplayCommand;
+            ReplayArguments = snapshot?.ReplayArguments;
             ReplayRestoreFailed = snapshot?.ReplayRestoreFailed == true;
             PersistExitedState = snapshot?.IsExited == true && snapshot?.ReplayRestoreFailed == true;
             IsExited = snapshot?.IsExited == true;
@@ -707,6 +710,7 @@ namespace SelfContainedDeployment.Shell
                 ReplayTool = snapshot.ReplayTool,
                 ReplaySessionId = snapshot.ReplaySessionId,
                 ReplayCommand = snapshot.ReplayCommand,
+                ReplayArguments = snapshot.ReplayArguments,
             };
         }
     }

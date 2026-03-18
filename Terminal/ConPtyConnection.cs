@@ -237,6 +237,14 @@ namespace SelfContainedDeployment.Terminal
                     values["WINMUX_BROWSER_STATE_URL"] = $"{baseUrl}/browser-state";
                     values["WINMUX_BROWSER_EVAL_URL"] = $"{baseUrl}/browser-eval";
                     values["WINMUX_BROWSER_SCREENSHOT_URL"] = $"{baseUrl}/browser-screenshot";
+
+                    string automationToken = values.TryGetValue("NATIVE_TERMINAL_AUTOMATION_TOKEN", out string tokenValue)
+                        ? tokenValue
+                        : Environment.GetEnvironmentVariable("NATIVE_TERMINAL_AUTOMATION_TOKEN");
+                    if (!string.IsNullOrWhiteSpace(automationToken))
+                    {
+                        values["WINMUX_AUTOMATION_TOKEN"] = automationToken;
+                    }
                 }
 
                 values["WINMUX_BROWSER_PROFILE_MODE"] = "shared";
@@ -248,6 +256,7 @@ namespace SelfContainedDeployment.Terminal
                 values["WSLENV"] = AppendWslenvEntry(values.TryGetValue("WSLENV", out string wslenv) ? wslenv : null, "WINMUX_BROWSER_PROFILE_MODE/u");
                 values["WSLENV"] = AppendWslenvEntry(values["WSLENV"], "WINMUX_AUTOMATION_PORT/u");
                 values["WSLENV"] = AppendWslenvEntry(values["WSLENV"], "WINMUX_AUTOMATION_URL/u");
+                values["WSLENV"] = AppendWslenvEntry(values["WSLENV"], "WINMUX_AUTOMATION_TOKEN/u");
                 values["WSLENV"] = AppendWslenvEntry(values["WSLENV"], "WINMUX_BROWSER_STATE_URL/u");
                 values["WSLENV"] = AppendWslenvEntry(values["WSLENV"], "WINMUX_BROWSER_EVAL_URL/u");
                 values["WSLENV"] = AppendWslenvEntry(values["WSLENV"], "WINMUX_BROWSER_SCREENSHOT_URL/u");

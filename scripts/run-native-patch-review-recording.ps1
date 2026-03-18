@@ -6,7 +6,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$baseUrl = "http://127.0.0.1:$Port"
+. (Join-Path $PSScriptRoot "native-automation-client.ps1")
+Initialize-WinMuxAutomationClient -Port $Port | Out-Null
 $repoRoot = Split-Path $PSScriptRoot -Parent
 
 if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
@@ -29,22 +30,6 @@ function Assert-True {
     if (-not $Condition) {
         throw $Message
     }
-}
-
-function Invoke-AutomationGet {
-    param([string]$Path)
-
-    return Invoke-RestMethod -Uri "$baseUrl$Path" -TimeoutSec 20
-}
-
-function Invoke-AutomationPost {
-    param(
-        [string]$Path,
-        [object]$Body
-    )
-
-    $json = if ($null -eq $Body) { "" } else { $Body | ConvertTo-Json -Depth 20 }
-    return Invoke-RestMethod -Method Post -Uri "$baseUrl$Path" -ContentType "application/json" -Body $json -TimeoutSec 25
 }
 
 function Wait-Until {

@@ -24,16 +24,18 @@ namespace SelfContainedDeployment.Automation
         private readonly TcpListener _listener;
         private readonly CancellationTokenSource _shutdown = new();
         private readonly int _port;
+        private readonly string _authToken;
         private readonly string _logPath;
         private readonly object _logGate = new();
         private Task _listenTask;
         private bool _disposed;
 
-        public NativeAutomationServer(MainWindow window, int port)
+        public NativeAutomationServer(MainWindow window, int port, string authToken)
         {
             _window = window;
             _port = port;
-            _listener = new TcpListener(IPAddress.Any, port);
+            _authToken = authToken;
+            _listener = new TcpListener(IPAddress.Loopback, port);
             _logPath = Path.Combine(Path.GetTempPath(), "native-terminal-automation.log");
         }
 
@@ -100,6 +102,16 @@ namespace SelfContainedDeployment.Automation
 
                 if (request is null)
                 {
+                    return;
+                }
+
+                if (!IsAuthorized(request))
+                {
+                    await WriteJsonAsync(stream, 401, new
+                    {
+                        ok = false,
+                        error = "Unauthorized",
+                    }).ConfigureAwait(false);
                     return;
                 }
 
@@ -383,6 +395,7 @@ namespace SelfContainedDeployment.Automation
             }
 
             int contentLength = 0;
+            var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             for (int i = 1; i < headerLines.Length; i++)
             {
                 int separator = headerLines[i].IndexOf(':');
@@ -393,6 +406,7 @@ namespace SelfContainedDeployment.Automation
 
                 string name = headerLines[i][..separator].Trim();
                 string value = headerLines[i][(separator + 1)..].Trim();
+                headers[name] = value;
 
                 if (name.Equals("Content-Length", StringComparison.OrdinalIgnoreCase))
                 {
@@ -419,7 +433,7 @@ namespace SelfContainedDeployment.Automation
                 ? Encoding.UTF8.GetString(requestBytes, bodyOffset, Math.Min(contentLength, requestBytes.Length - bodyOffset))
                 : string.Empty;
 
-            return new IncomingRequest(requestLine[0].Trim().ToUpperInvariant(), requestLine[1].Trim(), body);
+            return new IncomingRequest(requestLine[0].Trim().ToUpperInvariant(), requestLine[1].Trim(), body, headers);
         }
 
         private static int FindHeaderEnd(List<byte> buffer)
@@ -440,10 +454,40 @@ namespace SelfContainedDeployment.Automation
             return statusCode switch
             {
                 200 => "OK",
+                401 => "Unauthorized",
                 404 => "Not Found",
                 500 => "Internal Server Error",
                 _ => "OK",
             };
+        }
+
+        private bool IsAuthorized(IncomingRequest request)
+        {
+            if (string.IsNullOrWhiteSpace(_authToken))
+            {
+                return true;
+            }
+
+            if (request?.Headers is null)
+            {
+                return false;
+            }
+
+            if (request.Headers.TryGetValue("X-WinMux-Automation-Token", out string token) &&
+                string.Equals(token, _authToken, StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            if (request.Headers.TryGetValue("Authorization", out string authorization) &&
+                !string.IsNullOrWhiteSpace(authorization) &&
+                authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+            {
+                string bearerToken = authorization["Bearer ".Length..].Trim();
+                return string.Equals(bearerToken, _authToken, StringComparison.Ordinal);
+            }
+
+            return false;
         }
 
         private void Log(string message)
@@ -484,6 +528,6 @@ namespace SelfContainedDeployment.Automation
             stream.Write(tail, 0, tail.Length);
         }
 
-        private sealed record IncomingRequest(string Method, string Path, string Body);
+        private sealed record IncomingRequest(string Method, string Path, string Body, IReadOnlyDictionary<string, string> Headers);
     }
 }

@@ -247,6 +247,42 @@
       "automationActions": ["deleteproject"]
     },
     {
+      "id": "notes.upsert-thread-note",
+      "name": "Create or update thread note",
+      "category": "notes",
+      "measurementMode": "fixture_required",
+      "mutation": "destructive",
+      "budget": { "responseMs": 75, "firstRenderMs": 50 },
+      "automationActions": ["setthreadnote", "addthreadnote", "createthreadnote", "updatethreadnote"]
+    },
+    {
+      "id": "notes.delete-or-archive-thread-note",
+      "name": "Delete or archive thread note",
+      "category": "notes",
+      "measurementMode": "fixture_required",
+      "mutation": "destructive",
+      "budget": { "responseMs": 75, "firstRenderMs": 50 },
+      "automationActions": ["deletethreadnote", "archivethreadnote", "restorethreadnote", "unarchivethreadnote"]
+    },
+    {
+      "id": "notes.select-thread-note",
+      "name": "Select thread note",
+      "category": "notes",
+      "measurementMode": "fixture_required",
+      "mutation": "safe",
+      "budget": { "responseMs": 50, "firstRenderMs": 33 },
+      "automationActions": ["selectthreadnote"]
+    },
+    {
+      "id": "notes.open",
+      "name": "Open thread or project notes",
+      "category": "notes",
+      "measurementMode": "fixture_required",
+      "mutation": "safe",
+      "budget": { "responseMs": 50, "firstRenderMs": 33 },
+      "automationActions": ["editthreadnote", "showthreadnotes", "showprojectnotes", "shownotes"]
+    },
+    {
       "id": "pane.new-terminal-tab",
       "name": "Create terminal tab",
       "category": "pane",

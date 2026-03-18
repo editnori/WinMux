@@ -385,6 +385,8 @@ namespace SelfContainedDeployment.Automation
 
         public string ReplayCommand { get; set; }
 
+        public string ReplayArguments { get; set; }
+
         public string ActiveToolSession { get; set; }
 
         public bool ToolSurfaceVisible { get; set; }

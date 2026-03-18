@@ -29,6 +29,8 @@ namespace SelfContainedDeployment.Terminal
         private static readonly Regex ClaudeResumeRegex = new(@"claude\s+--resume\s+([0-9a-f-]+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
         private static readonly Regex CodexResumeInlineRegex = new(@"^codex\s+resume\s+([0-9a-f-]+)\s*(.*)$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
         private static readonly Regex ClaudeResumeInlineRegex = new(@"^claude\s+--resume\s+([0-9a-f-]+)\s*(.*)$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        private static readonly Regex ReplaySessionIdRegex = new(@"^[0-9a-f-]{8,128}$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        private static readonly Regex SafeReplayArgumentsRegex = new(@"^[A-Za-z0-9 _./:=+,@%-]{0,256}$", RegexOptions.Compiled);
         private static readonly Regex AnsiEscapeRegex = new(@"\u001B(?:\[[0-9;?]*[ -/]*[@-~]|\][^\u0007]*\u0007)", RegexOptions.Compiled);
         private static readonly Regex ShellPromptRegex = new(@"(?:^|\n)\s*(?:[>$#]|❯|\?)\s*$", RegexOptions.Compiled);
 
@@ -135,6 +137,8 @@ namespace SelfContainedDeployment.Terminal
 
         public string ReplayCommand => _replayCommand;
 
+        public string ReplayArguments => _toolLaunchArguments;
+
         public bool ReplayRestorePending => _replayRestorePending;
 
         public bool ReplayRestoreFailed => _replayRestoreFailed;
@@ -157,7 +161,19 @@ namespace SelfContainedDeployment.Terminal
         {
             UpdateStartupMask();
             UpdateTerminalHeader();
-            await EnsureInitializedAsync();
+            try
+            {
+                await EnsureInitializedAsync();
+            }
+            catch (Exception ex)
+            {
+                LogTerminalEvent("webview.load_failed", "Terminal WebView2 load failed", new Dictionary<string, string>
+                {
+                    ["exceptionType"] = ex.GetType().FullName ?? string.Empty,
+                    ["message"] = ex.Message ?? string.Empty,
+                });
+                ShowStatus($"WebView2 failed: {ex.Message}", keepVisible: true);
+            }
         }
 
         private async Task EnsureInitializedAsync()
@@ -522,7 +538,9 @@ namespace SelfContainedDeployment.Terminal
                     ShowStatus("Replay restore failed. Close the tab or relaunch the saved session.", keepVisible: true);
                     LogTerminalEvent("replay.restore_failed", "Saved replay command exited before the restore could settle", new Dictionary<string, string>
                     {
-                        ["replayCommand"] = _restoreReplayCommand ?? string.Empty,
+                        ["replayTool"] = _replayTool ?? string.Empty,
+                        ["replaySessionId"] = _replaySessionId ?? string.Empty,
+                        ["hasArguments"] = (!string.IsNullOrWhiteSpace(_toolLaunchArguments)).ToString(),
                     });
                 }
                 else
@@ -625,7 +643,9 @@ namespace SelfContainedDeployment.Terminal
             ReplayRestoreStateChanged?.Invoke(this, EventArgs.Empty);
             LogTerminalEvent("replay.restore_started", "Sent saved replay command to restored terminal", new Dictionary<string, string>
             {
-                ["replayCommand"] = _restoreReplayCommand,
+                ["replayTool"] = _replayTool ?? string.Empty,
+                ["replaySessionId"] = _replaySessionId ?? string.Empty,
+                ["hasArguments"] = (!string.IsNullOrWhiteSpace(_toolLaunchArguments)).ToString(),
             });
         }
 
@@ -642,7 +662,9 @@ namespace SelfContainedDeployment.Terminal
             ReplayRestoreStateChanged?.Invoke(this, EventArgs.Empty);
             LogTerminalEvent("replay.restore_confirmed", "Saved replay command survived the restore grace window", new Dictionary<string, string>
             {
-                ["replayCommand"] = _restoreReplayCommand ?? string.Empty,
+                ["replayTool"] = _replayTool ?? string.Empty,
+                ["replaySessionId"] = _replaySessionId ?? string.Empty,
+                ["hasArguments"] = (!string.IsNullOrWhiteSpace(_toolLaunchArguments)).ToString(),
             });
         }
 
@@ -1243,6 +1265,91 @@ namespace SelfContainedDeployment.Terminal
                 : $"claude --resume {sessionId}{suffix}";
         }
 
+        public static bool TryBuildReplayRestoreCommand(string tool, string sessionId, string arguments, out string command)
+        {
+            command = null;
+            if (!IsSupportedReplayTool(tool) || !IsValidReplaySessionId(sessionId))
+            {
+                return false;
+            }
+
+            string normalizedArguments = NormalizeReplayArguments(arguments);
+            if (!string.IsNullOrWhiteSpace(arguments) && normalizedArguments is null)
+            {
+                return false;
+            }
+
+            command = BuildReplayCommand(tool, sessionId, normalizedArguments);
+            return true;
+        }
+
+        public static bool TryExtractReplayCommandMetadata(string command, out string tool, out string sessionId, out string arguments)
+        {
+            tool = null;
+            sessionId = null;
+            arguments = null;
+
+            if (string.IsNullOrWhiteSpace(command))
+            {
+                return false;
+            }
+
+            string trimmed = command.Trim();
+            Match codexMatch = CodexResumeInlineRegex.Match(trimmed);
+            if (codexMatch.Success)
+            {
+                string normalizedArguments = NormalizeReplayArguments(codexMatch.Groups[2].Value);
+                if (!string.IsNullOrWhiteSpace(codexMatch.Groups[2].Value) && normalizedArguments is null)
+                {
+                    return false;
+                }
+
+                tool = "codex";
+                sessionId = codexMatch.Groups[1].Value;
+                arguments = normalizedArguments;
+                return IsValidReplaySessionId(sessionId);
+            }
+
+            Match claudeMatch = ClaudeResumeInlineRegex.Match(trimmed);
+            if (!claudeMatch.Success)
+            {
+                return false;
+            }
+
+            string normalizedClaudeArguments = NormalizeReplayArguments(claudeMatch.Groups[2].Value);
+            if (!string.IsNullOrWhiteSpace(claudeMatch.Groups[2].Value) && normalizedClaudeArguments is null)
+            {
+                return false;
+            }
+
+            tool = "claude";
+            sessionId = claudeMatch.Groups[1].Value;
+            arguments = normalizedClaudeArguments;
+            return IsValidReplaySessionId(sessionId);
+        }
+
+        private static bool IsSupportedReplayTool(string tool)
+        {
+            return string.Equals(tool, "codex", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(tool, "claude", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsValidReplaySessionId(string sessionId)
+        {
+            return !string.IsNullOrWhiteSpace(sessionId) && ReplaySessionIdRegex.IsMatch(sessionId);
+        }
+
+        private static string NormalizeReplayArguments(string arguments)
+        {
+            if (string.IsNullOrWhiteSpace(arguments))
+            {
+                return null;
+            }
+
+            string trimmed = arguments.Trim();
+            return SafeReplayArgumentsRegex.IsMatch(trimmed) ? trimmed : null;
+        }
+
         private NativeAutomationTerminalSnapshot BuildFallbackTerminalSnapshot()
         {
             string buffer = _outputBuffer.ToString();
@@ -1278,6 +1385,7 @@ namespace SelfContainedDeployment.Terminal
                 ReplayTool = _replayTool,
                 ReplaySessionId = _replaySessionId,
                 ReplayCommand = _replayCommand,
+                ReplayArguments = _toolLaunchArguments,
                 ActiveToolSession = _activeToolSession,
                 ToolSurfaceVisible = ShouldShowToolSurface(),
                 BufferTail = buffer,
@@ -1327,6 +1435,7 @@ namespace SelfContainedDeployment.Terminal
                 ReplayTool = _replayTool,
                 ReplaySessionId = _replaySessionId,
                 ReplayCommand = _replayCommand,
+                ReplayArguments = _toolLaunchArguments,
                 ActiveToolSession = string.IsNullOrWhiteSpace(message.ToolSession) ? _activeToolSession : message.ToolSession,
                 ToolSurfaceVisible = message.ToolSurfaceVisible || ShouldShowToolSurface(),
                 Selection = message.Selection,
@@ -1597,7 +1706,7 @@ namespace SelfContainedDeployment.Terminal
             {
                 settings.AreDefaultContextMenusEnabled = false;
                 settings.IsStatusBarEnabled = false;
-                settings.AreDevToolsEnabled = true;
+                settings.AreDevToolsEnabled = AreWebViewDevToolsEnabled();
                 settings.AreBrowserAcceleratorKeysEnabled = true;
             }
 
@@ -1605,6 +1714,15 @@ namespace SelfContainedDeployment.Terminal
             core.NavigationCompleted -= OnNavigationCompleted;
             core.WebMessageReceived += OnWebMessageReceived;
             core.NavigationCompleted += OnNavigationCompleted;
+        }
+
+        private static bool AreWebViewDevToolsEnabled()
+        {
+            string value = Environment.GetEnvironmentVariable("WINMUX_ENABLE_WEBVIEW_DEVTOOLS");
+            return string.Equals(value, "1", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(value, "true", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(value, "yes", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(value, "on", StringComparison.OrdinalIgnoreCase);
         }
 
         private async Task<CoreWebView2> WaitForCoreWebView2Async()

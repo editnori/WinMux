@@ -3,14 +3,20 @@ using SelfContainedDeployment.Shell;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Windows.Security.Cryptography;
+using Windows.Security.Cryptography.DataProtection;
+using Windows.Storage.Streams;
 
 namespace SelfContainedDeployment.Persistence
 {
     internal sealed class WorkspaceSessionSnapshot
     {
-        public int Version { get; set; } = 3;
+        public const int CurrentVersion = 3;
+
+        public int Version { get; set; } = CurrentVersion;
 
         public string SavedAt { get; set; }
 
@@ -187,6 +193,8 @@ namespace SelfContainedDeployment.Persistence
         public string ReplaySessionId { get; set; }
 
         public string ReplayCommand { get; set; }
+
+        public string ReplayArguments { get; set; }
     }
 
     internal sealed class BrowserTabSessionSnapshot
@@ -208,6 +216,7 @@ namespace SelfContainedDeployment.Persistence
         };
         private static readonly object SaveLock = new();
         private static string LastSavedJson;
+        private const string ProtectedSessionPrefix = "winmux-dpapi-v1:";
 
         private static readonly string SessionDirectory = ResolveSessionDirectory();
 
@@ -224,10 +233,24 @@ namespace SelfContainedDeployment.Persistence
                     return null;
                 }
 
-                string json = File.ReadAllText(loadPath);
+                string persisted = File.ReadAllText(loadPath);
+                string json = DecodePersistedSessionJson(persisted);
                 LastSavedJson = json;
+                WorkspaceSessionSnapshot snapshot = JsonSerializer.Deserialize<WorkspaceSessionSnapshot>(json, JsonOptions);
+                if (snapshot is null)
+                {
+                    error = "Saved workspace session was empty.";
+                    return null;
+                }
+
+                if (snapshot.Version > WorkspaceSessionSnapshot.CurrentVersion)
+                {
+                    error = $"Saved workspace session version {snapshot.Version} is newer than this WinMux build supports.";
+                    return null;
+                }
+
                 error = null;
-                return JsonSerializer.Deserialize<WorkspaceSessionSnapshot>(json, JsonOptions);
+                return snapshot;
             }
             catch (Exception ex)
             {
@@ -254,7 +277,7 @@ namespace SelfContainedDeployment.Persistence
                     return;
                 }
 
-                File.WriteAllText(tempPath, json);
+                File.WriteAllText(tempPath, EncodePersistedSessionJson(json));
 
                 if (File.Exists(SessionPath))
                 {
@@ -353,6 +376,32 @@ namespace SelfContainedDeployment.Persistence
         public static string FormatLayout(WorkspaceLayoutPreset layout)
         {
             return layout.ToString().ToLowerInvariant();
+        }
+
+        private static string DecodePersistedSessionJson(string persisted)
+        {
+            if (string.IsNullOrWhiteSpace(persisted) || !persisted.StartsWith(ProtectedSessionPrefix, StringComparison.Ordinal))
+            {
+                return persisted;
+            }
+
+            string encoded = persisted[ProtectedSessionPrefix.Length..].Trim();
+            byte[] protectedBytes = Convert.FromBase64String(encoded);
+            IBuffer protectedBuffer = CryptographicBuffer.CreateFromByteArray(protectedBytes);
+            DataProtectionProvider provider = new();
+            IBuffer rawBuffer = provider.UnprotectAsync(protectedBuffer).AsTask().GetAwaiter().GetResult();
+            CryptographicBuffer.CopyToByteArray(rawBuffer, out byte[] rawBytes);
+            return Encoding.UTF8.GetString(rawBytes);
+        }
+
+        private static string EncodePersistedSessionJson(string json)
+        {
+            byte[] rawBytes = Encoding.UTF8.GetBytes(json ?? string.Empty);
+            IBuffer rawBuffer = CryptographicBuffer.CreateFromByteArray(rawBytes);
+            DataProtectionProvider provider = new("LOCAL=user");
+            IBuffer protectedBuffer = provider.ProtectAsync(rawBuffer).AsTask().GetAwaiter().GetResult();
+            CryptographicBuffer.CopyToByteArray(protectedBuffer, out byte[] protectedBytes);
+            return ProtectedSessionPrefix + Convert.ToBase64String(protectedBytes);
         }
     }
 }

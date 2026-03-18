@@ -6,7 +6,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$baseUrl = "http://127.0.0.1:$Port"
+. (Join-Path $PSScriptRoot "native-automation-client.ps1")
+Initialize-WinMuxAutomationClient -Port $Port | Out-Null
 $repoRoot = Split-Path $PSScriptRoot -Parent
 
 if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
@@ -18,22 +19,6 @@ $recordingOutputDirectory = Join-Path $OutputDirectory "recording"
 $tempProjectPath = Join-Path $env:TEMP ("winmux-feature-tour-" + [Guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
 New-Item -ItemType Directory -Path $recordingOutputDirectory -Force | Out-Null
-
-function Invoke-AutomationGet {
-    param([string]$Path)
-
-    return Invoke-RestMethod -Uri "$baseUrl$Path" -TimeoutSec 20
-}
-
-function Invoke-AutomationPost {
-    param(
-        [string]$Path,
-        [object]$Body
-    )
-
-    $json = if ($null -eq $Body) { "" } else { $Body | ConvertTo-Json -Depth 20 }
-    return Invoke-RestMethod -Method Post -Uri "$baseUrl$Path" -ContentType "application/json" -Body $json -TimeoutSec 25
-}
 
 function Pause-Step {
     param([int]$Milliseconds = 900)
@@ -347,7 +332,7 @@ try {
     }
     Pause-Step 900
 
-    $null = Invoke-AutomationPost "/action" @{ action = "showOverview" }
+    $null = Invoke-AutomationPost "/action" @{ action = "showSettings" }
     Wait-Until -FailureMessage "Thread overview did not appear." -Condition {
         $latestState = Invoke-AutomationGet "/state"
         if ($latestState.activeView -eq "overview") {
