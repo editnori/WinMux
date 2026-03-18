@@ -18,7 +18,7 @@
                 Background="{ThemeResource ShellSurfaceBackgroundBrush}"
                 BorderBrush="{ThemeResource ShellBorderBrush}"
                 BorderThickness="0,0,0,1"
-                Padding="10,5,40,5">
+                Padding="8,3,32,3">
             <Grid ColumnDefinitions="*,Auto"
                   ColumnSpacing="10">
                 <TextBlock x:Name="EditorHeaderPathText"

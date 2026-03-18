@@ -7,6 +7,7 @@ using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
+using Microsoft.UI.Input;
 using Microsoft.UI.Dispatching;
 using SelfContainedDeployment.Automation;
 using SelfContainedDeployment.Browser;
@@ -24,6 +25,7 @@ using System.Linq;
 using System.Text;
 using Windows.Storage.Pickers;
 using Windows.Foundation;
+using Windows.UI.Core;
 using Windows.UI.ViewManagement;
 using WinRT.Interop;
 
@@ -166,11 +168,14 @@ namespace SelfContainedDeployment
         private readonly Dictionary<string, Border> _projectHeaderBordersById = new(StringComparer.Ordinal);
         private readonly Dictionary<string, Button> _threadButtonsById = new(StringComparer.Ordinal);
         private readonly Dictionary<string, Button> _diffFileButtonsByPath = new(StringComparer.Ordinal);
+        private readonly HashSet<string> _hoveredDiffFilePaths = new(StringComparer.Ordinal);
         private readonly List<DiffFileListItem> _diffFileListItems = new();
         private readonly Dictionary<string, ThreadActivitySummary> _threadActivitySummariesById = new(StringComparer.Ordinal);
         private readonly HashSet<string> _hoveredProjectIds = new(StringComparer.Ordinal);
         private readonly HashSet<string> _hoveredThreadIds = new(StringComparer.Ordinal);
+        private readonly HashSet<string> _hoveredPaneStripButtonNames = new(StringComparer.Ordinal);
         private readonly HashSet<string> _expandedArchivedNoteThreadIds = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, NoteDraftState> _noteDraftsById = new(StringComparer.Ordinal);
         private readonly Dictionary<string, TreeViewNode> _inspectorDirectoryNodesByPath = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<TreeViewNode, InspectorDirectoryTreeItem> _inspectorDirectoryItemsByNode = new();
         private readonly Dictionary<string, InspectorDirectoryUiCache> _inspectorDirectoryUiCacheByKey = new(StringComparer.OrdinalIgnoreCase);
@@ -244,6 +249,15 @@ namespace SelfContainedDeployment
             public bool RequiresAttention { get; init; }
         }
 
+        private sealed class NoteDraftState
+        {
+            public string EditableTitle { get; set; } = string.Empty;
+
+            public string Text { get; set; }
+
+            public bool Dirty { get; set; }
+        }
+
         private sealed class InspectorNoteCardItem
         {
             public string NoteId { get; init; }
@@ -251,6 +265,12 @@ namespace SelfContainedDeployment
             public string ThreadId { get; init; }
 
             public string Title { get; init; }
+
+            public string EditableTitle { get; init; }
+
+            public string TitlePlaceholderText { get; init; }
+
+            public string TitleEditorAutomationId { get; init; }
 
             public string Meta { get; init; }
 
@@ -270,6 +290,10 @@ namespace SelfContainedDeployment
 
             public string Text { get; init; }
 
+            public string StatusText { get; init; }
+
+            public Visibility StatusVisibility => string.IsNullOrWhiteSpace(StatusText) ? Visibility.Collapsed : Visibility.Visible;
+
             public string TimestampText { get; init; }
 
             public Brush AccentBrush { get; init; }
@@ -281,6 +305,8 @@ namespace SelfContainedDeployment
             public Visibility ArchiveButtonVisibility { get; init; }
 
             public bool IsArchived { get; init; }
+
+            public bool IsSelected { get; init; }
         }
 
         private sealed class InspectorNoteGroupItem
@@ -290,6 +316,8 @@ namespace SelfContainedDeployment
             public string Title { get; init; }
 
             public string Meta { get; init; }
+
+            public Brush HeaderAccentBrush { get; init; }
 
             public Visibility HeaderVisibility { get; init; }
 
@@ -886,6 +914,7 @@ namespace SelfContainedDeployment
                     ProfileSeedStatus = pane.Browser.ProfileSeedStatus,
                     ExtensionImportStatus = pane.Browser.ExtensionImportStatus,
                     CredentialAutofillStatus = pane.Browser.CredentialAutofillStatus,
+                    CredentialAutofillOutcome = pane.Browser.CredentialAutofillOutcome,
                     InstalledExtensions = pane.Browser.InstalledExtensionNames.ToList(),
                     Tabs = pane.Browser.Tabs.Select(tab => new NativeAutomationBrowserTabSnapshot
                     {
@@ -1119,7 +1148,10 @@ namespace SelfContainedDeployment
                 Theme = ResolveTheme(SampleConfig.CurrentTheme).ToString().ToLowerInvariant(),
                 PaneOpen = ShellSplitView.IsPaneOpen,
                 InspectorOpen = _inspectorOpen,
+                InspectorSection = FormatInspectorSection(_activeInspectorSection),
+                NotesScope = _activeNotesListScope == NotesListScope.Project ? "project" : "thread",
                 ShellProfileId = _activeProject?.ShellProfileId,
+                BrowserCredentialCount = BrowserCredentialStore.GetCredentialCount(),
                 GitBranch = displayedSnapshot?.BranchName ?? _activeThread?.BranchName,
                 WorktreePath = displayedSnapshot?.WorktreePath ?? _activeThread?.WorktreePath,
                 ChangedFileCount = displayedSnapshot?.ChangedFiles.Count ?? _activeThread?.ChangedFileCount ?? 0,
@@ -1867,6 +1899,7 @@ namespace SelfContainedDeployment
                 return;
             }
 
+            _hoveredDiffFilePaths.Clear();
             _ = SelectDiffPathInCurrentReviewAsync(changedFile.Path);
         }
 
@@ -1879,7 +1912,11 @@ namespace SelfContainedDeployment
 
             _diffFileButtonsByPath[changedFile.Path] = button;
             string selectedPath = ResolveDisplayedGitSnapshot()?.SelectedPath;
-            ApplyDiffFileButtonState(button, string.Equals(changedFile.Path, selectedPath, StringComparison.Ordinal));
+            ApplyDiffFileButtonState(
+                button,
+                changedFile,
+                string.Equals(changedFile.Path, selectedPath, StringComparison.Ordinal),
+                _hoveredDiffFilePaths.Contains(changedFile.Path));
         }
 
         private void OnDiffFileItemButtonUnloaded(object sender, RoutedEventArgs e)
@@ -1893,6 +1930,36 @@ namespace SelfContainedDeployment
             {
                 _diffFileButtonsByPath.Remove(changedFile.Path);
             }
+        }
+
+        private void OnDiffFileItemButtonPointerEntered(object sender, PointerRoutedEventArgs e)
+        {
+            if (sender is not Button button || ResolveSelectedDiffFile(button) is not GitChangedFile changedFile || string.IsNullOrWhiteSpace(changedFile.Path))
+            {
+                return;
+            }
+
+            _hoveredDiffFilePaths.Add(changedFile.Path);
+            ApplyDiffFileButtonState(
+                button,
+                changedFile,
+                string.Equals(ResolveDisplayedGitSnapshot()?.SelectedPath, changedFile.Path, StringComparison.Ordinal),
+                hovered: true);
+        }
+
+        private void OnDiffFileItemButtonPointerExited(object sender, PointerRoutedEventArgs e)
+        {
+            if (sender is not Button button || ResolveSelectedDiffFile(button) is not GitChangedFile changedFile || string.IsNullOrWhiteSpace(changedFile.Path))
+            {
+                return;
+            }
+
+            _hoveredDiffFilePaths.Remove(changedFile.Path);
+            ApplyDiffFileButtonState(
+                button,
+                changedFile,
+                string.Equals(ResolveDisplayedGitSnapshot()?.SelectedPath, changedFile.Path, StringComparison.Ordinal),
+                hovered: false);
         }
 
         private void TerminalTabs_TabCloseRequested(TabView sender, TabViewTabCloseRequestedEventArgs args)
@@ -2632,6 +2699,22 @@ namespace SelfContainedDeployment
             DeleteThreadNote(_activeThread, _activeThread.SelectedNoteId);
         }
 
+        private void OnInspectorSaveNoteClicked(object sender, RoutedEventArgs e)
+        {
+            if (_activeThread is null)
+            {
+                return;
+            }
+
+            WorkspaceThreadNote note = ResolveSelectedThreadNote(_activeThread);
+            if (note is null || note.IsArchived)
+            {
+                return;
+            }
+
+            CommitInspectorNoteDraft(_activeThread, note);
+        }
+
         private void OnInspectorCollapseAllClicked(object sender, RoutedEventArgs e)
         {
             if (InspectorDirectoryTree is null)
@@ -2701,7 +2784,43 @@ namespace SelfContainedDeployment
             }
 
             thread.SelectedNoteId = note.Id;
-            UpdateThreadNoteText(thread, note, noteBox.Text, refreshInspector: false);
+            UpdateInspectorNoteDraft(thread, note, text: noteBox.Text, updateText: true);
+        }
+
+        private void OnInspectorNoteCardTitleChanged(object sender, TextChangedEventArgs e)
+        {
+            if (sender is not TextBox titleBox || titleBox.Tag is not InspectorNoteCardItem item || item.IsArchived)
+            {
+                return;
+            }
+
+            WorkspaceThread thread = FindThread(item.ThreadId);
+            WorkspaceThreadNote note = thread?.NoteEntries.FirstOrDefault(candidate => string.Equals(candidate.Id, item.NoteId, StringComparison.Ordinal));
+            if (thread is null || note is null)
+            {
+                return;
+            }
+
+            thread.SelectedNoteId = note.Id;
+            UpdateInspectorNoteDraft(thread, note, title: titleBox.Text, updateTitle: true);
+        }
+
+        private void OnInspectorSaveNoteCardClicked(object sender, RoutedEventArgs e)
+        {
+            if (sender is not FrameworkElement element || element.Tag is not InspectorNoteCardItem item)
+            {
+                return;
+            }
+
+            WorkspaceThread thread = FindThread(item.ThreadId);
+            WorkspaceThreadNote note = thread?.NoteEntries.FirstOrDefault(candidate => string.Equals(candidate.Id, item.NoteId, StringComparison.Ordinal));
+            if (thread is null || note is null || note.IsArchived)
+            {
+                return;
+            }
+
+            thread.SelectedNoteId = note.Id;
+            CommitInspectorNoteDraft(thread, note);
         }
 
         private void OnInspectorNoteCardTapped(object sender, TappedRoutedEventArgs e)
@@ -2722,6 +2841,7 @@ namespace SelfContainedDeployment
 
             if (selectionChanged)
             {
+                RefreshInspectorNotes();
                 QueueSessionSave();
             }
         }
@@ -2743,6 +2863,7 @@ namespace SelfContainedDeployment
             thread.SelectedNoteId = item.NoteId;
             if (selectionChanged)
             {
+                RefreshInspectorNotes();
                 QueueSessionSave();
             }
 
@@ -2761,6 +2882,7 @@ namespace SelfContainedDeployment
                 return;
             }
 
+            ApplyInspectorNoteEditorFocusState(noteBox, item, focused: true);
             WorkspaceThread thread = FindThread(item.ThreadId);
             if (thread is null || string.IsNullOrWhiteSpace(item.NoteId))
             {
@@ -2771,23 +2893,73 @@ namespace SelfContainedDeployment
             QueueSessionSave();
         }
 
+        private void OnInspectorNoteCardTextBoxLostFocus(object sender, RoutedEventArgs e)
+        {
+            if (sender is TextBox noteBox && noteBox.Tag is InspectorNoteCardItem item)
+            {
+                ApplyInspectorNoteEditorFocusState(noteBox, item, focused: false);
+                WorkspaceThread thread = FindThread(item.ThreadId);
+                if (thread is not null && !string.IsNullOrWhiteSpace(item.NoteId))
+                {
+                    thread.SelectedNoteId = item.NoteId;
+                }
+
+                UpdateInspectorFileActionState();
+                QueueSessionSave();
+            }
+        }
+
         private void OnInspectorNoteCardTextBoxKeyDown(object sender, KeyRoutedEventArgs e)
         {
-            if (e.Key != Windows.System.VirtualKey.Escape ||
-                sender is not TextBox noteBox ||
+            if (sender is not TextBox noteBox ||
                 noteBox.Tag is not InspectorNoteCardItem item)
             {
                 return;
             }
 
             WorkspaceThread thread = FindThread(item.ThreadId);
+            WorkspaceThreadNote note = thread?.NoteEntries.FirstOrDefault(candidate => string.Equals(candidate.Id, item.NoteId, StringComparison.Ordinal));
+            if (e.Key == Windows.System.VirtualKey.Enter &&
+                noteBox.AcceptsReturn &&
+                (InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Control) & CoreVirtualKeyStates.Down) == CoreVirtualKeyStates.Down &&
+                thread is not null &&
+                note is not null)
+            {
+                thread.SelectedNoteId = item.NoteId;
+                CommitInspectorNoteDraft(thread, note);
+                e.Handled = true;
+                return;
+            }
+
+            if (e.Key != Windows.System.VirtualKey.Escape)
+            {
+                return;
+            }
+
             if (thread is not null && !string.IsNullOrWhiteSpace(item.NoteId))
             {
                 thread.SelectedNoteId = item.NoteId;
             }
 
+            DiscardInspectorNoteDraft(item.NoteId, refreshInspector: true);
             InspectorNotesThreadScopeButton?.Focus(FocusState.Programmatic);
             e.Handled = true;
+        }
+
+        private void OnInspectorNoteCardPointerEntered(object sender, PointerRoutedEventArgs e)
+        {
+            if (sender is Border card && card.Tag is InspectorNoteCardItem item)
+            {
+                ApplyInspectorNoteCardChrome(card, item, hovered: true);
+            }
+        }
+
+        private void OnInspectorNoteCardPointerExited(object sender, PointerRoutedEventArgs e)
+        {
+            if (sender is Border card && card.Tag is InspectorNoteCardItem item)
+            {
+                ApplyInspectorNoteCardChrome(card, item, hovered: false);
+            }
         }
 
         private void OnInspectorNoteScopeButtonClicked(object sender, RoutedEventArgs e)
@@ -2804,6 +2976,11 @@ namespace SelfContainedDeployment
             }
 
             thread.SelectedNoteId = item.NoteId;
+            WorkspaceThreadNote note = thread.NoteEntries.FirstOrDefault(candidate => string.Equals(candidate.Id, item.NoteId, StringComparison.Ordinal));
+            if (note is not null)
+            {
+                CommitInspectorNoteDraft(thread, note, refreshInspector: false);
+            }
             MenuFlyout flyout = BuildInspectorNoteScopeFlyout(thread, item);
             flyout.ShowAt(button);
         }
@@ -2823,6 +3000,7 @@ namespace SelfContainedDeployment
             }
 
             thread.SelectedNoteId = note.Id;
+            CommitInspectorNoteDraft(thread, note, refreshInspector: false);
             UpdateThreadNotePaneAttachment(thread, note, option.PaneId);
         }
 
@@ -2840,6 +3018,7 @@ namespace SelfContainedDeployment
                 return;
             }
 
+            CommitInspectorNoteDraft(thread, note, refreshInspector: false);
             SetThreadNoteArchived(thread, note, archived: !note.IsArchived);
         }
 
@@ -2952,7 +3131,7 @@ namespace SelfContainedDeployment
 
             if (InspectorNotesActionsPanel is not null)
             {
-                InspectorNotesActionsPanel.Visibility = Visibility.Collapsed;
+                InspectorNotesActionsPanel.Visibility = _activeInspectorSection == InspectorSection.Notes ? Visibility.Visible : Visibility.Collapsed;
             }
 
             RefreshInspectorNotes();
@@ -2976,17 +3155,6 @@ namespace SelfContainedDeployment
                     : activeNoteCount == 0 && archivedNoteCount == 0
                         ? "Open project notes"
                         : $"{BuildNotesMeta(_activeProject, _activeThread, NotesListScope.Thread)} in this thread");
-
-            if (_activeInspectorSection == InspectorSection.Notes)
-            {
-                return;
-            }
-
-            if (activeNoteCount > 0 || archivedNoteCount > 0)
-            {
-                InspectorNotesTabButton.Foreground = AppBrush(InspectorNotesTabButton, "ShellWarningBrush");
-                InspectorNotesTabButton.Background = CreateSidebarTintedBrush(AppBrush(InspectorNotesTabButton, "ShellWarningBrush"), 0x0D, Windows.UI.Color.FromArgb(0xFF, 0x14, 0x16, 0x1B));
-            }
         }
 
         private void SetNotesListScope(NotesListScope scope)
@@ -3010,7 +3178,10 @@ namespace SelfContainedDeployment
             OpenThreadNotes(thread, focusEditor: false, scope: scope);
             string resolvedPaneId = ResolveNotePaneId(thread, paneId, preferSelectedPane: true);
             WorkspaceThreadNote note = thread.NoteEntries
-                .FirstOrDefault(candidate => !candidate.IsArchived && string.IsNullOrWhiteSpace(candidate.Text));
+                .FirstOrDefault(candidate =>
+                    !candidate.IsArchived &&
+                    string.IsNullOrWhiteSpace(candidate.Text) &&
+                    IsSystemGeneratedNoteTitle(candidate.Title));
 
             if (note is null)
             {
@@ -3034,6 +3205,156 @@ namespace SelfContainedDeployment
 
         private void ClearInspectorNoteDraft()
         {
+            if (_activeThread is not null && !string.IsNullOrWhiteSpace(_activeThread.SelectedNoteId))
+            {
+                _noteDraftsById.Remove(_activeThread.SelectedNoteId);
+            }
+
+            UpdateInspectorFileActionState();
+        }
+
+        private static string NormalizeNoteDraftTitle(string title)
+        {
+            return string.IsNullOrWhiteSpace(title) ? string.Empty : title.Trim();
+        }
+
+        private static string NormalizeNoteDraftText(string text)
+        {
+            return string.IsNullOrWhiteSpace(text) ? null : text;
+        }
+
+        private NoteDraftState ResolveNoteDraftState(WorkspaceThreadNote note)
+        {
+            return note is not null && _noteDraftsById.TryGetValue(note.Id, out NoteDraftState draft)
+                ? draft
+                : null;
+        }
+
+        private NoteDraftState GetOrCreateNoteDraftState(WorkspaceThreadNote note)
+        {
+            if (note is null)
+            {
+                return null;
+            }
+
+            if (!_noteDraftsById.TryGetValue(note.Id, out NoteDraftState draft))
+            {
+                draft = new NoteDraftState
+                {
+                    EditableTitle = ResolveEditableNoteTitle(note),
+                    Text = note.Text,
+                };
+                _noteDraftsById[note.Id] = draft;
+            }
+
+            draft.Dirty = IsNoteDraftDirty(note, draft);
+            return draft;
+        }
+
+        private static bool IsNoteDraftDirty(WorkspaceThreadNote note, NoteDraftState draft)
+        {
+            if (note is null || draft is null)
+            {
+                return false;
+            }
+
+            return !string.Equals(ResolveEditableNoteTitle(note), draft.EditableTitle ?? string.Empty, StringComparison.Ordinal) ||
+                !string.Equals(NormalizeNoteDraftText(note.Text), NormalizeNoteDraftText(draft.Text), StringComparison.Ordinal);
+        }
+
+        private void UpdateInspectorNoteDraft(WorkspaceThread thread, WorkspaceThreadNote note, string title = null, string text = null, bool updateTitle = false, bool updateText = false)
+        {
+            if (thread is null || note is null || note.IsArchived)
+            {
+                return;
+            }
+
+            NoteDraftState draft = GetOrCreateNoteDraftState(note);
+            if (draft is null)
+            {
+                return;
+            }
+
+            if (updateTitle)
+            {
+                draft.EditableTitle = NormalizeNoteDraftTitle(title);
+            }
+
+            if (updateText)
+            {
+                draft.Text = NormalizeNoteDraftText(text);
+            }
+
+            draft.Dirty = IsNoteDraftDirty(note, draft);
+            if (!draft.Dirty)
+            {
+                _noteDraftsById.Remove(note.Id);
+            }
+
+            thread.SelectedNoteId = note.Id;
+            UpdateInspectorFileActionState();
+        }
+
+        private bool CommitInspectorNoteDraft(WorkspaceThread thread, WorkspaceThreadNote note, bool refreshInspector = true)
+        {
+            if (thread is null || note is null || note.IsArchived)
+            {
+                return false;
+            }
+
+            if (!_noteDraftsById.TryGetValue(note.Id, out NoteDraftState draft))
+            {
+                UpdateInspectorFileActionState();
+                return false;
+            }
+
+            string nextTitle = string.IsNullOrWhiteSpace(draft.EditableTitle)
+                ? BuildDefaultThreadNoteTitle(thread)
+                : draft.EditableTitle.Trim();
+            string nextText = NormalizeNoteDraftText(draft.Text);
+            bool changed = !string.Equals(note.Title, nextTitle, StringComparison.Ordinal) ||
+                !string.Equals(NormalizeNoteDraftText(note.Text), nextText, StringComparison.Ordinal);
+
+            _noteDraftsById.Remove(note.Id);
+
+            if (!changed)
+            {
+                if (refreshInspector)
+                {
+                    RefreshInspectorNotes();
+                }
+                else
+                {
+                    UpdateInspectorFileActionState();
+                }
+
+                return false;
+            }
+
+            note.Title = nextTitle;
+            note.Text = nextText;
+            note.UpdatedAt = DateTimeOffset.UtcNow;
+            thread.NoteEntries.Remove(note);
+            thread.NoteEntries.Insert(0, note);
+            thread.SelectedNoteId = note.Id;
+            AfterThreadNotesChanged(thread, refreshInspector);
+            return true;
+        }
+
+        private void DiscardInspectorNoteDraft(string noteId, bool refreshInspector)
+        {
+            if (string.IsNullOrWhiteSpace(noteId))
+            {
+                return;
+            }
+
+            if (_noteDraftsById.Remove(noteId) && refreshInspector)
+            {
+                RefreshInspectorNotes();
+                return;
+            }
+
+            UpdateInspectorFileActionState();
         }
 
         private void ApplyNotesListScopeButtonState(Button button, bool active)
@@ -3043,11 +3364,65 @@ namespace SelfContainedDeployment
                 return;
             }
 
+            Brush accentBrush = AppBrush(button, "ShellPaneActiveBorderBrush");
+            bool lightTheme = ResolveTheme(SampleConfig.CurrentTheme) == ElementTheme.Light;
             button.Background = active
-                ? CreateSidebarTintedBrush(AppBrush(button, "ShellPaneActiveBorderBrush"), 0x12, Windows.UI.Color.FromArgb(0xFF, 0x2C, 0x2D, 0x31))
+                ? CreateSidebarTintedBrush(accentBrush, lightTheme ? (byte)0x16 : (byte)0x12, Windows.UI.Color.FromArgb(0xFF, 0x33, 0x41, 0x55))
                 : null;
             button.BorderBrush = null;
+            button.BorderThickness = new Thickness(0);
             button.Foreground = active ? AppBrush(button, "ShellTextPrimaryBrush") : AppBrush(button, "ShellTextSecondaryBrush");
+        }
+
+        private void ApplyInspectorNoteCardChrome(Border card, InspectorNoteCardItem item, bool hovered)
+        {
+            if (card is null || item is null)
+            {
+                return;
+            }
+
+            if (!hovered)
+            {
+                card.Background = item.CardBackground;
+                card.BorderBrush = item.CardBorderBrush;
+                card.BorderThickness = new Thickness(0);
+                return;
+            }
+
+            bool lightTheme = ResolveTheme(SampleConfig.CurrentTheme) == ElementTheme.Light;
+            if (item.IsSelected)
+            {
+                byte backgroundAlpha = item.IsArchived
+                    ? (byte)(lightTheme ? 0x0B : 0x0A)
+                    : (byte)(lightTheme ? 0x14 : 0x12);
+                card.Background = CreateSidebarTintedBrush(item.AccentBrush, backgroundAlpha, Windows.UI.Color.FromArgb(0xFF, 0x14, 0x16, 0x1B));
+            }
+            else
+            {
+                card.Background = AppBrush(card, "ShellNavHoverBrush");
+            }
+
+            card.BorderBrush = null;
+            card.BorderThickness = new Thickness(0);
+        }
+
+        private void ApplyInspectorNoteEditorFocusState(TextBox editor, InspectorNoteCardItem item, bool focused)
+        {
+            if (editor is null || item is null)
+            {
+                return;
+            }
+
+            if (!focused)
+            {
+                editor.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x00, 0x00, 0x00, 0x00));
+                editor.BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(0x00, 0x00, 0x00, 0x00));
+                return;
+            }
+
+            bool lightTheme = ResolveTheme(SampleConfig.CurrentTheme) == ElementTheme.Light;
+            editor.Background = CreateSidebarTintedBrush(item.AccentBrush, lightTheme ? (byte)0x0A : (byte)0x08, Windows.UI.Color.FromArgb(0xFF, 0x14, 0x16, 0x1B));
+            editor.BorderBrush = CreateSidebarTintedBrush(item.AccentBrush, lightTheme ? (byte)0x54 : (byte)0x44, Windows.UI.Color.FromArgb(0xFF, 0x33, 0x41, 0x55));
         }
 
         private MenuFlyout BuildInspectorNoteScopeFlyout(WorkspaceThread thread, InspectorNoteCardItem item)
@@ -3148,7 +3523,8 @@ namespace SelfContainedDeployment
             {
                 string cacheKey = BuildInspectorDirectoryCacheKey(rootPath, renderKey);
                 if (!forceRebuild &&
-                    _inspectorDirectoryUiCacheByKey.TryGetValue(cacheKey, out InspectorDirectoryUiCache cachedUi))
+                    _inspectorDirectoryUiCacheByKey.TryGetValue(cacheKey, out InspectorDirectoryUiCache cachedUi) &&
+                    cachedUi.FileCount > 0)
                 {
                     ApplyInspectorDirectoryUiCache(cachedUi);
                     shouldRebuild = false;
@@ -3156,7 +3532,8 @@ namespace SelfContainedDeployment
                 else if (!forceRebuild &&
                     rootChanged &&
                     (_activeGitSnapshot is null || liveFiles.Count == 0) &&
-                    TryGetInspectorDirectoryUiForRoot(rootPath, out InspectorDirectoryUiCache cachedRootUi))
+                    TryGetInspectorDirectoryUiForRoot(rootPath, out InspectorDirectoryUiCache cachedRootUi) &&
+                    cachedRootUi.FileCount > 0)
                 {
                     ApplyInspectorDirectoryUiCache(cachedRootUi);
                     shouldRebuild = false;
@@ -3248,6 +3625,14 @@ namespace SelfContainedDeployment
 
                         if (task.IsFaulted)
                         {
+                            Exception failure = task.Exception?.GetBaseException();
+                            LogAutomationEvent("inspector", "directory_build_failed", $"Failed to build project file tree: {failure?.Message ?? "Unknown error"}", new Dictionary<string, string>
+                            {
+                                ["rootPath"] = rootPath ?? string.Empty,
+                                ["renderKey"] = renderKey ?? string.Empty,
+                                ["threadId"] = _activeThread?.Id ?? string.Empty,
+                                ["projectId"] = _activeProject?.Id ?? string.Empty,
+                            });
                             _pendingInspectorDirectoryRootPath = null;
                             _pendingInspectorDirectoryRenderKey = null;
                             _lastInspectorDirectoryRootPath = null;
@@ -3348,6 +3733,16 @@ namespace SelfContainedDeployment
             {
                 ["rootPath"] = result?.RootPath ?? string.Empty,
             });
+            if (result is not null && result.FileCount == 0)
+            {
+                LogAutomationEvent("inspector", "directory_build_empty", "Project file tree scan returned no editable files", new Dictionary<string, string>
+                {
+                    ["rootPath"] = result.RootPath ?? string.Empty,
+                    ["renderKey"] = result.RenderKey ?? string.Empty,
+                    ["threadId"] = _activeThread?.Id ?? string.Empty,
+                    ["projectId"] = _activeProject?.Id ?? string.Empty,
+                });
+            }
             InspectorDirectoryUiCache uiCache = BuildInspectorDirectoryUiCache(result);
             CacheInspectorDirectoryUi(uiCache);
             ApplyInspectorDirectoryUiCache(uiCache);
@@ -3507,16 +3902,34 @@ namespace SelfContainedDeployment
         {
             Grid row = new()
             {
-                MinHeight = 22,
-                ColumnSpacing = 5,
+                MinHeight = 24,
+                ColumnSpacing = 6,
                 Margin = new Thickness(-6, 1, 0, 1),
             };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             ToolTipService.SetToolTip(row, item.RelativePath);
 
-            row.Children.Add(BuildInspectorNodeGlyph(item));
+            Brush accentBrush = !string.IsNullOrWhiteSpace(item.StatusText)
+                ? item.StatusBrush
+                : item.IconBrush ?? item.KindBrush ?? AppBrush(InspectorDirectoryTree, "ShellPaneActiveBorderBrush");
+
+            Border accent = new()
+            {
+                Width = 2,
+                Margin = new Thickness(0, 1, 0, 1),
+                CornerRadius = new CornerRadius(999),
+                Background = accentBrush,
+                Opacity = item.IsDirectory ? 0.45 : 0.82,
+                VerticalAlignment = VerticalAlignment.Stretch,
+            };
+            row.Children.Add(accent);
+
+            FrameworkElement glyph = BuildInspectorNodeGlyph(item);
+            Grid.SetColumn(glyph, 1);
+            row.Children.Add(glyph);
 
             TextBlock name = new()
             {
@@ -3530,7 +3943,7 @@ namespace SelfContainedDeployment
                 TextWrapping = TextWrapping.NoWrap,
                 TextTrimming = TextTrimming.CharacterEllipsis,
             };
-            Grid.SetColumn(name, 1);
+            Grid.SetColumn(name, 2);
             row.Children.Add(name);
 
             StackPanel adornments = new()
@@ -3539,7 +3952,7 @@ namespace SelfContainedDeployment
                 Spacing = 4,
                 VerticalAlignment = VerticalAlignment.Center,
             };
-            Grid.SetColumn(adornments, 2);
+            Grid.SetColumn(adornments, 3);
 
             if (!string.IsNullOrWhiteSpace(item.StatusText))
             {
@@ -3863,6 +4276,9 @@ namespace SelfContainedDeployment
         private void UpdateInspectorFileActionState()
         {
             EditorPaneRecord editorPane = ResolveInspectorEditorPane(createIfNeeded: false);
+            WorkspaceThreadNote selectedNote = ResolveSelectedThreadNote(_activeThread);
+            bool canSaveSelectedNote = selectedNote is { IsArchived: false } &&
+                ResolveNoteDraftState(selectedNote)?.Dirty == true;
             if (InspectorCollapseAllButton is not null)
             {
                 InspectorCollapseAllButton.IsEnabled = InspectorDirectoryTree?.RootNodes.Count > 0;
@@ -3878,9 +4294,14 @@ namespace SelfContainedDeployment
                 InspectorAddNoteButton.IsEnabled = _activeThread is not null;
             }
 
+            if (InspectorSaveNoteButton is not null)
+            {
+                InspectorSaveNoteButton.IsEnabled = canSaveSelectedNote;
+            }
+
             if (InspectorDeleteNoteButton is not null)
             {
-                InspectorDeleteNoteButton.IsEnabled = ResolveSelectedThreadNote(_activeThread) is not null;
+                InspectorDeleteNoteButton.IsEnabled = selectedNote is not null;
             }
 
             if (InspectorInlineAddNoteButton is not null)
@@ -3888,9 +4309,14 @@ namespace SelfContainedDeployment
                 InspectorInlineAddNoteButton.IsEnabled = _activeThread is not null;
             }
 
+            if (InspectorInlineSaveNoteButton is not null)
+            {
+                InspectorInlineSaveNoteButton.IsEnabled = canSaveSelectedNote;
+            }
+
             if (InspectorInlineDeleteNoteButton is not null)
             {
-                InspectorInlineDeleteNoteButton.IsEnabled = ResolveSelectedThreadNote(_activeThread) is not null;
+                InspectorInlineDeleteNoteButton.IsEnabled = selectedNote is not null;
             }
         }
 
@@ -3946,15 +4372,7 @@ namespace SelfContainedDeployment
             InspectorNotesProjectScopeButton.IsEnabled = _activeProject is not null;
             ApplyNotesListScopeButtonState(InspectorNotesThreadScopeButton, _activeNotesListScope == NotesListScope.Thread);
             ApplyNotesListScopeButtonState(InspectorNotesProjectScopeButton, _activeNotesListScope == NotesListScope.Project);
-            if (InspectorDeleteNoteButton is not null)
-            {
-                InspectorDeleteNoteButton.IsEnabled = ResolveSelectedThreadNote(_activeThread) is not null;
-            }
-            if (InspectorInlineDeleteNoteButton is not null)
-            {
-                InspectorInlineDeleteNoteButton.IsEnabled = ResolveSelectedThreadNote(_activeThread) is not null;
-            }
-
+            UpdateInspectorFileActionState();
             InspectorNotesMetaText.Text = BuildNotesMeta(_activeProject, _activeThread, _activeNotesListScope);
             InspectorNotesMetaText.Foreground = AppBrush(InspectorNotesMetaText, "ShellTextSecondaryBrush");
         }
@@ -4195,6 +4613,33 @@ namespace SelfContainedDeployment
             return true;
         }
 
+        private bool UpdateThreadNoteTitle(WorkspaceThread thread, WorkspaceThreadNote note, string title, bool refreshInspector)
+        {
+            if (thread is null || note is null)
+            {
+                return false;
+            }
+
+            string normalizedTitle = string.IsNullOrWhiteSpace(title) ? BuildDefaultThreadNoteTitle(thread) : title.Trim();
+            if (string.Equals(note.Title, normalizedTitle, StringComparison.Ordinal))
+            {
+                if (refreshInspector && ReferenceEquals(thread, _activeThread))
+                {
+                    RefreshInspectorNotes();
+                }
+
+                return false;
+            }
+
+            note.Title = normalizedTitle;
+            note.UpdatedAt = DateTimeOffset.UtcNow;
+            thread.NoteEntries.Remove(note);
+            thread.NoteEntries.Insert(0, note);
+            thread.SelectedNoteId = note.Id;
+            AfterThreadNotesChanged(thread, refreshInspector);
+            return true;
+        }
+
         private bool DeleteThreadNote(WorkspaceThread thread, string noteId)
         {
             if (thread is null)
@@ -4210,6 +4655,7 @@ namespace SelfContainedDeployment
                 return false;
             }
 
+            _noteDraftsById.Remove(note.Id);
             thread.NoteEntries.Remove(note);
             thread.SelectedNoteId = ResolvePreferredThreadNote(thread)?.Id;
             AfterThreadNotesChanged(thread);
@@ -4325,6 +4771,17 @@ namespace SelfContainedDeployment
 
         private void AfterThreadNotesChanged(WorkspaceThread thread, bool refreshInspector = true)
         {
+            if (thread is not null)
+            {
+                HashSet<string> liveNoteIds = thread.NoteEntries
+                    .Select(note => note.Id)
+                    .ToHashSet(StringComparer.Ordinal);
+                foreach (string staleNoteId in _noteDraftsById.Keys.Where(noteId => !liveNoteIds.Contains(noteId)).ToList())
+                {
+                    _noteDraftsById.Remove(staleNoteId);
+                }
+            }
+
             QueueProjectTreeRefresh();
             QueueSessionSave();
 
@@ -4666,6 +5123,16 @@ namespace SelfContainedDeployment
             }
 
             return "terminal";
+        }
+
+        private static string FormatInspectorSection(InspectorSection section)
+        {
+            return section switch
+            {
+                InspectorSection.Files => "files",
+                InspectorSection.Notes => "notes",
+                _ => "review",
+            };
         }
 
         private static DiffReviewSourceKind ParseDiffReviewSource(string value)
@@ -5085,7 +5552,7 @@ namespace SelfContainedDeployment
             project ??= _activeProject ?? GetOrCreateProject(Environment.CurrentDirectory);
             thread = ResolveTargetThreadForNewPane(project, thread, WorkspacePaneKind.Terminal);
 
-            TerminalPaneRecord pane = CreateTerminalPane(project, thread, WorkspacePaneKind.Terminal, startupInput: null, initialTitle: FormatThreadPath(project, thread));
+            TerminalPaneRecord pane = CreateTerminalPane(project, thread, WorkspacePaneKind.Terminal, startupInput: null, initialTitle: "Terminal");
             thread.Panes.Add(pane);
             thread.SelectedPaneId = pane.Id;
             project.SelectedThreadId = thread.Id;
@@ -5570,7 +6037,6 @@ namespace SelfContainedDeployment
             terminal.ApplyTheme(ResolveTheme(SampleConfig.CurrentTheme));
 
             TerminalPaneRecord pane = new(initialTitle, terminal, kind, paneId);
-            terminal.SetHeaderTitleOverride(pane.HasCustomTitle ? pane.Title : null);
             AttachPaneInteraction(project, thread, pane);
             terminal.SessionTitleChanged += (_, title) =>
             {
@@ -5578,7 +6044,6 @@ namespace SelfContainedDeployment
                 {
                     pane.Title = string.IsNullOrWhiteSpace(title) ? initialTitle : title;
                 }
-                terminal.SetHeaderTitleOverride(pane.HasCustomTitle ? pane.Title : null);
                 LogAutomationEvent("terminal", "title.changed", $"Terminal title changed to {pane.Title}", new Dictionary<string, string>
                 {
                     ["paneId"] = pane.Id,
@@ -5928,7 +6393,7 @@ namespace SelfContainedDeployment
                     thread,
                     WorkspacePaneKind.Terminal,
                     startupInput: null,
-                    initialTitle: string.IsNullOrWhiteSpace(snapshot.Title) ? FormatThreadPath(project, thread) : snapshot.Title,
+                    initialTitle: string.IsNullOrWhiteSpace(snapshot.Title) ? "Terminal" : snapshot.Title,
                     paneId: snapshot.Id,
                     restoreReplayCommand: restoreReplayCommand,
                     autoStartSession: autoStartSession,
@@ -5939,10 +6404,6 @@ namespace SelfContainedDeployment
             if (snapshot.HasCustomTitle && !string.IsNullOrWhiteSpace(snapshot.Title))
             {
                 pane.Title = snapshot.Title;
-            }
-            if (pane is TerminalPaneRecord terminalPane)
-            {
-                terminalPane.Terminal.SetHeaderTitleOverride(pane.HasCustomTitle ? pane.Title : null);
             }
             pane.ReplayTool = snapshot.ReplayTool;
             pane.ReplaySessionId = snapshot.ReplaySessionId;
@@ -6849,10 +7310,6 @@ namespace SelfContainedDeployment
 
             pane.Title = trimmed;
             pane.HasCustomTitle = true;
-            if (pane is TerminalPaneRecord terminalPane)
-            {
-                terminalPane.Terminal.SetHeaderTitleOverride(pane.Title);
-            }
             _inlineRenamingPaneId = null;
             UpdateTabViewItem(pane);
             RenderPaneWorkspace();
@@ -8261,10 +8718,10 @@ namespace SelfContainedDeployment
                 Grid containerContent = BuildPaneContainerContent(pane);
                 border = new Border
                 {
-                    BorderThickness = new Thickness(1),
-                    CornerRadius = new CornerRadius(4),
+                    BorderThickness = new Thickness(1, 0, 1, 1),
+                    CornerRadius = new CornerRadius(5),
                     Child = containerContent,
-                    Margin = new Thickness(1),
+                    Margin = new Thickness(1, 0, 1, 1),
                     Tag = pane,
                 };
                 AutomationProperties.SetAutomationId(border, $"shell-pane-{pane.Id}");
@@ -8316,19 +8773,24 @@ namespace SelfContainedDeployment
 
             Button zoomButton = new()
             {
-                Width = 24,
-                Height = 24,
+                Width = 20,
+                Height = 20,
                 Padding = new Thickness(0),
-                Margin = new Thickness(0, 6, 6, 0),
+                Margin = ResolvePaneZoomButtonMargin(pane),
                 HorizontalAlignment = HorizontalAlignment.Right,
                 VerticalAlignment = VerticalAlignment.Top,
                 Style = (Style)Application.Current.Resources["ShellGhostToolbarButtonStyle"],
                 Tag = pane,
-                Opacity = 0.78,
+                Opacity = 0.84,
             };
             zoomButton.Click += OnPaneZoomButtonClicked;
             content.Children.Add(zoomButton);
             return content;
+        }
+
+        private static Thickness ResolvePaneZoomButtonMargin(WorkspacePaneRecord pane)
+        {
+            return new Thickness(0, 0, 1, 0);
         }
 
         private void UpdatePaneZoomButtonState(Border border, WorkspacePaneRecord pane)
@@ -8345,25 +8807,31 @@ namespace SelfContainedDeployment
             }
 
             zoomButton.Tag = pane;
+            zoomButton.Margin = ResolvePaneZoomButtonMargin(pane);
             bool isZoomed = string.Equals(_activeThread?.ZoomedPaneId, pane.Id, StringComparison.Ordinal);
             bool isSelected = string.Equals(_activeThread?.SelectedPaneId, pane.Id, StringComparison.Ordinal);
-            Brush accentBrush = AppBrush(border, ResolvePaneAccentBrushKey(pane.Kind));
+            bool lightTheme = ResolveTheme(SampleConfig.CurrentTheme) == ElementTheme.Light;
+            Brush selectionBrush = AppBrush(border, ResolvePaneAccentBrushKey(pane.Kind));
             zoomButton.Content = new FontIcon
             {
-                FontSize = 10.5,
+                FontSize = 9.25,
                 Glyph = isZoomed ? "\uE73F" : "\uE740",
             };
             zoomButton.Opacity = isZoomed ? 1.0 : 0.78;
-            zoomButton.Background = isZoomed || isSelected
-                ? CreateSidebarTintedBrush(accentBrush, isZoomed ? (byte)0x12 : (byte)0x0C, Windows.UI.Color.FromArgb(0xFF, 0x33, 0x41, 0x55))
+            zoomButton.Background = isZoomed
+                ? CreateSidebarTintedBrush(selectionBrush, lightTheme ? (byte)0x10 : (byte)0x12, Windows.UI.Color.FromArgb(0xFF, 0x33, 0x41, 0x55))
+                : isSelected
+                    ? CreateSidebarTintedBrush(selectionBrush, lightTheme ? (byte)0x08 : (byte)0x0C, Windows.UI.Color.FromArgb(0xFF, 0x33, 0x41, 0x55))
                 : new SolidColorBrush(Windows.UI.Color.FromArgb(0x00, 0x00, 0x00, 0x00));
-            zoomButton.BorderBrush = isZoomed || isSelected
-                ? CreateSidebarTintedBrush(accentBrush, isZoomed ? (byte)0x46 : (byte)0x2E, Windows.UI.Color.FromArgb(0xFF, 0x33, 0x41, 0x55))
+            zoomButton.BorderBrush = isZoomed
+                ? CreateSidebarTintedBrush(selectionBrush, lightTheme ? (byte)0x50 : (byte)0x46, Windows.UI.Color.FromArgb(0xFF, 0x33, 0x41, 0x55))
+                : isSelected
+                    ? CreateSidebarTintedBrush(selectionBrush, lightTheme ? (byte)0x24 : (byte)0x2E, Windows.UI.Color.FromArgb(0xFF, 0x33, 0x41, 0x55))
                 : new SolidColorBrush(Windows.UI.Color.FromArgb(0x00, 0x00, 0x00, 0x00));
             zoomButton.Foreground = isZoomed
                 ? AppBrush(border, "ShellTextPrimaryBrush")
                 : isSelected
-                    ? accentBrush
+                    ? selectionBrush
                     : AppBrush(border, "ShellTextTertiaryBrush");
             AutomationProperties.SetAutomationId(zoomButton, $"shell-pane-zoom-{pane.Id}");
             AutomationProperties.SetName(zoomButton, isZoomed ? "Restore pane layout" : "Focus pane");
@@ -9181,6 +9649,7 @@ namespace SelfContainedDeployment
         private void UpdatePaneSelectionChrome()
         {
             WorkspacePaneRecord selectedPane = GetSelectedPane(_activeThread);
+            bool lightTheme = ResolveTheme(SampleConfig.CurrentTheme) == ElementTheme.Light;
             foreach ((string paneId, Border border) in _paneContainersById)
             {
                 if (border.Tag is WorkspacePaneRecord taggedPane)
@@ -9194,12 +9663,12 @@ namespace SelfContainedDeployment
                     : "ShellPaneActiveBorderBrush";
                 Brush accentBrush = AppBrush(border, accentKey);
                 border.Background = isSelected
-                    ? CreateSidebarTintedBrush(accentBrush, ResolveTheme(SampleConfig.CurrentTheme) == ElementTheme.Light ? (byte)0x14 : (byte)0x10, Windows.UI.Color.FromArgb(0xFF, 0x33, 0x41, 0x55))
+                    ? CreateSidebarTintedBrush(accentBrush, lightTheme ? (byte)0x18 : (byte)0x12, Windows.UI.Color.FromArgb(0xFF, 0x33, 0x41, 0x55))
                     : AppBrush(border, "ShellSurfaceBackgroundBrush");
                 border.BorderBrush = isSelected
-                    ? CreateSidebarTintedBrush(accentBrush, ResolveTheme(SampleConfig.CurrentTheme) == ElementTheme.Light ? (byte)0x5A : (byte)0x62, Windows.UI.Color.FromArgb(0xFF, 0x33, 0x41, 0x55))
+                    ? CreateSidebarTintedBrush(accentBrush, lightTheme ? (byte)0x86 : (byte)0x70, Windows.UI.Color.FromArgb(0xFF, 0x33, 0x41, 0x55))
                     : AppBrush(border, "ShellBorderBrush");
-                border.BorderThickness = new Thickness(1);
+                border.BorderThickness = new Thickness(1, 0, 1, 1);
             }
 
             foreach ((_, TabViewItem item) in _tabItemsById)
@@ -9791,9 +10260,10 @@ namespace SelfContainedDeployment
                 }
 
                 GitStatusService.SelectDiffPath(displayedSnapshot, selectedPath);
+                _activeThread.SelectedDiffPath = displayedSnapshot.SelectedPath;
+                _hoveredDiffFilePaths.Clear();
                 if (ReferenceEquals(displayedSnapshot, _activeGitSnapshot))
                 {
-                    _activeThread.SelectedDiffPath = displayedSnapshot.SelectedPath;
                     UpdateDiffFileSelection();
                     if (HasSelectedDiffAvailable(displayedSnapshot, displayedSnapshot.SelectedPath))
                     {
@@ -10191,14 +10661,51 @@ namespace SelfContainedDeployment
 
         private static string BuildDiffFileMeta(GitChangedFile changedFile)
         {
-            string directory = Path.GetDirectoryName(changedFile?.DisplayName ?? string.Empty)?
-                .Replace('\\', '/');
-            if (string.IsNullOrWhiteSpace(directory) || string.Equals(directory, ".", StringComparison.Ordinal))
+            string status = ResolveGitStatusDescription(changedFile?.Status);
+            string relativePath = changedFile?.DisplayName ?? changedFile?.Path;
+            if (string.IsNullOrWhiteSpace(relativePath))
             {
-                return ResolveGitStatusDescription(changedFile?.Status);
+                return status;
             }
 
-            return $"{directory} · {ResolveGitStatusDescription(changedFile?.Status)}";
+            string normalizedPath = relativePath.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar);
+            string directory = Path.GetDirectoryName(normalizedPath)?.Trim();
+            if (string.IsNullOrWhiteSpace(directory))
+            {
+                return $"root · {status}";
+            }
+
+            return $"{FormatCompactDiffPathContext(directory)} · {status}";
+        }
+
+        private static string FormatCompactDiffPathContext(string directoryPath, int maxSegments = 2)
+        {
+            if (string.IsNullOrWhiteSpace(directoryPath))
+            {
+                return "root";
+            }
+
+            string normalized = directoryPath
+                .Replace(Path.DirectorySeparatorChar, '/')
+                .Trim()
+                .Trim('/');
+            if (string.IsNullOrWhiteSpace(normalized))
+            {
+                return "root";
+            }
+
+            string[] segments = normalized.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            if (segments.Length == 0)
+            {
+                return "root";
+            }
+
+            if (segments.Length <= maxSegments)
+            {
+                return string.Join("/", segments);
+            }
+
+            return $".../{string.Join("/", segments[^maxSegments..])}";
         }
 
         private void UpdateDiffFileSelection()
@@ -10207,7 +10714,11 @@ namespace SelfContainedDeployment
             foreach (Button button in _diffFileButtonsByPath.Values)
             {
                 GitChangedFile changedFile = ResolveSelectedDiffFile(button);
-                ApplyDiffFileButtonState(button, string.Equals(changedFile?.Path, selectedPath, StringComparison.Ordinal));
+                ApplyDiffFileButtonState(
+                    button,
+                    changedFile,
+                    string.Equals(changedFile?.Path, selectedPath, StringComparison.Ordinal),
+                    changedFile is not null && _hoveredDiffFilePaths.Contains(changedFile.Path));
             }
         }
 
@@ -10460,19 +10971,48 @@ namespace SelfContainedDeployment
             }
         }
 
+        private void OnPaneStripButtonPointerEntered(object sender, PointerRoutedEventArgs e)
+        {
+            if (sender is Button button && !string.IsNullOrWhiteSpace(button.Name))
+            {
+                _hoveredPaneStripButtonNames.Add(button.Name);
+                UpdateSidebarActions();
+            }
+        }
+
+        private void OnPaneStripButtonPointerExited(object sender, PointerRoutedEventArgs e)
+        {
+            if (sender is Button button && !string.IsNullOrWhiteSpace(button.Name))
+            {
+                _hoveredPaneStripButtonNames.Remove(button.Name);
+                UpdateSidebarActions();
+            }
+        }
+
+        private bool IsPaneStripButtonHovered(Button button)
+        {
+            return button is not null &&
+                !string.IsNullOrWhiteSpace(button.Name) &&
+                _hoveredPaneStripButtonNames.Contains(button.Name);
+        }
+
         private void UpdateSidebarActions()
         {
             ApplyActionButtonState(SettingsNavButton, SettingsNavText, _showingSettings);
             ApplyActionButtonState(NewProjectButton, NewProjectText, false);
-            ApplyPaneStripButtonState(AddBrowserPaneButton, "ShellInfoBrush");
-            ApplyPaneStripButtonState(AddEditorPaneButton, "ShellSuccessBrush");
+            ApplyPaneStripButtonState(AddBrowserPaneButton, "ShellInfoBrush", hovered: IsPaneStripButtonHovered(AddBrowserPaneButton));
+            ApplyPaneStripButtonState(AddEditorPaneButton, "ShellSuccessBrush", hovered: IsPaneStripButtonHovered(AddEditorPaneButton));
             ApplyPaneStripButtonState(
                 FitPanesButton,
                 _activeThread?.AutoFitPaneContentLocked == true
                     ? ResolvePaneAccentBrushKey(GetSelectedPane(_activeThread)?.Kind ?? WorkspacePaneKind.Terminal)
                     : "ShellTextSecondaryBrush",
-                _activeThread?.AutoFitPaneContentLocked == true);
-            ApplyPaneStripButtonState(ToggleInspectorButton, _inspectorOpen ? "ShellTextSecondaryBrush" : "ShellTextTertiaryBrush");
+                _activeThread?.AutoFitPaneContentLocked == true,
+                IsPaneStripButtonHovered(FitPanesButton));
+            ApplyPaneStripButtonState(
+                ToggleInspectorButton,
+                _inspectorOpen ? "ShellTextSecondaryBrush" : "ShellTextTertiaryBrush",
+                hovered: IsPaneStripButtonHovered(ToggleInspectorButton));
             if (FitPanesButton is not null)
             {
                 ToolTipService.SetToolTip(
@@ -10528,7 +11068,10 @@ namespace SelfContainedDeployment
                 icon.Glyph = _inspectorOpen ? "\uE7F8" : "\uE7F7";
             }
 
-            ApplyPaneStripButtonState(ToggleInspectorButton, _inspectorOpen ? "ShellTextSecondaryBrush" : "ShellTextTertiaryBrush");
+            ApplyPaneStripButtonState(
+                ToggleInspectorButton,
+                _inspectorOpen ? "ShellTextSecondaryBrush" : "ShellTextTertiaryBrush",
+                hovered: IsPaneStripButtonHovered(ToggleInspectorButton));
         }
 
         private void UpdatePaneLayout()
@@ -10943,6 +11486,7 @@ namespace SelfContainedDeployment
                 ThreadId = thread.Id,
                 Title = thread.Name,
                 Meta = showHeader ? BuildNoteGroupMeta(thread, activeNotes.Count, archivedNotes.Count, scope) : string.Empty,
+                HeaderAccentBrush = ResolveNoteGroupAccentBrush(thread, activeNotes, archivedNotes),
                 HeaderVisibility = showHeader ? Visibility.Visible : Visibility.Collapsed,
                 ArchivedToggleText = archivedExpanded
                     ? "Hide archived"
@@ -10975,14 +11519,31 @@ namespace SelfContainedDeployment
 
         private static string ResolveNoteAccentBrushKey(WorkspacePaneRecord attachedPane)
         {
-            return attachedPane is null
-                ? "ShellWarningBrush"
-                : ResolvePaneAccentBrushKey(attachedPane.Kind);
+            return attachedPane?.Kind switch
+            {
+                WorkspacePaneKind.Browser => "ShellInfoBrush",
+                WorkspacePaneKind.Editor => "ShellSuccessBrush",
+                WorkspacePaneKind.Diff => "ShellConfigBrush",
+                WorkspacePaneKind.Terminal => "ShellTerminalBrush",
+                _ => "ShellPaneActiveBorderBrush",
+            };
         }
 
         private Brush ResolveNoteAccentBrush(WorkspacePaneRecord attachedPane)
         {
             return AppBrush(InspectorNotesGroupsItemsControl, ResolveNoteAccentBrushKey(attachedPane));
+        }
+
+        private Brush ResolveNoteGroupAccentBrush(
+            WorkspaceThread thread,
+            IReadOnlyList<WorkspaceThreadNote> activeNotes,
+            IReadOnlyList<WorkspaceThreadNote> archivedNotes)
+        {
+            WorkspaceThreadNote sampleNote = activeNotes?.FirstOrDefault() ?? archivedNotes?.FirstOrDefault();
+            WorkspacePaneRecord attachedPane = thread?.Panes.FirstOrDefault(candidate => string.Equals(candidate.Id, sampleNote?.PaneId, StringComparison.Ordinal))
+                ?? thread?.Panes.FirstOrDefault(candidate => string.Equals(candidate.Id, thread.SelectedPaneId, StringComparison.Ordinal))
+                ?? thread?.Panes.FirstOrDefault();
+            return ResolveNoteAccentBrush(attachedPane);
         }
 
         private InspectorNoteCardItem BuildInspectorNoteCardItem(WorkspaceThread thread, WorkspaceThreadNote note)
@@ -10991,39 +11552,46 @@ namespace SelfContainedDeployment
             Brush accentBrush = ResolveNoteAccentBrush(attachedPane);
             bool selected = string.Equals(thread?.SelectedNoteId, note?.Id, StringComparison.Ordinal);
             bool archived = note?.IsArchived == true;
-            string noteText = note?.Text;
+            NoteDraftState draft = ResolveNoteDraftState(note);
+            bool dirty = draft?.Dirty == true;
+            string noteText = draft?.Text ?? note?.Text;
+            bool lightTheme = ResolveTheme(SampleConfig.CurrentTheme) == ElementTheme.Light;
             return new InspectorNoteCardItem
             {
                 NoteId = note?.Id,
                 ThreadId = thread?.Id,
                 Title = ResolveNoteListTitle(note),
+                EditableTitle = draft?.EditableTitle ?? ResolveEditableNoteTitle(note),
+                TitlePlaceholderText = archived ? string.Empty : "Optional title",
+                TitleEditorAutomationId = BuildNoteTitleEditorAutomationId(note?.Id),
                 Text = noteText,
                 Meta = BuildNoteCardMeta(attachedPane),
+                StatusText = archived ? "Read only" : dirty ? "Unsaved changes" : string.Empty,
                 TimestampText = archived
                     ? $"Archived {FormatNoteTimestamp(note?.ArchivedAt ?? note?.UpdatedAt ?? DateTimeOffset.UtcNow)}"
-                    : $"Updated {FormatNoteTimestamp(note?.UpdatedAt ?? DateTimeOffset.UtcNow)}",
+                    : dirty
+                        ? $"Last saved {FormatNoteTimestamp(note?.UpdatedAt ?? DateTimeOffset.UtcNow)}"
+                        : $"Saved {FormatNoteTimestamp(note?.UpdatedAt ?? DateTimeOffset.UtcNow)}",
                 ScopeButtonLabel = BuildNoteScopeLabel(attachedPane),
                 ScopeToolTip = "Attach this note to the thread or a pane",
                 ArchiveButtonLabel = archived ? "Restore" : "Archive",
                 ArchiveToolTip = archived ? "Restore this note to the active list" : "Archive this note",
                 DeleteToolTip = "Delete this note",
-                PlaceholderText = archived ? string.Empty : "Empty note",
+                PlaceholderText = archived ? string.Empty : "Write note",
                 EditorAutomationId = BuildNoteEditorAutomationId(note?.Id),
                 AccentBrush = accentBrush,
-                CardBackground = CreateSidebarTintedBrush(
-                    accentBrush,
-                    selected
-                        ? archived ? (byte)0x05 : (byte)0x09
-                        : (byte)0x00,
-                    Windows.UI.Color.FromArgb(0xFF, 0x14, 0x16, 0x1B)),
-                CardBorderBrush = CreateSidebarTintedBrush(
-                    AppBrush(InspectorNotesGroupsItemsControl, "ShellBorderBrush"),
-                    (byte)0x00,
-                    Windows.UI.Color.FromArgb(0xFF, 0x14, 0x16, 0x1B)),
-                ArchiveButtonVisibility = string.IsNullOrWhiteSpace(note?.Text) && !archived
+                CardBackground = selected
+                    ? CreateSidebarTintedBrush(
+                        accentBrush,
+                        archived ? (byte)(lightTheme ? 0x06 : 0x07) : (byte)(lightTheme ? 0x0E : 0x0C),
+                        Windows.UI.Color.FromArgb(0xFF, 0x14, 0x16, 0x1B))
+                    : null,
+                CardBorderBrush = null,
+                ArchiveButtonVisibility = string.IsNullOrWhiteSpace(noteText) && string.IsNullOrWhiteSpace(draft?.EditableTitle) && !archived
                     ? Visibility.Collapsed
                     : Visibility.Visible,
                 IsArchived = archived,
+                IsSelected = selected,
             };
         }
 
@@ -11151,6 +11719,13 @@ namespace SelfContainedDeployment
                 : $"shell-thread-note-editor-{noteId}";
         }
 
+        private static string BuildNoteTitleEditorAutomationId(string noteId)
+        {
+            return string.IsNullOrWhiteSpace(noteId)
+                ? "shell-thread-note-title"
+                : $"shell-thread-note-title-{noteId}";
+        }
+
         private static string BuildThreadNotePreview(string notes, int maxLength = 72)
         {
             if (string.IsNullOrWhiteSpace(notes))
@@ -11205,13 +11780,15 @@ namespace SelfContainedDeployment
                 return normalizedTitle;
             }
 
-            string firstLine = ExtractFirstNoteLine(note?.Text);
-            if (!string.IsNullOrWhiteSpace(firstLine))
-            {
-                return BuildThreadNotePreview(firstLine, maxLength: 56);
-            }
+            return "Untitled note";
+        }
 
-            return "Note";
+        private static string ResolveEditableNoteTitle(WorkspaceThreadNote note)
+        {
+            string normalizedTitle = note?.Title?.Trim();
+            return IsSystemGeneratedNoteTitle(normalizedTitle)
+                ? string.Empty
+                : normalizedTitle;
         }
 
         private static bool IsSystemGeneratedNoteTitle(string title)
@@ -12764,13 +13341,13 @@ namespace SelfContainedDeployment
                 (ElementTheme.Light, "ShellPageBackgroundBrush") => Windows.UI.Color.FromArgb(0xFF, 0xF2, 0xF5, 0xF8),
                 (ElementTheme.Light, "ShellPaneBackgroundBrush") => Windows.UI.Color.FromArgb(0xFF, 0xF2, 0xF5, 0xF8),
                 (ElementTheme.Light, "ShellSurfaceBackgroundBrush") => Windows.UI.Color.FromArgb(0xFF, 0xF9, 0xFB, 0xFD),
-                (ElementTheme.Light, "ShellMutedSurfaceBrush") => Windows.UI.Color.FromArgb(0xFF, 0xE7, 0xEC, 0xF2),
+                (ElementTheme.Light, "ShellMutedSurfaceBrush") => Windows.UI.Color.FromArgb(0xFF, 0xF2, 0xF6, 0xFA),
                 (ElementTheme.Light, "ShellBrandMarkBackgroundBrush") => Windows.UI.Color.FromArgb(0xFF, 0xF9, 0xFB, 0xFD),
-                (ElementTheme.Light, "ShellBrandMarkBorderBrush") => Windows.UI.Color.FromArgb(0xFF, 0xCB, 0xD5, 0xE0),
-                (ElementTheme.Light, "ShellPaneDividerBrush") => Windows.UI.Color.FromArgb(0xFF, 0xDC, 0xE5, 0xEE),
-                (ElementTheme.Light, "ShellNavHoverBrush") => Windows.UI.Color.FromArgb(0xFF, 0xE2, 0xEA, 0xF2),
-                (ElementTheme.Light, "ShellNavActiveBrush") => Windows.UI.Color.FromArgb(0xFF, 0xD6, 0xE1, 0xEC),
-                (ElementTheme.Light, "ShellBorderBrush") => Windows.UI.Color.FromArgb(0xFF, 0xD6, 0xDE, 0xE7),
+                (ElementTheme.Light, "ShellBrandMarkBorderBrush") => Windows.UI.Color.FromArgb(0xFF, 0xCC, 0xD6, 0xE0),
+                (ElementTheme.Light, "ShellPaneDividerBrush") => Windows.UI.Color.FromArgb(0xFF, 0xD3, 0xDE, 0xE8),
+                (ElementTheme.Light, "ShellNavHoverBrush") => Windows.UI.Color.FromArgb(0xFF, 0xE7, 0xEE, 0xF5),
+                (ElementTheme.Light, "ShellNavActiveBrush") => Windows.UI.Color.FromArgb(0xFF, 0xDF, 0xE8, 0xF1),
+                (ElementTheme.Light, "ShellBorderBrush") => Windows.UI.Color.FromArgb(0xFF, 0xC7, 0xD2, 0xDD),
                 (ElementTheme.Light, "ShellPaneActiveBorderBrush") => Windows.UI.Color.FromArgb(0xFF, 0x33, 0x41, 0x55),
                 (ElementTheme.Light, "ShellTextPrimaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0x1A, 0x1E, 0x23),
                 (ElementTheme.Light, "ShellTextSecondaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0x39, 0x42, 0x4D),
@@ -12825,15 +13402,25 @@ namespace SelfContainedDeployment
             };
         }
 
-        private static void ApplyDiffFileButtonState(Button button, bool active)
+        private void ApplyDiffFileButtonState(Button button, GitChangedFile changedFile, bool active, bool hovered = false)
         {
+            if (button is null)
+            {
+                return;
+            }
+
+            bool lightTheme = ResolveTheme(SampleConfig.CurrentTheme) == ElementTheme.Light;
+            Brush accentBrush = changedFile is not null
+                ? AppBrush(button, ResolveInspectorIconBrushKey(changedFile.Path, isDirectory: false, decoration: null))
+                : AppBrush(button, "ShellPaneActiveBorderBrush");
             button.Background = active
-                ? CreateSidebarTintedBrush(AppBrush(button, "ShellPaneActiveBorderBrush"), 0x0A, Windows.UI.Color.FromArgb(0xFF, 0x2C, 0x2D, 0x31))
-                : null;
-            button.BorderBrush = active
-                ? CreateSidebarTintedBrush(AppBrush(button, "ShellPaneActiveBorderBrush"), 0x38, Windows.UI.Color.FromArgb(0xFF, 0x2C, 0x2D, 0x31))
-                : null;
-            button.Foreground = active ? AppBrush(button, "ShellTextPrimaryBrush") : AppBrush(button, "ShellTextSecondaryBrush");
+                ? CreateSidebarTintedBrush(accentBrush, lightTheme ? (byte)0x16 : (byte)0x12, Windows.UI.Color.FromArgb(0xFF, 0x33, 0x41, 0x55))
+                : hovered
+                    ? AppBrush(button, "ShellNavHoverBrush")
+                    : null;
+            button.BorderBrush = null;
+            button.BorderThickness = new Thickness(0);
+            button.Foreground = active || hovered ? AppBrush(button, "ShellTextPrimaryBrush") : AppBrush(button, "ShellTextSecondaryBrush");
         }
 
         private static string ResolveGitStatusSymbol(string status)
@@ -12921,7 +13508,7 @@ namespace SelfContainedDeployment
             button.Foreground = active ? AppBrush(button, "ShellTextPrimaryBrush") : AppBrush(button, "ShellTextSecondaryBrush");
         }
 
-        private static void ApplyPaneStripButtonState(Button button, string accentKey, bool active = false)
+        private static void ApplyPaneStripButtonState(Button button, string accentKey, bool active = false, bool hovered = false)
         {
             if (button is null)
             {
@@ -12931,13 +13518,19 @@ namespace SelfContainedDeployment
             Brush accentBrush = AppBrush(button, accentKey);
             button.Background = active
                 ? CreateSidebarTintedBrush(accentBrush, 0x12, Windows.UI.Color.FromArgb(0xFF, 0x33, 0x41, 0x55))
-                : null;
-            button.BorderBrush = null;
-            button.BorderThickness = new Thickness(0);
-            button.Foreground = accentBrush;
+                : hovered
+                    ? CreateSidebarTintedBrush(accentBrush, 0x10, Windows.UI.Color.FromArgb(0xFF, 0x33, 0x41, 0x55))
+                    : null;
+            button.BorderBrush = active || hovered
+                ? CreateSidebarTintedBrush(accentBrush, hovered && !active ? (byte)0x2E : (byte)0x2A, Windows.UI.Color.FromArgb(0xFF, 0x33, 0x41, 0x55))
+                : AppBrush(button, "ShellBorderBrush");
+            button.BorderThickness = new Thickness(1);
+            button.Foreground = hovered ? AppBrush(button, "ShellTextPrimaryBrush") : accentBrush;
+            button.Opacity = hovered || active ? 1.0 : 0.92;
             if (button.Content is FontIcon icon)
             {
-                icon.Foreground = accentBrush;
+                icon.ClearValue(IconElement.ForegroundProperty);
+                icon.Opacity = hovered || active ? 1.0 : 0.92;
             }
         }
 
@@ -12985,18 +13578,20 @@ namespace SelfContainedDeployment
                 return;
             }
 
+            Brush accentBrush = AppBrush(button, "ShellPaneActiveBorderBrush");
             if (active)
             {
-                button.Background = CreateSidebarTintedBrush(AppBrush(button, "ShellPaneActiveBorderBrush"), 0x14, Windows.UI.Color.FromArgb(0xFF, 0x2C, 0x2D, 0x31));
-                button.BorderBrush = null;
+                button.Background = CreateSidebarTintedBrush(accentBrush, 0x14, Windows.UI.Color.FromArgb(0xFF, 0x33, 0x41, 0x55));
+                button.BorderBrush = CreateSidebarTintedBrush(accentBrush, 0x2E, Windows.UI.Color.FromArgb(0xFF, 0x33, 0x41, 0x55));
+                button.BorderThickness = new Thickness(1);
                 button.Foreground = AppBrush(button, "ShellTextPrimaryBrush");
                 return;
             }
 
             button.Background = null;
-            button.BorderBrush = null;
-            button.BorderThickness = new Thickness(0);
-            button.Foreground = AppBrush(button, "ShellTextPrimaryBrush");
+            button.BorderBrush = AppBrush(button, "ShellBorderBrush");
+            button.BorderThickness = new Thickness(1);
+            button.Foreground = AppBrush(button, "ShellTextSecondaryBrush");
         }
 
         private static void ApplyThreadButtonState(Button button, bool active)
@@ -13316,16 +13911,23 @@ namespace SelfContainedDeployment
                     WorkspacePaneKind.Browser => "preview",
                     WorkspacePaneKind.Editor => "editor",
                     WorkspacePaneKind.Diff => "diff",
-                    _ => "shell",
+                    _ => "terminal",
                 };
             }
             else
             {
                 string trimmed = title.Trim().TrimEnd('\\', '/');
-                int slashIndex = Math.Max(trimmed.LastIndexOf('\\'), trimmed.LastIndexOf('/'));
-                nextTitle = slashIndex >= 0 && slashIndex < trimmed.Length - 1
-                    ? trimmed[(slashIndex + 1)..]
-                    : trimmed;
+                if (kind == WorkspacePaneKind.Terminal && LooksLikePath(trimmed))
+                {
+                    nextTitle = "terminal";
+                }
+                else
+                {
+                    int slashIndex = Math.Max(trimmed.LastIndexOf('\\'), trimmed.LastIndexOf('/'));
+                    nextTitle = slashIndex >= 0 && slashIndex < trimmed.Length - 1
+                        ? trimmed[(slashIndex + 1)..]
+                        : trimmed;
+                }
             }
 
             if (nextTitle.Length > 28)

@@ -1,10 +1,11 @@
 command_timeout = 2000
+add_newline = false
 
-format = "$directory$git_branch$git_status$bun$dotnet$line_break$character"
+format = "$directory$git_branch$git_status$bun$dotnet $character"
 
 [git_branch]
 symbol = "git:"
-format = " on [$symbol$branch]($style)"
+format = " [$symbol$branch]($style)"
 
 [git_status]
 format = " [$all_status$ahead_behind]($style)"
@@ -21,11 +22,11 @@ deleted = "x"
 
 [bun]
 symbol = ""
-format = " via [bun $version]($style)"
+format = " [bun]($style)"
 
 [dotnet]
 symbol = ""
-format = " via [.NET $tfm]($style)"
+format = " [.NET]($style)"
 
 [character]
 success_symbol = "[>](bold green) "

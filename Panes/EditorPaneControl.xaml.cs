@@ -11,6 +11,7 @@ using SelfContainedDeployment.Terminal;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -43,6 +44,15 @@ namespace SelfContainedDeployment.Panes
         public string FullPath { get; init; }
 
         public string RelativePath { get; init; }
+    }
+
+    internal sealed class EditorPaneFileOpenTarget
+    {
+        public string FullPath { get; init; }
+
+        public string RelativePath { get; init; }
+
+        public string FailureReason { get; init; }
     }
 
     public sealed partial class EditorPaneControl : UserControl
@@ -169,6 +179,7 @@ namespace SelfContainedDeployment.Panes
         private bool _editorReady;
         private bool _disposed;
         private string _paneId;
+        private string _projectRootPath;
         private string _selectedFullPath;
         private string _selectedRelativePath;
         private string _loadedText = string.Empty;
@@ -222,7 +233,11 @@ namespace SelfContainedDeployment.Panes
 
         public event EventHandler StateChanged;
 
-        public string ProjectRootPath { get; set; }
+        public string ProjectRootPath
+        {
+            get => _projectRootPath;
+            set => UpdateProjectRootPath(value);
+        }
 
         public string InitialFilePath { get; set; }
 
@@ -313,6 +328,30 @@ namespace SelfContainedDeployment.Panes
             if (enabled)
             {
                 _fitWidthRequested = true;
+            }
+        }
+
+        public void UpdateProjectRootPath(string projectRootPath)
+        {
+            string normalizedRootPath = NormalizeRootPath(projectRootPath);
+            if (string.Equals(_projectRootPath, normalizedRootPath, StringComparison.OrdinalIgnoreCase))
+            {
+                if (_loaded && !_disposed)
+                {
+                    _ = RefreshProjectRootAsync(reopenCurrentSelection: true);
+                }
+
+                return;
+            }
+
+            _projectRootPath = normalizedRootPath;
+            _fileListLoaded = false;
+            _files.Clear();
+            RaiseStateChanged();
+
+            if (_loaded && !_disposed)
+            {
+                _ = RefreshProjectRootAsync(reopenCurrentSelection: true);
             }
         }
 
@@ -766,25 +805,61 @@ namespace SelfContainedDeployment.Panes
                 return;
             }
 
-            string rootPath = NormalizeRootPath(ProjectRootPath);
-            if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
+            await ReloadFileListAsync(bypassCache: false).ConfigureAwait(true);
+        }
+
+        private async Task RefreshProjectRootAsync(bool reopenCurrentSelection)
+        {
+            if (_disposed)
             {
-                SetStatusText("Project path is unavailable.");
-                ShowOverlay("Editor unavailable", "This thread does not have a readable project root.");
+                return;
+            }
+
+            bool loaded = await ReloadFileListAsync(bypassCache: true).ConfigureAwait(true);
+            if (_disposed || !loaded)
+            {
+                return;
+            }
+
+            if (_dirty)
+            {
                 RaiseStateChanged();
                 return;
             }
 
-            List<EditorPaneFileEntry> files = await Task.Run(() => EnumerateProjectFiles(rootPath)).ConfigureAwait(true);
+            if (reopenCurrentSelection && !string.IsNullOrWhiteSpace(_selectedRelativePath))
+            {
+                await OpenFileAsync(_selectedRelativePath, savePendingChanges: false).ConfigureAwait(true);
+                return;
+            }
+
+            await OpenInitialFileAsync().ConfigureAwait(true);
+        }
+
+        private async Task<bool> ReloadFileListAsync(bool bypassCache)
+        {
+            string rootPath = NormalizeRootPath(ProjectRootPath);
+            if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
+            {
+                _files.Clear();
+                _fileListLoaded = false;
+                SetStatusText("Project path is unavailable.");
+                ShowOverlay("Editor unavailable", "This thread does not have a readable project root.");
+                RaiseStateChanged();
+                return false;
+            }
+
+            List<EditorPaneFileEntry> files = await Task.Run(() => EnumerateProjectFiles(rootPath, bypassCache)).ConfigureAwait(true);
             if (_disposed)
             {
-                return;
+                return false;
             }
 
             _files.Clear();
             _files.AddRange(files);
             _fileListLoaded = true;
             RaiseStateChanged();
+            return true;
         }
 
         private async Task OpenInitialFileAsync()
@@ -857,12 +932,46 @@ namespace SelfContainedDeployment.Panes
             RaiseInteractionRequested();
 
             string rootPath = NormalizeRootPath(ProjectRootPath);
-            string fullPath = ResolveExistingFilePath(rootPath, path);
-            string relativePath = MakeRelativePath(rootPath, fullPath);
+            EditorPaneFileOpenTarget target = ResolveFileOpenTarget(rootPath, path);
+            if (string.IsNullOrWhiteSpace(target.FullPath))
+            {
+                bool reloaded = await ReloadFileListAsync(bypassCache: true).ConfigureAwait(true);
+                if (reloaded)
+                {
+                    rootPath = NormalizeRootPath(ProjectRootPath);
+                    target = ResolveFileOpenTarget(rootPath, path);
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(target.FullPath))
+            {
+                SetUnavailableDocumentState(
+                    target.RelativePath,
+                    target.RelativePath,
+                    string.IsNullOrWhiteSpace(target.FailureReason)
+                        ? "The selected file is no longer available."
+                        : target.FailureReason,
+                    BuildOpenFailureMessage(path, rootPath, target.FailureReason));
+                await PushDocumentToEditorAsync().ConfigureAwait(true);
+                RaiseStateChanged();
+                return;
+            }
+
+            if (Directory.Exists(target.FullPath))
+            {
+                SetUnavailableDocumentState(
+                    target.FullPath,
+                    target.RelativePath,
+                    "This path is a folder, not an editable file.",
+                    BuildOpenFailureMessage(path, rootPath, target.FailureReason ?? "Select a file instead of a folder."));
+                await PushDocumentToEditorAsync().ConfigureAwait(true);
+                RaiseStateChanged();
+                return;
+            }
 
             try
             {
-                byte[] bytes = await File.ReadAllBytesAsync(fullPath).ConfigureAwait(true);
+                byte[] bytes = await File.ReadAllBytesAsync(target.FullPath).ConfigureAwait(true);
                 if (_disposed)
                 {
                     return;
@@ -870,26 +979,19 @@ namespace SelfContainedDeployment.Panes
 
                 if (LooksBinary(bytes))
                 {
-                    _selectedFullPath = fullPath;
-                    _selectedRelativePath = relativePath;
-                    _loadedText = string.Empty;
-                    _currentText = string.Empty;
-                    _loadedEncoding = new UTF8Encoding(false);
-                    _lineEnding = "\n";
-                    _dirty = false;
-                    _readOnly = true;
-                    UpdateContentMetrics();
-                    SetStatusText("This file looks binary and cannot be edited here.");
-                    UpdateTitle();
-                    ShowOverlay("File unavailable", "This file looks binary and cannot be edited in the GUI editor.");
+                    SetUnavailableDocumentState(
+                        target.FullPath,
+                        target.RelativePath,
+                        "This file looks binary and cannot be edited here.",
+                        BuildOpenFailureMessage(path, rootPath, "This file looks binary and cannot be edited in the GUI editor."));
                     await PushDocumentToEditorAsync().ConfigureAwait(true);
                     RaiseStateChanged();
                     return;
                 }
 
                 (string text, Encoding encoding) = DecodeFile(bytes);
-                _selectedFullPath = fullPath;
-                _selectedRelativePath = relativePath;
+                _selectedFullPath = target.FullPath;
+                _selectedRelativePath = target.RelativePath;
                 _loadedEncoding = encoding;
                 _lineEnding = DetectLineEnding(text);
                 _loadedText = text;
@@ -897,7 +999,7 @@ namespace SelfContainedDeployment.Panes
                 _dirty = false;
                 _readOnly = false;
                 UpdateContentMetrics();
-                SetStatusText($"Editing {relativePath}");
+                SetStatusText($"Editing {target.RelativePath}");
                 UpdateTitle();
                 HideOverlay();
                 await PushDocumentToEditorAsync().ConfigureAwait(true);
@@ -910,18 +1012,11 @@ namespace SelfContainedDeployment.Panes
                     return;
                 }
 
-                _selectedFullPath = fullPath;
-                _selectedRelativePath = relativePath;
-                _loadedText = string.Empty;
-                _currentText = string.Empty;
-                _loadedEncoding = new UTF8Encoding(false);
-                _lineEnding = "\n";
-                _dirty = false;
-                _readOnly = true;
-                UpdateContentMetrics();
-                SetStatusText($"Could not load file: {ex.Message}");
-                UpdateTitle();
-                ShowOverlay("File unavailable", ex.Message);
+                SetUnavailableDocumentState(
+                    target.FullPath,
+                    target.RelativePath,
+                    $"Could not load {target.RelativePath ?? Path.GetFileName(target.FullPath)}.",
+                    BuildOpenFailureMessage(path, rootPath, ex.Message));
                 await PushDocumentToEditorAsync().ConfigureAwait(true);
                 RaiseStateChanged();
             }
@@ -973,6 +1068,167 @@ namespace SelfContainedDeployment.Panes
                 RaiseStateChanged();
                 return false;
             }
+        }
+
+        private void SetUnavailableDocumentState(string fullPath, string relativePath, string statusText, string overlayMessage)
+        {
+            _selectedFullPath = string.IsNullOrWhiteSpace(fullPath) ? relativePath : fullPath;
+            _selectedRelativePath = string.IsNullOrWhiteSpace(relativePath) ? _selectedFullPath : relativePath;
+            _loadedText = string.Empty;
+            _currentText = string.Empty;
+            _loadedEncoding = new UTF8Encoding(false);
+            _lineEnding = "\n";
+            _dirty = false;
+            _readOnly = true;
+            UpdateContentMetrics();
+            SetStatusText(statusText);
+            UpdateTitle();
+            ShowOverlay("File unavailable", overlayMessage);
+        }
+
+        private static string BuildOpenFailureMessage(string candidatePath, string rootPath, string reason)
+        {
+            string normalizedCandidate = NormalizeComparablePath(candidatePath);
+            string candidateLabel = string.IsNullOrWhiteSpace(normalizedCandidate)
+                ? candidatePath?.Trim()
+                : normalizedCandidate;
+            string normalizedRoot = NormalizeRootPath(rootPath);
+            string rootLabel = string.IsNullOrWhiteSpace(normalizedRoot)
+                ? rootPath?.Trim()
+                : normalizedRoot;
+
+            StringBuilder builder = new();
+            if (!string.IsNullOrWhiteSpace(reason))
+            {
+                builder.Append(reason.Trim());
+            }
+            else
+            {
+                builder.Append("The file could not be opened.");
+            }
+
+            if (!string.IsNullOrWhiteSpace(candidateLabel))
+            {
+                builder.Append(" Path: ").Append(candidateLabel);
+            }
+
+            if (!string.IsNullOrWhiteSpace(rootLabel))
+            {
+                builder.Append(" Root: ").Append(rootLabel);
+            }
+
+            return builder.ToString();
+        }
+
+        private EditorPaneFileOpenTarget ResolveFileOpenTarget(string rootPath, string candidatePath, bool allowFileListSearch = true)
+        {
+            if (string.IsNullOrWhiteSpace(candidatePath))
+            {
+                return new EditorPaneFileOpenTarget
+                {
+                    FailureReason = "No file path was provided.",
+                };
+            }
+
+            string resolvedPath = ResolvePath(rootPath, candidatePath);
+            if (!string.IsNullOrWhiteSpace(resolvedPath))
+            {
+                if (File.Exists(resolvedPath))
+                {
+                    return new EditorPaneFileOpenTarget
+                    {
+                        FullPath = resolvedPath,
+                        RelativePath = MakeRelativePath(rootPath, resolvedPath),
+                    };
+                }
+
+                if (Directory.Exists(resolvedPath))
+                {
+                    return new EditorPaneFileOpenTarget
+                    {
+                        FullPath = resolvedPath,
+                        RelativePath = MakeRelativePath(rootPath, resolvedPath),
+                        FailureReason = $"Resolved '{candidatePath}' to a folder.",
+                    };
+                }
+            }
+
+            string normalizedRootPath = NormalizeRootPath(rootPath);
+            if (string.IsNullOrWhiteSpace(normalizedRootPath))
+            {
+                return new EditorPaneFileOpenTarget
+                {
+                    RelativePath = NormalizeComparablePath(candidatePath),
+                    FailureReason = "The project root is not readable from the editor.",
+                };
+            }
+
+            if (!Directory.Exists(normalizedRootPath))
+            {
+                return new EditorPaneFileOpenTarget
+                {
+                    RelativePath = NormalizeComparablePath(candidatePath),
+                    FailureReason = $"The project root '{normalizedRootPath}' is not readable from this host.",
+                };
+            }
+
+            string normalizedCandidatePath = NormalizeComparablePath(candidatePath);
+            if (allowFileListSearch && !string.IsNullOrWhiteSpace(normalizedCandidatePath))
+            {
+                EditorPaneFileEntry match = _files.FirstOrDefault(file =>
+                    string.Equals(file.RelativePath, normalizedCandidatePath, StringComparison.OrdinalIgnoreCase));
+                if (match is not null && File.Exists(match.FullPath))
+                {
+                    return new EditorPaneFileOpenTarget
+                    {
+                        FullPath = match.FullPath,
+                        RelativePath = match.RelativePath,
+                    };
+                }
+
+                List<EditorPaneFileEntry> suffixMatches = _files
+                    .Where(file =>
+                        file?.RelativePath is not null &&
+                        (file.RelativePath.EndsWith("/" + normalizedCandidatePath, StringComparison.OrdinalIgnoreCase) ||
+                         normalizedCandidatePath.EndsWith("/" + file.RelativePath, StringComparison.OrdinalIgnoreCase)))
+                    .Take(2)
+                    .ToList();
+                if (suffixMatches.Count == 1 && File.Exists(suffixMatches[0].FullPath))
+                {
+                    return new EditorPaneFileOpenTarget
+                    {
+                        FullPath = suffixMatches[0].FullPath,
+                        RelativePath = suffixMatches[0].RelativePath,
+                    };
+                }
+
+                string candidateFileName = Path.GetFileName(normalizedCandidatePath);
+                if (!string.IsNullOrWhiteSpace(candidateFileName))
+                {
+                    List<EditorPaneFileEntry> fileNameMatches = _files
+                        .Where(file =>
+                            file?.RelativePath is not null &&
+                            string.Equals(Path.GetFileName(file.RelativePath), candidateFileName, StringComparison.OrdinalIgnoreCase))
+                        .Take(2)
+                        .ToList();
+                    if (fileNameMatches.Count == 1 && File.Exists(fileNameMatches[0].FullPath))
+                    {
+                        return new EditorPaneFileOpenTarget
+                        {
+                            FullPath = fileNameMatches[0].FullPath,
+                            RelativePath = fileNameMatches[0].RelativePath,
+                        };
+                    }
+                }
+            }
+
+            return new EditorPaneFileOpenTarget
+            {
+                RelativePath = string.IsNullOrWhiteSpace(normalizedCandidatePath)
+                    ? candidatePath.Trim()
+                    : normalizedCandidatePath,
+                FailureReason = $"Could not resolve '{candidatePath.Trim()}' under '{normalizedRootPath}'.",
+            };
         }
 
         private async Task PushDocumentToEditorAsync()
@@ -1570,6 +1826,36 @@ namespace SelfContainedDeployment.Panes
                 }
             }
 
+            List<EditorPaneFileEntry> ordered = EnumerateProjectFilesCore(normalizedRootPath, cancellationToken);
+            if (ordered.Count == 0)
+            {
+                NativeAutomationDiagnostics.IncrementCounter("editorFileScan.fallback.count");
+                ordered = EnumerateProjectFilesFallback(normalizedRootPath, cancellationToken);
+            }
+
+            if (ordered.Count == 0)
+            {
+                NativeAutomationDiagnostics.IncrementCounter("editorFileScan.gitFallback.count");
+                ordered = EnumerateProjectFilesFromGit(normalizedRootPath, cancellationToken);
+            }
+
+            lock (ProjectFileCacheGate)
+            {
+                DateTimeOffset capturedAt = DateTimeOffset.UtcNow;
+                PruneProjectFileCache(capturedAt);
+                ProjectFileCache[normalizedRootPath] = new CachedProjectFileSnapshot
+                {
+                    CapturedAt = capturedAt,
+                    Files = CloneFileEntries(ordered),
+                };
+                PruneProjectFileCache(capturedAt);
+            }
+
+            return ordered;
+        }
+
+        private static List<EditorPaneFileEntry> EnumerateProjectFilesCore(string normalizedRootPath, CancellationToken cancellationToken)
+        {
             List<EditorPaneFileEntry> results = new();
             Stack<string> stack = new();
             stack.Push(normalizedRootPath);
@@ -1612,23 +1898,161 @@ namespace SelfContainedDeployment.Panes
                 }
             }
 
-            List<EditorPaneFileEntry> ordered = results
-                .OrderBy(item => item.RelativePath, StringComparer.OrdinalIgnoreCase)
-                .ToList();
+            return OrderProjectFileEntries(results);
+        }
 
-            lock (ProjectFileCacheGate)
+        private static List<EditorPaneFileEntry> EnumerateProjectFilesFallback(string normalizedRootPath, CancellationToken cancellationToken)
+        {
+            List<EditorPaneFileEntry> results = new();
+            Queue<string> queue = new();
+            queue.Enqueue(normalizedRootPath);
+
+            while (queue.Count > 0)
             {
-                DateTimeOffset capturedAt = DateTimeOffset.UtcNow;
-                PruneProjectFileCache(capturedAt);
-                ProjectFileCache[normalizedRootPath] = new CachedProjectFileSnapshot
+                cancellationToken.ThrowIfCancellationRequested();
+                string current = queue.Dequeue();
+
+                string[] directories;
+                try
                 {
-                    CapturedAt = capturedAt,
-                    Files = CloneFileEntries(ordered),
-                };
-                PruneProjectFileCache(capturedAt);
+                    directories = Directory.GetDirectories(current);
+                }
+                catch
+                {
+                    directories = Array.Empty<string>();
+                }
+
+                foreach (string directory in directories)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    string name = Path.GetFileName(directory);
+                    if (IgnoredDirectoryNames.Contains(name))
+                    {
+                        continue;
+                    }
+
+                    queue.Enqueue(directory);
+                }
+
+                string[] files;
+                try
+                {
+                    files = Directory.GetFiles(current);
+                }
+                catch
+                {
+                    files = Array.Empty<string>();
+                }
+
+                foreach (string file in files)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (!IsProbablyEditableFile(file))
+                    {
+                        continue;
+                    }
+
+                    results.Add(new EditorPaneFileEntry
+                    {
+                        FullPath = file,
+                        RelativePath = MakeRelativePath(normalizedRootPath, file),
+                    });
+                }
             }
 
-            return ordered;
+            return OrderProjectFileEntries(results);
+        }
+
+        private static List<EditorPaneFileEntry> OrderProjectFileEntries(IEnumerable<EditorPaneFileEntry> entries)
+        {
+            return entries?
+                .Where(item => item is not null &&
+                    !string.IsNullOrWhiteSpace(item.FullPath) &&
+                    !string.IsNullOrWhiteSpace(item.RelativePath))
+                .GroupBy(item => item.RelativePath, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
+                .OrderBy(item => item.RelativePath, StringComparer.OrdinalIgnoreCase)
+                .ToList()
+                ?? new List<EditorPaneFileEntry>();
+        }
+
+        private static List<EditorPaneFileEntry> EnumerateProjectFilesFromGit(string normalizedRootPath, CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrWhiteSpace(normalizedRootPath) || !Directory.Exists(normalizedRootPath))
+            {
+                return new List<EditorPaneFileEntry>();
+            }
+
+            try
+            {
+                using Process process = new()
+                {
+                    StartInfo = new ProcessStartInfo
+                    {
+                        FileName = "git.exe",
+                        UseShellExecute = false,
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                        CreateNoWindow = true,
+                    },
+                };
+                process.StartInfo.ArgumentList.Add("-C");
+                process.StartInfo.ArgumentList.Add(normalizedRootPath);
+                process.StartInfo.ArgumentList.Add("ls-files");
+                process.StartInfo.ArgumentList.Add("--cached");
+                process.StartInfo.ArgumentList.Add("--others");
+                process.StartInfo.ArgumentList.Add("--exclude-standard");
+
+                process.Start();
+                if (!process.WaitForExit(10_000))
+                {
+                    try
+                    {
+                        process.Kill(entireProcessTree: true);
+                    }
+                    catch
+                    {
+                    }
+
+                    return new List<EditorPaneFileEntry>();
+                }
+
+                cancellationToken.ThrowIfCancellationRequested();
+                if (process.ExitCode != 0)
+                {
+                    return new List<EditorPaneFileEntry>();
+                }
+
+                List<EditorPaneFileEntry> results = new();
+                foreach (string line in process.StandardOutput.ReadToEnd()
+                    .Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries))
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    string relativePath = line.Trim().Replace('\\', '/');
+                    if (string.IsNullOrWhiteSpace(relativePath))
+                    {
+                        continue;
+                    }
+
+                    string fullPath = Path.Combine(normalizedRootPath, relativePath.Replace('/', Path.DirectorySeparatorChar));
+                    if (!IsProbablyEditableFile(fullPath))
+                    {
+                        continue;
+                    }
+
+                    results.Add(new EditorPaneFileEntry
+                    {
+                        FullPath = fullPath,
+                        RelativePath = relativePath,
+                    });
+                }
+
+                return OrderProjectFileEntries(results);
+            }
+            catch
+            {
+                return new List<EditorPaneFileEntry>();
+            }
         }
 
         private static IEnumerable<string> EnumerateDirectoriesSafely(string path)
@@ -1742,6 +2166,33 @@ namespace SelfContainedDeployment.Panes
                 {
                     return match.FullPath;
                 }
+
+                List<EditorPaneFileEntry> suffixMatches = _files
+                    .Where(file =>
+                        file?.RelativePath is not null &&
+                        (file.RelativePath.EndsWith("/" + normalizedCandidatePath, StringComparison.OrdinalIgnoreCase) ||
+                         normalizedCandidatePath.EndsWith("/" + file.RelativePath, StringComparison.OrdinalIgnoreCase)))
+                    .Take(2)
+                    .ToList();
+                if (suffixMatches.Count == 1 && File.Exists(suffixMatches[0].FullPath))
+                {
+                    return suffixMatches[0].FullPath;
+                }
+
+                string candidateFileName = Path.GetFileName(normalizedCandidatePath);
+                if (!string.IsNullOrWhiteSpace(candidateFileName))
+                {
+                    List<EditorPaneFileEntry> fileNameMatches = _files
+                        .Where(file =>
+                            file?.RelativePath is not null &&
+                            string.Equals(Path.GetFileName(file.RelativePath), candidateFileName, StringComparison.OrdinalIgnoreCase))
+                        .Take(2)
+                        .ToList();
+                    if (fileNameMatches.Count == 1 && File.Exists(fileNameMatches[0].FullPath))
+                    {
+                        return fileNameMatches[0].FullPath;
+                    }
+                }
             }
 
             return resolvedPath;
@@ -1806,13 +2257,12 @@ namespace SelfContainedDeployment.Panes
                     candidate = fileUri.LocalPath;
                 }
 
-                string normalizedPath = ShellProfiles.NormalizeProjectPath(candidate);
-                if (ShellProfiles.TryResolveLocalStoragePath(normalizedPath, out string localPath))
+                if (ShellProfiles.TryResolveHostReadablePath(candidate, out string hostReadablePath))
                 {
-                    return Path.GetFullPath(localPath);
+                    return Path.GetFullPath(hostReadablePath);
                 }
 
-                return normalizedPath;
+                return null;
             }
             catch
             {

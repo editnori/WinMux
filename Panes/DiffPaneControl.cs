@@ -8,6 +8,7 @@ using SelfContainedDeployment.Git;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
@@ -101,7 +102,7 @@ namespace SelfContainedDeployment.Panes
             {
                 BorderBrush = ResolveBrush("ShellBorderBrush"),
                 BorderThickness = new Thickness(0, 0, 0, 1),
-                Padding = new Thickness(12, 10, 42, 10),
+                Padding = new Thickness(10, 7, 34, 7),
                 Background = ResolveBrush("ShellSurfaceBackgroundBrush"),
                 Visibility = Visibility.Collapsed,
             };
@@ -295,7 +296,7 @@ namespace SelfContainedDeployment.Panes
                 string.Equals(_currentPath ?? string.Empty, normalizedPath, StringComparison.Ordinal) &&
                 string.Equals(_currentDiff ?? string.Empty, normalizedDiff, StringComparison.Ordinal))
             {
-                _pathText.Text = string.IsNullOrWhiteSpace(path) ? "No diff selected" : path.Replace('\\', '/');
+                _pathText.Text = FormatDiffPathLabel(path);
                 _summaryText.Text = string.IsNullOrWhiteSpace(path)
                     ? "Choose a changed file from the inspector."
                     : "Patch view";
@@ -308,7 +309,7 @@ namespace SelfContainedDeployment.Panes
             _currentDiff = normalizedDiff;
             _showLoadingState = false;
 
-            _pathText.Text = string.IsNullOrWhiteSpace(path) ? "No diff selected" : path.Replace('\\', '/');
+            _pathText.Text = FormatDiffPathLabel(path);
             _summaryText.Text = string.IsNullOrWhiteSpace(path)
                 ? "Choose a changed file from the inspector."
                 : "Patch view";
@@ -323,7 +324,7 @@ namespace SelfContainedDeployment.Panes
             _currentPath = path ?? string.Empty;
             _currentDiff = string.Empty;
             _showLoadingState = true;
-            _pathText.Text = string.IsNullOrWhiteSpace(path) ? "No diff selected" : path.Replace('\\', '/');
+            _pathText.Text = FormatDiffPathLabel(path);
             _summaryText.Text = string.IsNullOrWhiteSpace(summary)
                 ? (string.IsNullOrWhiteSpace(path) ? "Choose a changed file from the inspector." : "Loading patch…")
                 : summary;
@@ -359,7 +360,7 @@ namespace SelfContainedDeployment.Panes
             _showLoadingState = false;
             _pathText.Text = string.IsNullOrWhiteSpace(selectedPath)
                 ? "All changed files"
-                : selectedPath.Replace('\\', '/');
+                : FormatDiffPathLabel(selectedPath);
             _summaryText.Text = $"{diffFiles.Count} files · Scroll to review the full patch";
             UpdateHeaderVisibility();
             RenderDiffSet(diffFiles, selectedPath);
@@ -714,7 +715,7 @@ namespace SelfContainedDeployment.Panes
 
             TextBlock title = new()
             {
-                Text = file.DisplayName,
+                Text = FormatDiffPathLabel(file.DisplayName),
                 FontSize = 12,
                 FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
                 Foreground = ResolveBrush("ShellTextPrimaryBrush"),
@@ -751,6 +752,54 @@ namespace SelfContainedDeployment.Panes
                 double offset = Math.Max(0, point.Y - 12);
                 _scrollViewer.ChangeView(null, offset, null, true);
             });
+        }
+
+        private static string FormatDiffPathLabel(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return "No diff selected";
+            }
+
+            string normalized = path.Replace('\\', '/').Trim().TrimEnd('/');
+            string fileName = Path.GetFileName(normalized);
+            string directory = Path.GetDirectoryName(normalized)?.Replace('\\', '/');
+            if (string.IsNullOrWhiteSpace(directory))
+            {
+                return string.IsNullOrWhiteSpace(fileName) ? normalized : fileName;
+            }
+
+            string compactDirectory = FormatCompactDiffPathContext(directory);
+            return string.IsNullOrWhiteSpace(fileName)
+                ? compactDirectory
+                : $"{fileName} · {compactDirectory}";
+        }
+
+        private static string FormatCompactDiffPathContext(string directoryPath, int maxSegments = 2)
+        {
+            if (string.IsNullOrWhiteSpace(directoryPath))
+            {
+                return "root";
+            }
+
+            string normalized = directoryPath.Trim().Trim('/');
+            if (string.IsNullOrWhiteSpace(normalized))
+            {
+                return "root";
+            }
+
+            string[] segments = normalized.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            if (segments.Length == 0)
+            {
+                return "root";
+            }
+
+            if (segments.Length <= maxSegments)
+            {
+                return string.Join("/", segments);
+            }
+
+            return $".../{string.Join("/", segments[^maxSegments..])}";
         }
 
         private static string BuildCombinedDiffText(IReadOnlyList<GitChangedFile> files)

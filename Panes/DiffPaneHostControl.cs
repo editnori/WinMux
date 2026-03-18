@@ -5,6 +5,7 @@ using Microsoft.UI.Xaml.Media;
 using SelfContainedDeployment.Git;
 using System;
 using System.Collections.Generic;
+using System.IO;
 
 namespace SelfContainedDeployment.Panes
 {
@@ -57,7 +58,7 @@ namespace SelfContainedDeployment.Panes
 
             _fileHeader = new Border
             {
-                Padding = new Thickness(10, 5, 40, 5),
+                Padding = new Thickness(8, 3, 32, 4),
                 BorderThickness = new Thickness(0, 0, 0, 1),
                 Visibility = Visibility.Collapsed,
                 Child = _fileHeaderText,
@@ -272,7 +273,9 @@ namespace SelfContainedDeployment.Panes
                 return;
             }
 
-            _fileHeaderText.Text = path.Replace('\\', '/');
+            string normalized = path.Replace('\\', '/').TrimEnd('/');
+            string fileName = Path.GetFileName(normalized);
+            _fileHeaderText.Text = string.IsNullOrWhiteSpace(fileName) ? normalized : fileName;
             _fileHeader.Visibility = Visibility.Visible;
         }
 
