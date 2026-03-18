@@ -3,6 +3,7 @@ using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Dispatching;
 using Microsoft.Web.WebView2.Core;
 using SelfContainedDeployment.Automation;
@@ -20,6 +21,7 @@ using System.Threading.Tasks;
 using System.Linq;
 using Windows.System;
 using Windows.Storage.Streams;
+using Windows.UI.ViewManagement;
 
 namespace SelfContainedDeployment.Panes
 {
@@ -84,6 +86,10 @@ namespace SelfContainedDeployment.Panes
         private int _lastResizeNotificationWidth;
         private int _lastResizeNotificationHeight;
         private double _lastAppliedZoomFactor = double.NaN;
+        private readonly UISettings _uiSettings = new();
+        private int _resizeMaskSequence;
+        private bool _liveResizeMode;
+        private DateTimeOffset _lastLiveResizeLayoutAt;
 
         private sealed class BrowserAutofillResult
         {
@@ -113,6 +119,7 @@ namespace SelfContainedDeployment.Panes
             RefreshBrowserTabStrip();
             UpdateNavigationButtons();
             UpdateAdaptiveChromeLayout();
+            ApplyBrowserSurfaceTheme();
         }
 
         internal static void PreloadBrowserEnvironmentIfAvailable()
@@ -205,6 +212,7 @@ namespace SelfContainedDeployment.Panes
         {
             _themePreference = theme;
             RequestedTheme = theme;
+            ApplyBrowserSurfaceTheme();
 
             if (_initialized && string.Equals(_currentUri, "winmux://start", StringComparison.OrdinalIgnoreCase))
             {
@@ -212,15 +220,70 @@ namespace SelfContainedDeployment.Panes
             }
         }
 
+        private bool AnimationsEnabled => _uiSettings?.AnimationsEnabled ?? true;
+
         private async Task RefreshStartPageForThemeChangeAsync()
         {
+            int maskSequence = ShowResizeMask();
             try
             {
-                await NavigateToStartPageAsync().ConfigureAwait(true);
+                if (_initialized && BrowserView.CoreWebView2 is not null)
+                {
+                    string themeName = ResolveCurrentThemeName();
+                    string script = $"(() => {{ if (window.__winmuxStartPage?.setTheme) {{ window.__winmuxStartPage.setTheme('{themeName}'); return true; }} return false; }})()";
+                    string result = await BrowserView.CoreWebView2.ExecuteScriptAsync(script).AsTask().ConfigureAwait(true);
+                    if (!string.Equals(result, "true", StringComparison.OrdinalIgnoreCase))
+                    {
+                        await NavigateToStartPageAsync().ConfigureAwait(true);
+                    }
+                }
+                else
+                {
+                    await NavigateToStartPageAsync().ConfigureAwait(true);
+                }
             }
             catch (Exception ex)
             {
-                HandleBrowserInitializationFailure(ex);
+                try
+                {
+                    await NavigateToStartPageAsync().ConfigureAwait(true);
+                }
+                catch
+                {
+                    HandleBrowserInitializationFailure(ex);
+                }
+            }
+            finally
+            {
+                _ = ReleaseResizeMaskAsync(maskSequence);
+            }
+        }
+
+        private string ResolveCurrentThemeName()
+        {
+            ElementTheme effectiveTheme = _themePreference == ElementTheme.Default ? ActualTheme : _themePreference;
+            return effectiveTheme == ElementTheme.Light ? "light" : "dark";
+        }
+
+        private void ApplyBrowserSurfaceTheme()
+        {
+            Windows.UI.Color backgroundColor = ResolveShellColor(
+                "ShellPageBackgroundBrush",
+                Windows.UI.Color.FromArgb(0xFF, 0xF5, 0xF6, 0xF8));
+
+            if (BrowserRoot is not null)
+            {
+                BrowserRoot.Background = new SolidColorBrush(backgroundColor);
+            }
+
+            if (BrowserResizeMask is not null)
+            {
+                BrowserResizeMask.Background = new SolidColorBrush(backgroundColor);
+            }
+
+            if (BrowserView is not null)
+            {
+                BrowserView.DefaultBackgroundColor = backgroundColor;
             }
         }
 
@@ -237,7 +300,22 @@ namespace SelfContainedDeployment.Panes
 
         public void RequestLayout()
         {
+            if (_liveResizeMode)
+            {
+                RequestImmediateLayoutRefresh();
+                return;
+            }
+
             QueueLayoutRefresh();
+        }
+
+        public void SetLiveResizeMode(bool enabled)
+        {
+            _liveResizeMode = enabled;
+            if (!enabled)
+            {
+                QueueLayoutRefresh();
+            }
         }
 
         public void RefreshCredentialAutofillState()
@@ -1097,11 +1175,17 @@ namespace SelfContainedDeployment.Panes
             return "ShellTextTertiaryBrush";
         }
 
-        private Brush ResolveShellBrush(string key)
+        private Windows.UI.Color ResolveShellColor(string key, Windows.UI.Color fallbackColor)
         {
             ElementTheme effectiveTheme = _themePreference == ElementTheme.Default
                 ? (ActualTheme == ElementTheme.Light ? ElementTheme.Light : ElementTheme.Dark)
                 : _themePreference;
+
+            return ResolveShellColorForTheme(effectiveTheme, key, fallbackColor);
+        }
+
+        private static Windows.UI.Color ResolveShellColorForTheme(ElementTheme effectiveTheme, string key, Windows.UI.Color fallbackColor)
+        {
 
             Windows.UI.Color color = (effectiveTheme, key) switch
             {
@@ -1132,6 +1216,12 @@ namespace SelfContainedDeployment.Panes
                 _ => default,
             };
 
+            return color != default ? color : fallbackColor;
+        }
+
+        private Brush ResolveShellBrush(string key)
+        {
+            Windows.UI.Color color = ResolveShellColor(key, default);
             if (color != default)
             {
                 return new SolidColorBrush(color);
@@ -1148,11 +1238,23 @@ namespace SelfContainedDeployment.Panes
             return $"#{color.R:X2}{color.G:X2}{color.B:X2}";
         }
 
+        private string ResolveCssColor(ElementTheme theme, string key, Windows.UI.Color fallbackColor)
+        {
+            Windows.UI.Color color = ResolveShellColorForTheme(theme, key, fallbackColor);
+            return $"#{color.R:X2}{color.G:X2}{color.B:X2}";
+        }
+
         private string ResolveCssColor(string key, byte alpha, Windows.UI.Color fallbackColor)
         {
             Windows.UI.Color color = ResolveShellBrush(key) is SolidColorBrush solid
                 ? solid.Color
                 : fallbackColor;
+            return $"rgba({color.R}, {color.G}, {color.B}, {(alpha / 255d).ToString("0.###", CultureInfo.InvariantCulture)})";
+        }
+
+        private string ResolveCssColor(ElementTheme theme, string key, byte alpha, Windows.UI.Color fallbackColor)
+        {
+            Windows.UI.Color color = ResolveShellColorForTheme(theme, key, fallbackColor);
             return $"rgba({color.R}, {color.G}, {color.B}, {(alpha / 255d).ToString("0.###", CultureInfo.InvariantCulture)})";
         }
 
@@ -1162,6 +1264,83 @@ namespace SelfContainedDeployment.Panes
                 ? solid.Color
                 : fallbackBaseColor;
             return new SolidColorBrush(Windows.UI.Color.FromArgb(alpha, baseColor.R, baseColor.G, baseColor.B));
+        }
+
+        private int ShowResizeMask()
+        {
+            _resizeMaskSequence++;
+
+            if (BrowserResizeMask is null)
+            {
+                return _resizeMaskSequence;
+            }
+
+            BrowserResizeMask.Visibility = Visibility.Visible;
+            BrowserResizeMask.Opacity = 0.96;
+            return _resizeMaskSequence;
+        }
+
+        private async Task ReleaseResizeMaskAsync(int maskSequence)
+        {
+            if (BrowserResizeMask is null || maskSequence != _resizeMaskSequence)
+            {
+                return;
+            }
+
+            if (!AnimationsEnabled)
+            {
+                BrowserResizeMask.Opacity = 0;
+                BrowserResizeMask.Visibility = Visibility.Collapsed;
+                return;
+            }
+
+            await Task.Delay(70).ConfigureAwait(true);
+            if (BrowserResizeMask is null || maskSequence != _resizeMaskSequence)
+            {
+                return;
+            }
+
+            await AnimateOpacityAsync(BrowserResizeMask, BrowserResizeMask.Opacity, 0, 140).ConfigureAwait(true);
+            if (BrowserResizeMask is not null && maskSequence == _resizeMaskSequence)
+            {
+                BrowserResizeMask.Opacity = 0;
+                BrowserResizeMask.Visibility = Visibility.Collapsed;
+            }
+        }
+
+        private Task AnimateOpacityAsync(FrameworkElement element, double from, double to, int durationMs)
+        {
+            if (element is null || !AnimationsEnabled || durationMs <= 0)
+            {
+                if (element is not null)
+                {
+                    element.Opacity = to;
+                }
+
+                return Task.CompletedTask;
+            }
+
+            var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            Storyboard storyboard = new();
+            DoubleAnimation opacityAnimation = new()
+            {
+                From = from,
+                To = to,
+                Duration = new Duration(TimeSpan.FromMilliseconds(durationMs)),
+                EasingFunction = new CubicEase
+                {
+                    EasingMode = EasingMode.EaseOut,
+                },
+                EnableDependentAnimation = true,
+            };
+
+            element.Opacity = from;
+            Storyboard.SetTarget(opacityAnimation, element);
+            Storyboard.SetTargetProperty(opacityAnimation, nameof(UIElement.Opacity));
+            storyboard.Children.Add(opacityAnimation);
+            storyboard.Completed += (_, _) => tcs.TrySetResult(true);
+            storyboard.Begin();
+            return tcs.Task;
         }
 
         private void ApplyBrowserTabButtonState(Button button, bool active)
@@ -1229,9 +1408,11 @@ namespace SelfContainedDeployment.Panes
 
         private void OnActualThemeChanged(FrameworkElement sender, object args)
         {
+            ApplyBrowserSurfaceTheme();
+
             if (_themePreference == ElementTheme.Default && string.Equals(_currentUri, "winmux://start", StringComparison.OrdinalIgnoreCase))
             {
-                _ = NavigateToStartPageAsync();
+                _ = RefreshStartPageForThemeChangeAsync();
             }
 
             UpdateBrowserTabSelectionVisuals();
@@ -1243,12 +1424,35 @@ namespace SelfContainedDeployment.Panes
             _layoutTimer.Start();
         }
 
+        private void RequestImmediateLayoutRefresh()
+        {
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            if ((now - _lastLiveResizeLayoutAt).TotalMilliseconds < 16)
+            {
+                return;
+            }
+
+            _lastLiveResizeLayoutAt = now;
+            _layoutTimer.Stop();
+            UpdateAdaptiveChromeLayout();
+            UpdateAdaptiveZoomFactor();
+            int maskSequence = _resizeMaskSequence;
+            _ = CompleteLayoutRefreshAsync(maskSequence);
+        }
+
         private void OnLayoutTimerTick(Microsoft.UI.Dispatching.DispatcherQueueTimer sender, object args)
         {
             _layoutTimer.Stop();
             UpdateAdaptiveChromeLayout();
             UpdateAdaptiveZoomFactor();
-            _ = NotifyBrowserResizedAsync();
+            int maskSequence = _resizeMaskSequence;
+            _ = CompleteLayoutRefreshAsync(maskSequence);
+        }
+
+        private async Task CompleteLayoutRefreshAsync(int maskSequence)
+        {
+            await NotifyBrowserResizedAsync().ConfigureAwait(true);
+            await ReleaseResizeMaskAsync(maskSequence).ConfigureAwait(true);
         }
 
         private async Task NavigateToStartPageAsync()
@@ -1538,6 +1742,13 @@ namespace SelfContainedDeployment.Panes
 
             _lastQueuedLayoutWidth = width;
             _lastQueuedLayoutHeight = height;
+            ShowResizeMask();
+            if (_liveResizeMode)
+            {
+                RequestImmediateLayoutRefresh();
+                return;
+            }
+
             QueueLayoutRefresh();
         }
 
@@ -2206,7 +2417,7 @@ namespace SelfContainedDeployment.Panes
 
         private string BuildStartPageHtml()
         {
-            bool darkTheme = (_themePreference == ElementTheme.Default ? ActualTheme : _themePreference) != ElementTheme.Light;
+            string initialTheme = ResolveCurrentThemeName();
             string projectName = WebUtility.HtmlEncode(string.IsNullOrWhiteSpace(ProjectName) ? "Project preview" : ProjectName);
             string projectPath = WebUtility.HtmlEncode(string.IsNullOrWhiteSpace(ProjectPath) ? "No active path yet." : ProjectPath);
             string rootLabel = WebUtility.HtmlEncode(string.IsNullOrWhiteSpace(ProjectRootPath)
@@ -2215,18 +2426,30 @@ namespace SelfContainedDeployment.Panes
             string profileStatus = WebUtility.HtmlEncode(string.IsNullOrWhiteSpace(_profileSeedStatus) ? "Isolated WinMux browser profile reused across panes and projects" : _profileSeedStatus);
             string extensionStatus = WebUtility.HtmlEncode(string.IsNullOrWhiteSpace(_extensionImportStatus) ? "No browser extensions are installed in this WinMux profile." : _extensionImportStatus);
             string credentialStatus = WebUtility.HtmlEncode(string.IsNullOrWhiteSpace(_credentialAutofillStatus) ? "No imported WinMux credentials." : _credentialAutofillStatus);
-            string background = ResolveCssColor("ShellPageBackgroundBrush", Windows.UI.Color.FromArgb(0xFF, 0xF5, 0xF6, 0xF8));
-            string surface = ResolveCssColor("ShellSurfaceBackgroundBrush", Windows.UI.Color.FromArgb(0xFF, 0xFB, 0xFC, 0xFD));
-            string mutedSurface = ResolveCssColor("ShellMutedSurfaceBrush", Windows.UI.Color.FromArgb(0xFF, 0xEE, 0xF1, 0xF4));
-            string border = ResolveCssColor("ShellBorderBrush", Windows.UI.Color.FromArgb(0xFF, 0xE1, 0xE5, 0xEA));
-            string borderSoft = ResolveCssColor("ShellBorderBrush", 0x88, Windows.UI.Color.FromArgb(0xFF, 0xE1, 0xE5, 0xEA));
-            string text = ResolveCssColor("ShellTextPrimaryBrush", Windows.UI.Color.FromArgb(0xFF, 0x1B, 0x1F, 0x24));
-            string subtext = ResolveCssColor("ShellTextSecondaryBrush", Windows.UI.Color.FromArgb(0xFF, 0x59, 0x60, 0x6A));
-            string faint = ResolveCssColor("ShellTextTertiaryBrush", Windows.UI.Color.FromArgb(0xFF, 0x7E, 0x86, 0x91));
-            string accent = ResolveCssColor("ShellPaneActiveBorderBrush", Windows.UI.Color.FromArgb(0xFF, 0x2C, 0x2D, 0x31));
-            string success = ResolveCssColor("ShellSuccessBrush", Windows.UI.Color.FromArgb(0xFF, 0x16, 0xA3, 0x4A));
-            string warning = ResolveCssColor("ShellWarningBrush", Windows.UI.Color.FromArgb(0xFF, 0xCA, 0x8A, 0x04));
-            string info = ResolveCssColor("ShellInfoBrush", Windows.UI.Color.FromArgb(0xFF, 0x25, 0x63, 0xEB));
+            string lightBackground = ResolveCssColor(ElementTheme.Light, "ShellPageBackgroundBrush", Windows.UI.Color.FromArgb(0xFF, 0xF5, 0xF6, 0xF8));
+            string lightSurface = ResolveCssColor(ElementTheme.Light, "ShellSurfaceBackgroundBrush", Windows.UI.Color.FromArgb(0xFF, 0xFB, 0xFC, 0xFD));
+            string lightMutedSurface = ResolveCssColor(ElementTheme.Light, "ShellMutedSurfaceBrush", Windows.UI.Color.FromArgb(0xFF, 0xEE, 0xF1, 0xF4));
+            string lightBorder = ResolveCssColor(ElementTheme.Light, "ShellBorderBrush", Windows.UI.Color.FromArgb(0xFF, 0xE1, 0xE5, 0xEA));
+            string lightBorderSoft = ResolveCssColor(ElementTheme.Light, "ShellBorderBrush", 0x88, Windows.UI.Color.FromArgb(0xFF, 0xE1, 0xE5, 0xEA));
+            string lightText = ResolveCssColor(ElementTheme.Light, "ShellTextPrimaryBrush", Windows.UI.Color.FromArgb(0xFF, 0x1B, 0x1F, 0x24));
+            string lightSubtext = ResolveCssColor(ElementTheme.Light, "ShellTextSecondaryBrush", Windows.UI.Color.FromArgb(0xFF, 0x59, 0x60, 0x6A));
+            string lightFaint = ResolveCssColor(ElementTheme.Light, "ShellTextTertiaryBrush", Windows.UI.Color.FromArgb(0xFF, 0x7E, 0x86, 0x91));
+            string lightAccent = ResolveCssColor(ElementTheme.Light, "ShellPaneActiveBorderBrush", Windows.UI.Color.FromArgb(0xFF, 0x2C, 0x2D, 0x31));
+            string lightSuccess = ResolveCssColor(ElementTheme.Light, "ShellSuccessBrush", Windows.UI.Color.FromArgb(0xFF, 0x16, 0xA3, 0x4A));
+            string lightWarning = ResolveCssColor(ElementTheme.Light, "ShellWarningBrush", Windows.UI.Color.FromArgb(0xFF, 0xCA, 0x8A, 0x04));
+            string lightInfo = ResolveCssColor(ElementTheme.Light, "ShellInfoBrush", Windows.UI.Color.FromArgb(0xFF, 0x25, 0x63, 0xEB));
+            string darkBackground = ResolveCssColor(ElementTheme.Dark, "ShellPageBackgroundBrush", Windows.UI.Color.FromArgb(0xFF, 0x0C, 0x0D, 0x10));
+            string darkSurface = ResolveCssColor(ElementTheme.Dark, "ShellSurfaceBackgroundBrush", Windows.UI.Color.FromArgb(0xFF, 0x10, 0x12, 0x16));
+            string darkMutedSurface = ResolveCssColor(ElementTheme.Dark, "ShellMutedSurfaceBrush", Windows.UI.Color.FromArgb(0xFF, 0x14, 0x16, 0x1B));
+            string darkBorder = ResolveCssColor(ElementTheme.Dark, "ShellBorderBrush", Windows.UI.Color.FromArgb(0xFF, 0x1E, 0x21, 0x27));
+            string darkBorderSoft = ResolveCssColor(ElementTheme.Dark, "ShellBorderBrush", 0x88, Windows.UI.Color.FromArgb(0xFF, 0x1E, 0x21, 0x27));
+            string darkText = ResolveCssColor(ElementTheme.Dark, "ShellTextPrimaryBrush", Windows.UI.Color.FromArgb(0xFF, 0xF3, 0xF4, 0xF6));
+            string darkSubtext = ResolveCssColor(ElementTheme.Dark, "ShellTextSecondaryBrush", Windows.UI.Color.FromArgb(0xFF, 0xA7, 0xAD, 0xB7));
+            string darkFaint = ResolveCssColor(ElementTheme.Dark, "ShellTextTertiaryBrush", Windows.UI.Color.FromArgb(0xFF, 0x7A, 0x80, 0x8B));
+            string darkAccent = ResolveCssColor(ElementTheme.Dark, "ShellPaneActiveBorderBrush", Windows.UI.Color.FromArgb(0xFF, 0xC9, 0xCD, 0xD4));
+            string darkSuccess = ResolveCssColor(ElementTheme.Dark, "ShellSuccessBrush", Windows.UI.Color.FromArgb(0xFF, 0x4A, 0xDE, 0x80));
+            string darkWarning = ResolveCssColor(ElementTheme.Dark, "ShellWarningBrush", Windows.UI.Color.FromArgb(0xFF, 0xFB, 0xBF, 0x24));
+            string darkInfo = ResolveCssColor(ElementTheme.Dark, "ShellInfoBrush", Windows.UI.Color.FromArgb(0xFF, 0x60, 0xA5, 0xFA));
 
             string[] previewUrls =
             {
@@ -2266,13 +2489,47 @@ namespace SelfContainedDeployment.Panes
   <title>{{projectName}}</title>
   <style>
     :root {
-      color-scheme: {{(darkTheme ? "dark" : "light")}};
+      color-scheme: light dark;
+      --ease-shell: cubic-bezier(0.22, 1, 0.36, 1);
     }
     body {
       margin: 0;
-      background: {{background}};
-      color: {{text}};
+      background: var(--background);
+      color: var(--text);
       font-family: "Segoe UI Variable Text", "Segoe UI", sans-serif;
+      transition:
+        background-color 160ms var(--ease-shell),
+        color 160ms var(--ease-shell);
+    }
+    body[data-theme="light"] {
+      color-scheme: light;
+      --background: {{lightBackground}};
+      --surface: {{lightSurface}};
+      --muted-surface: {{lightMutedSurface}};
+      --border: {{lightBorder}};
+      --border-soft: {{lightBorderSoft}};
+      --text: {{lightText}};
+      --subtext: {{lightSubtext}};
+      --faint: {{lightFaint}};
+      --accent: {{lightAccent}};
+      --success: {{lightSuccess}};
+      --warning: {{lightWarning}};
+      --info: {{lightInfo}};
+    }
+    body[data-theme="dark"] {
+      color-scheme: dark;
+      --background: {{darkBackground}};
+      --surface: {{darkSurface}};
+      --muted-surface: {{darkMutedSurface}};
+      --border: {{darkBorder}};
+      --border-soft: {{darkBorderSoft}};
+      --text: {{darkText}};
+      --subtext: {{darkSubtext}};
+      --faint: {{darkFaint}};
+      --accent: {{darkAccent}};
+      --success: {{darkSuccess}};
+      --warning: {{darkWarning}};
+      --info: {{darkInfo}};
     }
     .wrap {
       padding: 24px 26px 30px;
@@ -2284,7 +2541,8 @@ namespace SelfContainedDeployment.Panes
       display: grid;
       gap: 10px;
       padding-bottom: 12px;
-      border-bottom: 1px solid {{border}};
+      border-bottom: 1px solid var(--border);
+      transition: border-color 160ms var(--ease-shell);
     }
     .hero-top {
       display: flex;
@@ -2296,13 +2554,17 @@ namespace SelfContainedDeployment.Panes
       height: 24px;
       display: grid;
       place-items: center;
-      border: 1px solid {{border}};
+      border: 1px solid var(--border);
       border-radius: 4px;
-      background: {{surface}};
+      background: var(--surface);
       font-size: 8.5px;
       font-weight: 700;
       letter-spacing: 0.09em;
-      color: {{text}};
+      color: var(--text);
+      transition:
+        background-color 160ms var(--ease-shell),
+        border-color 160ms var(--ease-shell),
+        color 160ms var(--ease-shell);
     }
     .hero-copy,
     .hero-summary {
@@ -2315,7 +2577,7 @@ namespace SelfContainedDeployment.Panes
       font-weight: 600;
       letter-spacing: 0.08em;
       text-transform: uppercase;
-      color: {{faint}};
+      color: var(--faint);
     }
     h1 {
       margin: 0;
@@ -2325,9 +2587,10 @@ namespace SelfContainedDeployment.Panes
     }
     p {
       margin: 0;
-      color: {{subtext}};
+      color: var(--subtext);
       line-height: 1.45;
       max-width: 720px;
+      transition: color 160ms var(--ease-shell);
     }
     .grid {
       display: grid;
@@ -2353,16 +2616,16 @@ namespace SelfContainedDeployment.Panes
       font-weight: 600;
       letter-spacing: 0.08em;
       text-transform: uppercase;
-      color: {{faint}};
+      color: var(--faint);
     }
     .section-title {
       font-size: 13px;
       font-weight: 600;
-      color: {{text}};
+      color: var(--text);
     }
     .section-copy {
       font-size: 12px;
-      color: {{subtext}};
+      color: var(--subtext);
       line-height: 1.45;
     }
     .launches,
@@ -2376,16 +2639,19 @@ namespace SelfContainedDeployment.Panes
       align-items: center;
       gap: 10px;
       padding: 10px;
-      border: 1px solid {{border}};
+      border: 1px solid var(--border);
       border-radius: 4px;
-      background: {{surface}};
-      color: {{text}};
+      background: var(--surface);
+      color: var(--text);
       text-decoration: none;
-      transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
+      transition:
+        border-color 120ms var(--ease-shell),
+        background-color 120ms var(--ease-shell),
+        color 120ms var(--ease-shell);
     }
     .launch:hover {
-      border-color: {{accent}};
-      background: {{mutedSurface}};
+      border-color: var(--accent);
+      background: var(--muted-surface);
     }
     .launch-copy {
       display: grid;
@@ -2394,7 +2660,7 @@ namespace SelfContainedDeployment.Panes
     }
     .launch-kicker {
       font-size: 10.5px;
-      color: {{subtext}};
+      color: var(--subtext);
     }
     .launch-url {
       font-size: 12.5px;
@@ -2408,27 +2674,27 @@ namespace SelfContainedDeployment.Panes
       font-weight: 600;
       letter-spacing: 0.08em;
       text-transform: uppercase;
-      color: {{faint}};
+      color: var(--faint);
     }
     .facts {
-      border-top: 1px solid {{borderSoft}};
+      border-top: 1px solid var(--border-soft);
     }
     .fact {
       display: grid;
       gap: 3px;
       padding: 9px 0;
-      border-bottom: 1px solid {{borderSoft}};
+      border-bottom: 1px solid var(--border-soft);
     }
     .fact-title {
       font-size: 10.5px;
       font-weight: 600;
       letter-spacing: 0.08em;
       text-transform: uppercase;
-      color: {{faint}};
+      color: var(--faint);
     }
     .fact-value {
       font-size: 12px;
-      color: {{text}};
+      color: var(--text);
       line-height: 1.45;
       word-break: break-word;
     }
@@ -2441,7 +2707,7 @@ namespace SelfContainedDeployment.Panes
       flex-wrap: wrap;
       gap: 8px 14px;
       align-items: center;
-      color: {{subtext}};
+      color: var(--subtext);
       font-size: 11px;
     }
     .status-item {
@@ -2453,17 +2719,17 @@ namespace SelfContainedDeployment.Panes
       width: 5px;
       height: 5px;
       border-radius: 2.5px;
-      background: {{success}};
+      background: var(--success);
     }
     .status-dot.warning {
-      background: {{warning}};
+      background: var(--warning);
     }
     .status-dot.info {
-      background: {{info}};
+      background: var(--info);
     }
     code {
       font-family: Consolas, monospace;
-      color: {{text}};
+      color: var(--text);
     }
     @media (max-width: 760px) {
       .wrap {
@@ -2475,7 +2741,7 @@ namespace SelfContainedDeployment.Panes
     }
   </style>
 </head>
-<body>
+<body data-theme="{{initialTheme}}">
   <div class="wrap">
     <div class="hero">
       <div class="hero-top">
@@ -2551,6 +2817,25 @@ namespace SelfContainedDeployment.Panes
       </div>
     </div>
   </div>
+  <script>
+    (() => {
+      const normalizeTheme = (theme) => theme === 'light' ? 'light' : 'dark';
+      const applyTheme = (theme) => {
+        const resolved = normalizeTheme(theme);
+        document.body.dataset.theme = resolved;
+        document.documentElement.style.colorScheme = resolved;
+        return resolved;
+      };
+
+      window.__winmuxStartPage = {
+        setTheme(theme) {
+          return applyTheme(theme);
+        },
+      };
+
+      applyTheme('{{initialTheme}}');
+    })();
+  </script>
 </body>
 </html>
 """;

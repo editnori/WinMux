@@ -138,5 +138,14 @@
                   Margin="0,1,0,0"
                   Canvas.ZIndex="0"
                   AutomationProperties.AutomationId="browser-pane-webview" />
+
+        <Border x:Name="BrowserResizeMask"
+                Grid.Row="1"
+                Margin="0,1,0,0"
+                Background="{ThemeResource ShellPageBackgroundBrush}"
+                Canvas.ZIndex="1"
+                IsHitTestVisible="False"
+                Opacity="0"
+                Visibility="Collapsed" />
     </Grid>
 </UserControl>

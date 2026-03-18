@@ -6,6 +6,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Dispatching;
 using SelfContainedDeployment.Automation;
 using SelfContainedDeployment.Browser;
@@ -23,6 +24,7 @@ using System.Linq;
 using System.Text;
 using Windows.Storage.Pickers;
 using Windows.Foundation;
+using Windows.UI.ViewManagement;
 using WinRT.Interop;
 
 namespace SelfContainedDeployment
@@ -102,6 +104,7 @@ namespace SelfContainedDeployment
         private readonly List<WorkspaceProject> _projects = new();
         private readonly Dictionary<string, TabViewItem> _tabItemsById = new(StringComparer.Ordinal);
         private readonly Dictionary<string, Border> _paneContainersById = new(StringComparer.Ordinal);
+        private readonly List<Border> _paneSplitPreviewItems = new();
         private WorkspaceProject _activeProject;
         private WorkspaceThread _activeThread;
         private Border _activeSplitter;
@@ -111,6 +114,8 @@ namespace SelfContainedDeployment
         private double _splitterDragOriginY;
         private double _splitterStartPrimaryRatio;
         private double _splitterStartSecondaryRatio;
+        private double? _splitterPreviewPrimaryRatio;
+        private double? _splitterPreviewSecondaryRatio;
         private bool _showingSettings;
         private bool _suppressTabSelectionChanged;
         private bool _refreshingTabView;
@@ -125,6 +130,7 @@ namespace SelfContainedDeployment
         private bool _restoringSession;
         private bool _inspectorOpen = true;
         private int _threadSequence = 1;
+        private readonly UISettings _uiSettings;
         private readonly DispatcherQueueTimer _sessionSaveTimer;
         private readonly DispatcherQueueTimer _projectTreeRefreshTimer;
         private readonly DispatcherQueueTimer _gitRefreshTimer;
@@ -336,6 +342,7 @@ namespace SelfContainedDeployment
             Current = this;
             Loaded += OnLoaded;
             ActualThemeChanged += OnActualThemeChanged;
+            _uiSettings = new UISettings();
             _sessionSaveTimer = DispatcherQueue.CreateTimer();
             _sessionSaveTimer.IsRepeating = false;
             _sessionSaveTimer.Interval = TimeSpan.FromMilliseconds(1200);
@@ -456,11 +463,102 @@ namespace SelfContainedDeployment
             _lastPaneWorkspaceRenderKey = null;
             RenderPaneWorkspace();
             PaneWorkspaceGrid.Background = AppBrush(PaneWorkspaceGrid, "ShellPaneDividerBrush");
+            StartShellThemeTransition();
+            PlayShellLayoutTransition(includeSidebar: ShellSplitView?.IsPaneOpen == true, includeInspector: _inspectorOpen);
             LogAutomationEvent("shell", "theme.changed", $"Theme set to {ResolveTheme(theme).ToString().ToLowerInvariant()}", new Dictionary<string, string>
             {
                 ["theme"] = ResolveTheme(theme).ToString().ToLowerInvariant(),
             });
             QueueSessionSave();
+        }
+
+        private bool AnimationsEnabled => _uiSettings?.AnimationsEnabled ?? true;
+
+        private void PlayShellLayoutTransition(bool includeSidebar, bool includeInspector)
+        {
+            AnimateOpacity(ShellMainContent, 0.965, 1, 170);
+            AnimateOpacity(PaneWorkspaceShell, 0.94, 1, 170);
+
+            if (includeSidebar)
+            {
+                AnimateOpacity(SidebarScrollViewer, 0.84, 1, 160);
+                AnimateOpacity(SidebarFooterStack, 0.88, 1, 160);
+
+                if (PaneBrandTextStack?.Visibility == Visibility.Visible)
+                {
+                    AnimateOpacity(PaneBrandTextStack, 0, 1, 190);
+                }
+            }
+
+            if (includeInspector && InspectorSidebar?.Visibility == Visibility.Visible)
+            {
+                AnimateOpacity(InspectorSidebar, 0, 1, 190);
+            }
+        }
+
+        private void StartShellThemeTransition()
+        {
+            if (ShellThemeTransitionOverlay is null)
+            {
+                return;
+            }
+
+            if (!AnimationsEnabled)
+            {
+                ShellThemeTransitionOverlay.Opacity = 0;
+                ShellThemeTransitionOverlay.Visibility = Visibility.Collapsed;
+                return;
+            }
+
+            ShellThemeTransitionOverlay.Visibility = Visibility.Visible;
+            AnimateOpacity(ShellThemeTransitionOverlay, 1, 0, 180, () =>
+            {
+                if (ShellThemeTransitionOverlay is not null)
+                {
+                    ShellThemeTransitionOverlay.Opacity = 0;
+                    ShellThemeTransitionOverlay.Visibility = Visibility.Collapsed;
+                }
+            });
+        }
+
+        private void AnimateOpacity(FrameworkElement element, double from, double to, int durationMs, Action completed = null)
+        {
+            if (element is null)
+            {
+                completed?.Invoke();
+                return;
+            }
+
+            if (!AnimationsEnabled || durationMs <= 0)
+            {
+                element.Opacity = to;
+                completed?.Invoke();
+                return;
+            }
+
+            Storyboard storyboard = new();
+            DoubleAnimation opacityAnimation = new()
+            {
+                From = from,
+                To = to,
+                Duration = new Duration(TimeSpan.FromMilliseconds(durationMs)),
+                EasingFunction = new CubicEase
+                {
+                    EasingMode = EasingMode.EaseOut,
+                },
+                EnableDependentAnimation = true,
+            };
+
+            element.Opacity = from;
+            Storyboard.SetTarget(opacityAnimation, element);
+            Storyboard.SetTargetProperty(opacityAnimation, nameof(UIElement.Opacity));
+            storyboard.Children.Add(opacityAnimation);
+            if (completed is not null)
+            {
+                storyboard.Completed += (_, _) => completed();
+            }
+
+            storyboard.Begin();
         }
 
         public void ApplyShellProfile(string profileId)
@@ -1053,9 +1151,7 @@ namespace SelfContainedDeployment
                 switch (request.Action?.Trim().ToLowerInvariant())
                 {
                     case "togglepane":
-                        ShellSplitView.IsPaneOpen = !ShellSplitView.IsPaneOpen;
-                        UpdatePaneLayout();
-                        RequestLayoutForVisiblePanes();
+                        ToggleSidebarPane();
                         break;
                     case "showterminal":
                         ShowTerminalShell(queueGitRefresh: false);
@@ -1447,15 +1543,23 @@ namespace SelfContainedDeployment
                 _lastPaneWorkspaceRenderKey = null;
                 RenderPaneWorkspace();
                 PaneWorkspaceGrid.Background = AppBrush(PaneWorkspaceGrid, "ShellPaneDividerBrush");
+                StartShellThemeTransition();
+                PlayShellLayoutTransition(includeSidebar: ShellSplitView?.IsPaneOpen == true, includeInspector: _inspectorOpen);
             }
         }
 
         private void OnPaneToggleClicked(object sender, RoutedEventArgs e)
         {
+            ToggleSidebarPane();
+        }
+
+        private void ToggleSidebarPane()
+        {
             ShellSplitView.IsPaneOpen = !ShellSplitView.IsPaneOpen;
             UpdatePaneLayout();
             RequestLayoutForVisiblePanes();
             QueueSessionSave();
+            PlayShellLayoutTransition(includeSidebar: true, includeInspector: false);
         }
 
         private void OnSettingsNavClicked(object sender, RoutedEventArgs e)
@@ -8298,6 +8402,7 @@ namespace SelfContainedDeployment
             splitter.PointerMoved += OnPaneSplitterPointerMoved;
             splitter.PointerReleased += OnPaneSplitterPointerReleased;
             splitter.PointerCanceled += OnPaneSplitterPointerCanceled;
+            splitter.PointerCaptureLost += OnPaneSplitterPointerCaptureLost;
             splitter.PointerEntered += OnPaneSplitterPointerEntered;
             splitter.PointerExited += OnPaneSplitterPointerExited;
             splitter.DoubleTapped += OnPaneSplitterDoubleTapped;
@@ -8323,6 +8428,7 @@ namespace SelfContainedDeployment
             splitter.PointerMoved += OnPaneSplitterPointerMoved;
             splitter.PointerReleased += OnPaneSplitterPointerReleased;
             splitter.PointerCanceled += OnPaneSplitterPointerCanceled;
+            splitter.PointerCaptureLost += OnPaneSplitterPointerCaptureLost;
             splitter.PointerEntered += OnPaneSplitterPointerEntered;
             splitter.PointerExited += OnPaneSplitterPointerExited;
             splitter.DoubleTapped += OnPaneSplitterDoubleTapped;
@@ -8352,6 +8458,7 @@ namespace SelfContainedDeployment
             splitter.PointerMoved += OnPaneSplitterPointerMoved;
             splitter.PointerReleased += OnPaneSplitterPointerReleased;
             splitter.PointerCanceled += OnPaneSplitterPointerCanceled;
+            splitter.PointerCaptureLost += OnPaneSplitterPointerCaptureLost;
             splitter.PointerEntered += OnPaneSplitterPointerEntered;
             splitter.PointerExited += OnPaneSplitterPointerExited;
             splitter.DoubleTapped += OnPaneSplitterDoubleTapped;
@@ -8376,6 +8483,11 @@ namespace SelfContainedDeployment
             _splitterDragOriginY = point.Y;
             _splitterStartPrimaryRatio = _activeThread.PrimarySplitRatio;
             _splitterStartSecondaryRatio = _activeThread.SecondarySplitRatio;
+            _splitterPreviewPrimaryRatio = _splitterStartPrimaryRatio;
+            _splitterPreviewSecondaryRatio = _splitterStartSecondaryRatio;
+            ResetPaneSplitPreview();
+            ShowPaneSplitPreview();
+            UpdatePaneSplitPreviewVisuals();
             ApplyPaneSplitterVisual(splitter, emphasized: true);
             splitter.CapturePointer(e.Pointer);
             e.Handled = true;
@@ -8393,21 +8505,21 @@ namespace SelfContainedDeployment
 
             if (string.Equals(_activeSplitterDirection, "vertical", StringComparison.Ordinal))
             {
-                UpdatePaneSplitRatiosFromPointer(point, adjustPrimary: true, adjustSecondary: resizeBothAxes);
+                UpdatePaneSplitPreviewFromPointer(point, adjustPrimary: true, adjustSecondary: resizeBothAxes);
                 e.Handled = true;
                 return;
             }
 
             if (string.Equals(_activeSplitterDirection, "both", StringComparison.Ordinal))
             {
-                UpdatePaneSplitRatiosFromPointer(point, adjustPrimary: true, adjustSecondary: true);
+                UpdatePaneSplitPreviewFromPointer(point, adjustPrimary: true, adjustSecondary: true);
                 e.Handled = true;
                 return;
             }
 
             if (string.Equals(_activeSplitterDirection, "horizontal", StringComparison.Ordinal))
             {
-                UpdatePaneSplitRatiosFromPointer(point, adjustPrimary: resizeBothAxes, adjustSecondary: true);
+                UpdatePaneSplitPreviewFromPointer(point, adjustPrimary: resizeBothAxes, adjustSecondary: true);
                 e.Handled = true;
             }
         }
@@ -8422,22 +8534,29 @@ namespace SelfContainedDeployment
         {
             if (sender is Border splitter && ReferenceEquals(splitter, _activeSplitter) && _activeSplitterPointerId == e.Pointer.PointerId)
             {
+                CompletePaneSplitterInteraction(splitter, commitPreview: true);
                 splitter.ReleasePointerCapture(e.Pointer);
-                ApplyPaneSplitterVisual(splitter, emphasized: false);
-                ClearActiveSplitterTracking();
                 e.Handled = true;
             }
-
-            PersistActiveThreadSplitRatios();
         }
 
         private void OnPaneSplitterPointerCanceled(object sender, PointerRoutedEventArgs e)
         {
             if (sender is Border splitter && ReferenceEquals(splitter, _activeSplitter) && _activeSplitterPointerId == e.Pointer.PointerId)
             {
+                CompletePaneSplitterInteraction(splitter, commitPreview: false);
                 splitter.ReleasePointerCaptures();
-                ApplyPaneSplitterVisual(splitter, emphasized: false);
-                ClearActiveSplitterTracking();
+                e.Handled = true;
+            }
+        }
+
+        private void OnPaneSplitterPointerCaptureLost(object sender, PointerRoutedEventArgs e)
+        {
+            if (sender is Border splitter &&
+                ReferenceEquals(splitter, _activeSplitter) &&
+                (!_activeSplitterPointerId.HasValue || _activeSplitterPointerId == e.Pointer.PointerId))
+            {
+                CompletePaneSplitterInteraction(splitter, commitPreview: false);
                 e.Handled = true;
             }
         }
@@ -8482,11 +8601,40 @@ namespace SelfContainedDeployment
                 : CreateSidebarTintedBrush(AppBrush(PaneWorkspaceGrid, "ShellBorderBrush"), 0x20, Windows.UI.Color.FromArgb(0xFF, 0x7E, 0x86, 0x91));
         }
 
+        private void SetLiveResizeModeForVisiblePanes(bool enabled)
+        {
+            if (_activeThread is null)
+            {
+                return;
+            }
+
+            foreach (WorkspacePaneRecord pane in GetVisiblePanes(_activeThread))
+            {
+                switch (pane)
+                {
+                    case TerminalPaneRecord terminalPane:
+                        terminalPane.Terminal.SetLiveResizeMode(enabled);
+                        break;
+                    case BrowserPaneRecord browserPane:
+                        browserPane.Browser.SetLiveResizeMode(enabled);
+                        break;
+                    case EditorPaneRecord editorPane:
+                        editorPane.Editor.SetLiveResizeMode(enabled);
+                        break;
+                    case DiffPaneRecord diffPane:
+                        diffPane.DiffPane.SetLiveResizeMode(enabled);
+                        break;
+                }
+            }
+        }
+
         private void ClearActiveSplitterTracking()
         {
             _activeSplitter = null;
             _activeSplitterDirection = null;
             _activeSplitterPointerId = null;
+            _splitterPreviewPrimaryRatio = null;
+            _splitterPreviewSecondaryRatio = null;
         }
 
         private void PersistActiveThreadSplitRatios()
@@ -8529,12 +8677,15 @@ namespace SelfContainedDeployment
             });
         }
 
-        private void UpdatePaneSplitRatiosFromPointer(Point point, bool adjustPrimary, bool adjustSecondary)
+        private void UpdatePaneSplitPreviewFromPointer(Point point, bool adjustPrimary, bool adjustSecondary)
         {
             if (_activeThread is null)
             {
                 return;
             }
+
+            double horizontalOffset = 0;
+            double verticalOffset = 0;
 
             if (adjustPrimary && PaneWorkspaceGrid.ColumnDefinitions.Count >= 3)
             {
@@ -8544,9 +8695,8 @@ namespace SelfContainedDeployment
                 if (totalWidth > 0)
                 {
                     double nextLeftWidth = Math.Clamp((totalWidth * _splitterStartPrimaryRatio) + (point.X - _splitterDragOriginX), totalWidth * MinPaneSplitRatio, totalWidth * MaxPaneSplitRatio);
-                    _activeThread.PrimarySplitRatio = ClampPaneSplitRatio(nextLeftWidth / totalWidth);
-                    PaneWorkspaceGrid.ColumnDefinitions[0].Width = new GridLength(_activeThread.PrimarySplitRatio, GridUnitType.Star);
-                    PaneWorkspaceGrid.ColumnDefinitions[2].Width = new GridLength(1 - _activeThread.PrimarySplitRatio, GridUnitType.Star);
+                    _splitterPreviewPrimaryRatio = ClampPaneSplitRatio(nextLeftWidth / totalWidth);
+                    horizontalOffset = nextLeftWidth - (totalWidth * _splitterStartPrimaryRatio);
                 }
             }
 
@@ -8558,11 +8708,308 @@ namespace SelfContainedDeployment
                 if (totalHeight > 0)
                 {
                     double nextTopHeight = Math.Clamp((totalHeight * _splitterStartSecondaryRatio) + (point.Y - _splitterDragOriginY), totalHeight * MinPaneSplitRatio, totalHeight * MaxPaneSplitRatio);
-                    _activeThread.SecondarySplitRatio = ClampPaneSplitRatio(nextTopHeight / totalHeight);
-                    PaneWorkspaceGrid.RowDefinitions[0].Height = new GridLength(_activeThread.SecondarySplitRatio, GridUnitType.Star);
-                    PaneWorkspaceGrid.RowDefinitions[2].Height = new GridLength(1 - _activeThread.SecondarySplitRatio, GridUnitType.Star);
+                    _splitterPreviewSecondaryRatio = ClampPaneSplitRatio(nextTopHeight / totalHeight);
+                    verticalOffset = nextTopHeight - (totalHeight * _splitterStartSecondaryRatio);
                 }
             }
+
+            ApplyPaneSplitPreview(horizontalOffset, verticalOffset);
+            UpdatePaneSplitPreviewVisuals();
+        }
+
+        private void ApplyPaneSplitPreview(double horizontalOffset, double verticalOffset)
+        {
+            foreach (Border splitter in PaneWorkspaceGrid.Children.OfType<Border>())
+            {
+                string direction = splitter.Tag as string;
+                switch (direction)
+                {
+                    case "vertical":
+                        SetPaneSplitPreviewTransform(splitter, horizontalOffset, 0);
+                        break;
+                    case "horizontal":
+                        SetPaneSplitPreviewTransform(splitter, 0, verticalOffset);
+                        break;
+                    case "both":
+                        SetPaneSplitPreviewTransform(splitter, horizontalOffset, verticalOffset);
+                        break;
+                }
+            }
+        }
+
+        private void ShowPaneSplitPreview()
+        {
+            if (PaneSplitPreviewCanvas is null)
+            {
+                return;
+            }
+
+            PaneSplitPreviewCanvas.Children.Clear();
+            _paneSplitPreviewItems.Clear();
+            PaneSplitPreviewCanvas.Visibility = Visibility.Visible;
+        }
+
+        private void HidePaneSplitPreview()
+        {
+            if (PaneSplitPreviewCanvas is null)
+            {
+                return;
+            }
+
+            PaneSplitPreviewCanvas.Children.Clear();
+            _paneSplitPreviewItems.Clear();
+            PaneSplitPreviewCanvas.Visibility = Visibility.Collapsed;
+        }
+
+        private void UpdatePaneSplitPreviewVisuals()
+        {
+            if (PaneSplitPreviewCanvas is null || _activeThread is null || PaneSplitPreviewCanvas.Visibility != Visibility.Visible)
+            {
+                return;
+            }
+
+            List<(WorkspacePaneRecord Pane, Rect Bounds)> previewRects = BuildPaneSplitPreviewRects();
+            EnsurePaneSplitPreviewItems(previewRects.Count);
+
+            for (int index = 0; index < _paneSplitPreviewItems.Count; index++)
+            {
+                Border previewBorder = _paneSplitPreviewItems[index];
+                if (index >= previewRects.Count)
+                {
+                    previewBorder.Visibility = Visibility.Collapsed;
+                    continue;
+                }
+
+                (WorkspacePaneRecord pane, Rect bounds) = previewRects[index];
+                Rect insetBounds = InsetPreviewRect(bounds, 6);
+                previewBorder.Width = Math.Max(0, insetBounds.Width);
+                previewBorder.Height = Math.Max(0, insetBounds.Height);
+                Canvas.SetLeft(previewBorder, insetBounds.X);
+                Canvas.SetTop(previewBorder, insetBounds.Y);
+                previewBorder.Visibility = Visibility.Visible;
+
+                Brush accentBrush = AppBrush(PaneWorkspaceGrid, ResolvePaneAccentBrushKey(pane.Kind));
+                previewBorder.BorderBrush = CreateSidebarTintedBrush(accentBrush, 0x7C, Windows.UI.Color.FromArgb(0xFF, 0x33, 0x41, 0x55));
+                previewBorder.Background = CreateSidebarTintedBrush(accentBrush, 0x14, Windows.UI.Color.FromArgb(0xFF, 0x33, 0x41, 0x55));
+                if (previewBorder.Child is Grid previewContent)
+                {
+                    previewContent.Background = null;
+                    if (previewContent.Children.OfType<TextBlock>().FirstOrDefault() is TextBlock label)
+                    {
+                        label.Text = BuildOverviewPaneLabel(pane);
+                        label.Foreground = accentBrush;
+                    }
+                }
+            }
+        }
+
+        private void EnsurePaneSplitPreviewItems(int count)
+        {
+            if (PaneSplitPreviewCanvas is null)
+            {
+                return;
+            }
+
+            while (_paneSplitPreviewItems.Count < count)
+            {
+                TextBlock label = new()
+                {
+                    FontSize = 11,
+                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                    Margin = new Thickness(8, 6, 8, 0),
+                    HorizontalAlignment = HorizontalAlignment.Left,
+                    VerticalAlignment = VerticalAlignment.Top,
+                };
+
+                Grid previewContent = new();
+                previewContent.Children.Add(label);
+
+                Border previewBorder = new()
+                {
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(6),
+                    IsHitTestVisible = false,
+                    Opacity = 1,
+                    Child = previewContent,
+                };
+
+                previewBorder.Visibility = Visibility.Collapsed;
+                _paneSplitPreviewItems.Add(previewBorder);
+                PaneSplitPreviewCanvas.Children.Add(previewBorder);
+            }
+        }
+
+        private List<(WorkspacePaneRecord Pane, Rect Bounds)> BuildPaneSplitPreviewRects()
+        {
+            List<(WorkspacePaneRecord Pane, Rect Bounds)> result = new();
+            if (_activeThread is null || PaneWorkspaceGrid is null)
+            {
+                return result;
+            }
+
+            List<WorkspacePaneRecord> visiblePanes = GetVisiblePanes(_activeThread).ToList();
+            if (visiblePanes.Count == 0)
+            {
+                return result;
+            }
+
+            double totalWidth = Math.Max(0, PaneWorkspaceGrid.ActualWidth);
+            double totalHeight = Math.Max(0, PaneWorkspaceGrid.ActualHeight);
+            if (totalWidth <= 1 || totalHeight <= 1)
+            {
+                return result;
+            }
+
+            double primaryRatio = _splitterPreviewPrimaryRatio ?? _activeThread.PrimarySplitRatio;
+            double secondaryRatio = _splitterPreviewSecondaryRatio ?? _activeThread.SecondarySplitRatio;
+            double splitWidth = Math.Max(0, totalWidth - PaneDividerThickness);
+            double splitHeight = Math.Max(0, totalHeight - PaneDividerThickness);
+            double leftWidth = splitWidth * primaryRatio;
+            double rightWidth = splitWidth - leftWidth;
+            double topHeight = splitHeight * secondaryRatio;
+            double bottomHeight = splitHeight - topHeight;
+
+            switch (visiblePanes.Count)
+            {
+                case 1:
+                    result.Add((visiblePanes[0], new Rect(0, 0, totalWidth, totalHeight)));
+                    break;
+                case 2:
+                    result.Add((visiblePanes[0], new Rect(0, 0, leftWidth, totalHeight)));
+                    result.Add((visiblePanes[1], new Rect(leftWidth + PaneDividerThickness, 0, rightWidth, totalHeight)));
+                    break;
+                case 3:
+                    result.Add((visiblePanes[0], new Rect(0, 0, leftWidth, totalHeight)));
+                    result.Add((visiblePanes[1], new Rect(leftWidth + PaneDividerThickness, 0, rightWidth, topHeight)));
+                    result.Add((visiblePanes[2], new Rect(leftWidth + PaneDividerThickness, topHeight + PaneDividerThickness, rightWidth, bottomHeight)));
+                    break;
+                default:
+                    result.Add((visiblePanes[0], new Rect(0, 0, leftWidth, topHeight)));
+                    result.Add((visiblePanes[1], new Rect(leftWidth + PaneDividerThickness, 0, rightWidth, topHeight)));
+                    result.Add((visiblePanes[2], new Rect(0, topHeight + PaneDividerThickness, leftWidth, bottomHeight)));
+                    result.Add((visiblePanes[3], new Rect(leftWidth + PaneDividerThickness, topHeight + PaneDividerThickness, rightWidth, bottomHeight)));
+                    break;
+            }
+
+            return result;
+        }
+
+        private static Rect InsetPreviewRect(Rect bounds, double inset)
+        {
+            double safeInsetX = Math.Min(inset, bounds.Width / 2);
+            double safeInsetY = Math.Min(inset, bounds.Height / 2);
+            return new Rect(
+                bounds.X + safeInsetX,
+                bounds.Y + safeInsetY,
+                Math.Max(0, bounds.Width - (safeInsetX * 2)),
+                Math.Max(0, bounds.Height - (safeInsetY * 2)));
+        }
+
+        private static void SetPaneSplitPreviewTransform(UIElement element, double x, double y)
+        {
+            if (element is null)
+            {
+                return;
+            }
+
+            if (Math.Abs(x) < 0.01 && Math.Abs(y) < 0.01)
+            {
+                element.RenderTransform = null;
+                return;
+            }
+
+            if (element.RenderTransform is not TranslateTransform transform)
+            {
+                transform = new TranslateTransform();
+                element.RenderTransform = transform;
+            }
+
+            transform.X = x;
+            transform.Y = y;
+        }
+
+        private void ResetPaneSplitPreview()
+        {
+            ApplyPaneSplitPreview(0, 0);
+        }
+
+        private void CompletePaneSplitterInteraction(Border splitter, bool commitPreview)
+        {
+            ApplyPaneSplitterVisual(splitter, emphasized: false);
+
+            if (commitPreview)
+            {
+                CommitPaneSplitPreviewRatios();
+            }
+
+            ResetPaneSplitPreview();
+            HidePaneSplitPreview();
+            ClearActiveSplitterTracking();
+            RequestLayoutForVisiblePanes();
+        }
+
+        private void CommitPaneSplitPreviewRatios()
+        {
+            if (_activeThread is null)
+            {
+                return;
+            }
+
+            bool changed = false;
+
+            if (_splitterPreviewPrimaryRatio is double previewPrimary &&
+                Math.Abs(previewPrimary - _activeThread.PrimarySplitRatio) > 0.0005)
+            {
+                _activeThread.PrimarySplitRatio = ClampPaneSplitRatio(previewPrimary);
+                changed = true;
+            }
+
+            if (_splitterPreviewSecondaryRatio is double previewSecondary &&
+                Math.Abs(previewSecondary - _activeThread.SecondarySplitRatio) > 0.0005)
+            {
+                _activeThread.SecondarySplitRatio = ClampPaneSplitRatio(previewSecondary);
+                changed = true;
+            }
+
+            ApplyCommittedPaneSplitRatios();
+
+            if (!changed)
+            {
+                return;
+            }
+
+            QueueProjectTreeRefresh();
+            QueueSessionSave();
+            LogAutomationEvent("render", "pane.split_resized", "Updated pane split ratios", new Dictionary<string, string>
+            {
+                ["threadId"] = _activeThread.Id,
+                ["projectId"] = _activeProject?.Id ?? string.Empty,
+                ["primarySplitRatio"] = _activeThread.PrimarySplitRatio.ToString("0.000"),
+                ["secondarySplitRatio"] = _activeThread.SecondarySplitRatio.ToString("0.000"),
+            });
+        }
+
+        private void ApplyCommittedPaneSplitRatios()
+        {
+            if (_activeThread is null)
+            {
+                return;
+            }
+
+            if (PaneWorkspaceGrid.ColumnDefinitions.Count >= 3)
+            {
+                PaneWorkspaceGrid.ColumnDefinitions[0].Width = new GridLength(_activeThread.PrimarySplitRatio, GridUnitType.Star);
+                PaneWorkspaceGrid.ColumnDefinitions[2].Width = new GridLength(1 - _activeThread.PrimarySplitRatio, GridUnitType.Star);
+            }
+
+            if (PaneWorkspaceGrid.RowDefinitions.Count >= 3)
+            {
+                PaneWorkspaceGrid.RowDefinitions[0].Height = new GridLength(_activeThread.SecondarySplitRatio, GridUnitType.Star);
+                PaneWorkspaceGrid.RowDefinitions[2].Height = new GridLength(1 - _activeThread.SecondarySplitRatio, GridUnitType.Star);
+            }
+
+            PaneWorkspaceGrid.UpdateLayout();
         }
 
         private void EqualizeVisiblePaneSplits(WorkspaceThread thread, bool equalizePrimary, bool equalizeSecondary, string reason)
@@ -10052,6 +10499,7 @@ namespace SelfContainedDeployment
             UpdateInspectorVisibility();
             _lastPaneWorkspaceRenderKey = null;
             QueueSessionSave();
+            PlayShellLayoutTransition(includeSidebar: false, includeInspector: true);
             LogAutomationEvent("shell", "inspector.toggled", _inspectorOpen ? "Inspector opened" : "Inspector collapsed", new Dictionary<string, string>
             {
                 ["inspectorOpen"] = _inspectorOpen.ToString(),

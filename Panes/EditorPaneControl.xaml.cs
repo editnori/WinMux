@@ -197,6 +197,8 @@ namespace SelfContainedDeployment.Panes
         private bool _fitWidthRequested;
         private double _lastAppliedZoomFactor = double.NaN;
         private int _maxVisibleLineLength;
+        private bool _liveResizeMode;
+        private DateTimeOffset _lastLiveResizeLayoutAt;
 
         public EditorPaneControl()
         {
@@ -280,7 +282,22 @@ namespace SelfContainedDeployment.Panes
 
         public void RequestLayout()
         {
+            if (_liveResizeMode)
+            {
+                RequestImmediateLayout();
+                return;
+            }
+
             QueueEditorLayout(force: true);
+        }
+
+        public void SetLiveResizeMode(bool enabled)
+        {
+            _liveResizeMode = enabled;
+            if (!enabled)
+            {
+                QueueEditorLayout(force: true);
+            }
         }
 
         public void ApplyFitToWidth(bool autoLock)
@@ -1099,7 +1116,26 @@ namespace SelfContainedDeployment.Panes
                 return;
             }
 
+            if (_liveResizeMode)
+            {
+                RequestImmediateLayout();
+                return;
+            }
+
             QueueEditorLayout(force: false);
+        }
+
+        private void RequestImmediateLayout()
+        {
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            if ((now - _lastLiveResizeLayoutAt).TotalMilliseconds < 16)
+            {
+                return;
+            }
+
+            _lastLiveResizeLayoutAt = now;
+            _layoutTimer.Stop();
+            _ = ApplyImmediateLayoutAsync();
         }
 
         private void QueueEditorLayout(bool force)
@@ -1107,6 +1143,22 @@ namespace SelfContainedDeployment.Panes
             _forceLayoutPending |= force;
             _layoutTimer.Stop();
             _layoutTimer.Start();
+        }
+
+        private async Task ApplyImmediateLayoutAsync()
+        {
+            double width = Math.Round(ActualWidth);
+            double height = Math.Round(ActualHeight);
+            if (width <= 1 || height <= 1)
+            {
+                return;
+            }
+
+            _lastLayoutWidth = width;
+            _lastLayoutHeight = height;
+            _forceLayoutPending = false;
+            await ExecuteEditorScriptAsync("window.__winmuxEditorHost?.layout?.();").ConfigureAwait(true);
+            await ApplyFitWidthAsync().ConfigureAwait(true);
         }
 
         private async void OnLayoutTimerTick(DispatcherQueueTimer sender, object args)

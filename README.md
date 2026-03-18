@@ -4,7 +4,7 @@ WinMux is a native Windows workspace shell built with WinUI 3, ConPTY, and WebVi
 
 It combines terminals, browser panes, editor panes, patch review, worktree-aware threads, session restore, and a full native automation surface that can be driven from Bun. The repo is set up so a human can use the shell directly while an LLM can inspect, drive, screenshot, and record the exact same native app.
 
-![WinMux workspace](docs/media/winmux-screenshot.png)
+![WinMux workspace showcase](docs/media/winmux-workspace-showcase.png)
 
 ## Download
 
@@ -14,12 +14,15 @@ It combines terminals, browser panes, editor panes, patch review, worktree-aware
 
 The release asset is a real installer `.exe` that installs WinMux under `%LocalAppData%\Programs\WinMux` and can launch it immediately after setup.
 
-## New in alpha-v0.1.4
+## Current shell snapshot
 
-- Notes now edit directly in-place inside the inspector, support archive and restore, and stay grouped by thread when you switch to project scope.
-- Sidebar thread rows, pane tabs, and pane-strip actions now share the same pane-type iconography and color language across browser, editor, diff, and terminal surfaces.
-- Terminal surfaces now adapt their accent treatment to the active shell context while keeping the shell chrome flatter and less boxed-in.
-- Release packaging is cleaner: self-contained RID builds carry the right assets forward and the build excludes stray generated artifacts.
+WinMux is no longer the original sample shell. The current app now centers on a denser native workspace model:
+
+- project-scoped threads with per-thread pane workspaces and a top pane strip
+- terminal, browser, editor, and patch review surfaces that can all stay visible together
+- worktree-aware thread metadata, diff review, and inspector-driven file context
+- autosaved session replay plus native automation for screenshots, recordings, render traces, and UI control
+- smoother shell polish across sidebar toggles, pane drag preview, theme changes, and heavy pane redraw paths
 
 ## Demo
 
@@ -27,14 +30,14 @@ The release asset is a real installer `.exe` that installs WinMux under `%LocalA
 
 [Watch the overview clip](docs/media/winmux-demo.mp4)
 
-The overview clip shows:
+The current walkthrough shows:
 
-- a dense quad-pane workspace with terminal, editor, browser, and diff review in one shell
-- project and thread flows with overflow behavior instead of endlessly shrinking panes
-- inspector-side file navigation and live git context while review panes stay in the workspace
-- the real native app being driven and captured through the built-in automation surface
+- a scripted workspace showcase from the live native shell, not a mocked browser demo
+- quad-pane terminal, editor, browser, and diff review working in one thread
+- the refactored pane strip, project/thread shell, and workspace-scoped browser/editor surfaces
+- the current patch review workflow and automation-driven capture pipeline used for release media
 
-![WinMux overview](docs/media/winmux-overview-light.png)
+![WinMux patch review](docs/media/winmux-patch-review.png)
 
 ## What WinMux does
 
@@ -92,6 +95,11 @@ bun run native:screenshot
 ## Cinematic recordings
 
 The repo now includes a recording suite intended for public demos and shareable walkthroughs.
+
+The media used in this README comes from the same automation path:
+
+- `bun run native:workspace-showcase-recording`
+- `bun run native:patch-review-recording`
 
 The main entrypoint is:
 

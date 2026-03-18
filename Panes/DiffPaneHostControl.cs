@@ -132,6 +132,15 @@ namespace SelfContainedDeployment.Panes
             }
         }
 
+        public void SetLiveResizeMode(bool enabled)
+        {
+            _comparePane.SetLiveResizeMode(enabled);
+            if (!enabled)
+            {
+                RequestLayout();
+            }
+        }
+
         public void DisposePane()
         {
             _comparePane.DisposePane();

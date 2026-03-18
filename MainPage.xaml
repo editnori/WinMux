@@ -69,9 +69,17 @@
                             </Grid>
                         </Border>
 
-                        <ScrollViewer Grid.Row="1"
+                        <ScrollViewer x:Name="SidebarScrollViewer"
+                                      Grid.Row="1"
                                       VerticalScrollBarVisibility="Auto"
                                       VerticalScrollMode="Auto">
+                            <ScrollViewer.Transitions>
+                                <TransitionCollection>
+                                    <EntranceThemeTransition FromHorizontalOffset="10"
+                                                             IsStaggeringEnabled="False" />
+                                    <RepositionThemeTransition />
+                                </TransitionCollection>
+                            </ScrollViewer.Transitions>
                             <StackPanel Margin="0,6,0,8">
                                 <TextBlock x:Name="ProjectSectionText"
                                            Margin="8,0,8,6"
@@ -86,10 +94,18 @@
                             </StackPanel>
                         </ScrollViewer>
 
-                        <StackPanel Grid.Row="2"
+                        <StackPanel x:Name="SidebarFooterStack"
+                                    Grid.Row="2"
                                     AutomationProperties.AutomationId="shell-sidebar-footer"
                                     Margin="4,8,4,6"
                                     Spacing="3">
+                            <StackPanel.Transitions>
+                                <TransitionCollection>
+                                    <EntranceThemeTransition FromVerticalOffset="8"
+                                                             IsStaggeringEnabled="False" />
+                                    <RepositionThemeTransition />
+                                </TransitionCollection>
+                            </StackPanel.Transitions>
                             <Button x:Name="NewProjectButton"
                                     AutomationProperties.AutomationId="shell-new-project"
                                     Style="{StaticResource ShellSidebarPrimaryButtonStyle}"
@@ -124,9 +140,15 @@
                 </Border>
             </SplitView.Pane>
 
-                <Grid AutomationProperties.AutomationId="shell-main-content"
-                  Background="{ThemeResource ShellPageBackgroundBrush}"
-                  Margin="0">
+                <Grid x:Name="ShellMainContent"
+                      AutomationProperties.AutomationId="shell-main-content"
+                      Background="{ThemeResource ShellPageBackgroundBrush}"
+                      Margin="0">
+                    <Grid.Transitions>
+                        <TransitionCollection>
+                            <RepositionThemeTransition />
+                        </TransitionCollection>
+                    </Grid.Transitions>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="36" />
                     <RowDefinition Height="*" />
@@ -185,6 +207,11 @@
                         <SplitView.Content>
                             <Grid x:Name="PaneWorkspaceShell"
                                   AutomationProperties.AutomationId="shell-pane-workspace">
+                                <Grid.Transitions>
+                                    <TransitionCollection>
+                                        <RepositionThemeTransition />
+                                    </TransitionCollection>
+                                </Grid.Transitions>
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="36" />
                                     <RowDefinition Height="*" />
@@ -253,6 +280,12 @@
                                       Grid.Row="1"
                                       AutomationProperties.AutomationId="shell-pane-grid"
                                       Background="{ThemeResource ShellPaneDividerBrush}" />
+
+                                <Canvas x:Name="PaneSplitPreviewCanvas"
+                                        Grid.Row="1"
+                                        AutomationProperties.AutomationId="shell-pane-split-preview"
+                                        IsHitTestVisible="False"
+                                        Visibility="Collapsed" />
                             </Grid>
                         </SplitView.Content>
 
@@ -262,6 +295,13 @@
                                     Background="{ThemeResource ShellSurfaceBackgroundBrush}"
                                     BorderBrush="{ThemeResource ShellBorderBrush}"
                                     BorderThickness="1,0,0,0">
+                                <Border.Transitions>
+                                    <TransitionCollection>
+                                        <EntranceThemeTransition FromHorizontalOffset="20"
+                                                                 IsStaggeringEnabled="False" />
+                                        <RepositionThemeTransition />
+                                    </TransitionCollection>
+                                </Border.Transitions>
                                 <Grid RowDefinitions="Auto,*">
                                     <Grid Padding="10,9,10,8"
                                           BorderBrush="{ThemeResource ShellBorderBrush}"
@@ -914,6 +954,13 @@
                 AutomationProperties.AutomationId="shell-automation-overlay"
                 Background="Transparent"
                 IsHitTestVisible="False"
+                Visibility="Collapsed" />
+
+        <Border x:Name="ShellThemeTransitionOverlay"
+                AutomationProperties.AutomationId="shell-theme-transition-overlay"
+                Background="{ThemeResource ShellPageBackgroundBrush}"
+                IsHitTestVisible="False"
+                Opacity="0"
                 Visibility="Collapsed" />
     </Grid>
 </Page>

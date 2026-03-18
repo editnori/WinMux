@@ -72,6 +72,8 @@ namespace SelfContainedDeployment.Terminal
         private string _restoreReplayCommand;
         private string _toolLaunchArguments;
         private string _headerTitleOverride;
+        private bool _liveResizeMode;
+        private DateTimeOffset _lastLiveResizeFitAt;
 
         public event EventHandler<string> SessionTitleChanged;
         public event EventHandler RendererReady;
@@ -725,6 +727,15 @@ namespace SelfContainedDeployment.Terminal
             _fitTimer.Start();
         }
 
+        public void SetLiveResizeMode(bool enabled)
+        {
+            _liveResizeMode = enabled;
+            if (!enabled)
+            {
+                RequestFit();
+            }
+        }
+
         public async Task<NativeAutomationTerminalSnapshot> GetTerminalSnapshotAsync()
         {
             NativeAutomationTerminalSnapshot fallback = BuildFallbackTerminalSnapshot();
@@ -932,7 +943,26 @@ namespace SelfContainedDeployment.Terminal
                 return;
             }
 
+            if (_liveResizeMode)
+            {
+                RequestImmediateFit();
+                return;
+            }
+
             RequestFit();
+        }
+
+        private void RequestImmediateFit()
+        {
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            if ((now - _lastLiveResizeFitAt).TotalMilliseconds < 16)
+            {
+                return;
+            }
+
+            _lastLiveResizeFitAt = now;
+            _fitTimer.Stop();
+            OnFitTimerTick(_fitTimer, null);
         }
 
         private void OnFitTimerTick(DispatcherQueueTimer sender, object args)
