@@ -4388,6 +4388,7 @@ namespace SelfContainedDeployment
                     EditorFilePath = deferredPane.EditorFilePath,
                     ReplayTool = pane.ReplayTool,
                     ReplaySessionId = pane.ReplaySessionId,
+                    ReplayCommand = pane.ReplayCommand,
                     ReplayArguments = pane.ReplayArguments,
                 };
             }
@@ -4414,6 +4415,7 @@ namespace SelfContainedDeployment
                 EditorFilePath = pane is EditorPaneRecord editorPane ? editorPane.Editor.SelectedFilePath : null,
                 ReplayTool = pane.ReplayTool,
                 ReplaySessionId = pane.ReplaySessionId,
+                ReplayCommand = pane.ReplayCommand,
                 ReplayArguments = pane.ReplayArguments,
             };
         }
@@ -5887,14 +5889,15 @@ namespace SelfContainedDeployment
                 return false;
             }
 
-            if (TerminalControl.TryBuildReplayRestoreCommand(snapshot.ReplayTool, snapshot.ReplaySessionId, snapshot.ReplayArguments, out restoreReplayCommand))
+            if (!string.IsNullOrWhiteSpace(snapshot.ReplayArguments) &&
+                TerminalControl.TryBuildReplayRestoreCommand(snapshot.ReplayTool, snapshot.ReplaySessionId, snapshot.ReplayArguments, out restoreReplayCommand))
             {
                 return true;
             }
 
             if (!TerminalControl.TryExtractReplayCommandMetadata(snapshot.ReplayCommand, out string replayTool, out string replaySessionId, out string replayArguments))
             {
-                return false;
+                return TerminalControl.TryBuildReplayRestoreCommand(snapshot.ReplayTool, snapshot.ReplaySessionId, snapshot.ReplayArguments, out restoreReplayCommand);
             }
 
             snapshot.ReplayTool = replayTool;
@@ -12575,6 +12578,12 @@ namespace SelfContainedDeployment
             if (ShellProfiles.TryResolveLocalStoragePath(normalizedPath, out string localStoragePath))
             {
                 pathToCheck = localStoragePath;
+            }
+            else if (normalizedPath.StartsWith("/", StringComparison.Ordinal))
+            {
+                // WSL Linux paths are valid project roots even though Win32 Directory.Exists
+                // cannot verify them directly from the host process.
+                return true;
             }
 
             if (Directory.Exists(pathToCheck))

@@ -30,7 +30,7 @@ namespace SelfContainedDeployment.Terminal
         private static readonly Regex CodexResumeInlineRegex = new(@"^codex\s+resume\s+([0-9a-f-]+)\s*(.*)$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
         private static readonly Regex ClaudeResumeInlineRegex = new(@"^claude\s+--resume\s+([0-9a-f-]+)\s*(.*)$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
         private static readonly Regex ReplaySessionIdRegex = new(@"^[0-9a-f-]{8,128}$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-        private static readonly Regex SafeReplayArgumentsRegex = new(@"^[A-Za-z0-9 _./:=+,@%-]{0,256}$", RegexOptions.Compiled);
+        private static readonly Regex SafeReplayArgumentsRegex = new(@"^[^\x00-\x1F\x7F;&|<>`]{0,512}$", RegexOptions.Compiled);
         private static readonly Regex AnsiEscapeRegex = new(@"\u001B(?:\[[0-9;?]*[ -/]*[@-~]|\][^\u0007]*\u0007)", RegexOptions.Compiled);
         private static readonly Regex ShellPromptRegex = new(@"(?:^|\n)\s*(?:[>$#]|❯|\?)\s*$", RegexOptions.Compiled);
 
