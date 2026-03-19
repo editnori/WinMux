@@ -6,7 +6,7 @@ This repo is the native Windows foundation for a terminal-first workspace app.
 
 1. Keep the app native on Windows with WinUI 3 and the Windows App SDK.
 2. Add first-class WSL launch and session support.
-3. Replace the sample scenario content with a real terminal host page.
+3. Continue replacing stock WinUI chrome with tighter custom shell surfaces where it materially improves density and clarity.
 4. Add a multiplexed layout system inspired by Neri, especially sliding panels instead of constant shrink-to-fit splits.
 
 ## Terminal experience
