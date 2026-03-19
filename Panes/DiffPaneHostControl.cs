@@ -282,20 +282,7 @@ namespace SelfContainedDeployment.Panes
         private Brush ResolveBrush(string key)
         {
             ElementTheme theme = RequestedTheme == ElementTheme.Light ? ElementTheme.Light : ElementTheme.Dark;
-            Windows.UI.Color fallback = (theme, key) switch
-            {
-                (ElementTheme.Light, "ShellSurfaceBackgroundBrush") => Windows.UI.Color.FromArgb(0xFF, 0xFF, 0xFF, 0xFF),
-                (ElementTheme.Light, "ShellBorderBrush") => Windows.UI.Color.FromArgb(0xFF, 0xE4, 0xE4, 0xE7),
-                (ElementTheme.Light, "ShellTextSecondaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0x52, 0x52, 0x5B),
-                (ElementTheme.Dark, "ShellSurfaceBackgroundBrush") => Windows.UI.Color.FromArgb(0xFF, 0x11, 0x12, 0x14),
-                (ElementTheme.Dark, "ShellBorderBrush") => Windows.UI.Color.FromArgb(0xFF, 0x23, 0x25, 0x2B),
-                (ElementTheme.Dark, "ShellTextSecondaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0xA1, 0xA1, 0xAA),
-                _ => Application.Current.Resources.TryGetValue(key, out object resource) && resource is SolidColorBrush solid
-                    ? solid.Color
-                    : Windows.UI.Color.FromArgb(0xFF, 0x71, 0x71, 0x7A),
-            };
-
-            return new SolidColorBrush(fallback);
+            return ShellTheme.ResolveBrushForTheme(theme, key, Windows.UI.Color.FromArgb(0xFF, 0x71, 0x71, 0x7A));
         }
     }
 }

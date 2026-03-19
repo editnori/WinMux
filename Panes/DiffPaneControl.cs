@@ -1016,48 +1016,12 @@ namespace SelfContainedDeployment.Panes
 
         private static ElementTheme ResolveEffectiveTheme()
         {
-            return SelfContainedDeployment.SampleConfig.CurrentTheme == ElementTheme.Default
-                ? (SelfContainedDeployment.MainPage.Current?.ActualTheme == ElementTheme.Light ? ElementTheme.Light : ElementTheme.Dark)
-                : SelfContainedDeployment.SampleConfig.CurrentTheme;
+            return ShellTheme.ResolveEffectiveTheme(SelfContainedDeployment.SampleConfig.CurrentTheme, SelfContainedDeployment.MainPage.Current?.ActualTheme ?? ElementTheme.Default);
         }
 
         private static Brush ResolveBrush(string key)
         {
-            ElementTheme effectiveTheme = ResolveEffectiveTheme();
-
-            Windows.UI.Color color = (effectiveTheme, key) switch
-            {
-                (ElementTheme.Light, "ShellSurfaceBackgroundBrush") => Windows.UI.Color.FromArgb(0xFF, 0xFF, 0xFF, 0xFF),
-                (ElementTheme.Light, "ShellMutedSurfaceBrush") => Windows.UI.Color.FromArgb(0xFF, 0xF4, 0xF4, 0xF5),
-                (ElementTheme.Light, "ShellBorderBrush") => Windows.UI.Color.FromArgb(0xFF, 0xE4, 0xE4, 0xE7),
-                (ElementTheme.Light, "ShellPaneActiveBorderBrush") => Windows.UI.Color.FromArgb(0xFF, 0x25, 0x63, 0xEB),
-                (ElementTheme.Light, "ShellTextPrimaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0x18, 0x18, 0x1B),
-                (ElementTheme.Light, "ShellTextSecondaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0x52, 0x52, 0x5B),
-                (ElementTheme.Light, "ShellTextTertiaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0x71, 0x71, 0x7A),
-                (ElementTheme.Light, "ShellSuccessBrush") => Windows.UI.Color.FromArgb(0xFF, 0x16, 0xA3, 0x4A),
-                (ElementTheme.Light, "ShellWarningBrush") => Windows.UI.Color.FromArgb(0xFF, 0xCA, 0x8A, 0x04),
-                (ElementTheme.Light, "ShellDangerBrush") => Windows.UI.Color.FromArgb(0xFF, 0xDC, 0x26, 0x26),
-                (ElementTheme.Light, "ShellInfoBrush") => Windows.UI.Color.FromArgb(0xFF, 0x25, 0x63, 0xEB),
-                (ElementTheme.Dark, "ShellSurfaceBackgroundBrush") => Windows.UI.Color.FromArgb(0xFF, 0x11, 0x12, 0x14),
-                (ElementTheme.Dark, "ShellMutedSurfaceBrush") => Windows.UI.Color.FromArgb(0xFF, 0x17, 0x18, 0x1C),
-                (ElementTheme.Dark, "ShellBorderBrush") => Windows.UI.Color.FromArgb(0xFF, 0x23, 0x25, 0x2B),
-                (ElementTheme.Dark, "ShellPaneActiveBorderBrush") => Windows.UI.Color.FromArgb(0xFF, 0x60, 0xA5, 0xFA),
-                (ElementTheme.Dark, "ShellTextPrimaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0xFA, 0xFA, 0xFA),
-                (ElementTheme.Dark, "ShellTextSecondaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0xA1, 0xA1, 0xAA),
-                (ElementTheme.Dark, "ShellTextTertiaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0x71, 0x71, 0x7A),
-                (ElementTheme.Dark, "ShellSuccessBrush") => Windows.UI.Color.FromArgb(0xFF, 0x4A, 0xDE, 0x80),
-                (ElementTheme.Dark, "ShellWarningBrush") => Windows.UI.Color.FromArgb(0xFF, 0xFB, 0xBF, 0x24),
-                (ElementTheme.Dark, "ShellDangerBrush") => Windows.UI.Color.FromArgb(0xFF, 0xF8, 0x71, 0x71),
-                (ElementTheme.Dark, "ShellInfoBrush") => Windows.UI.Color.FromArgb(0xFF, 0x60, 0xA5, 0xFA),
-                _ => default,
-            };
-
-            if (color != default)
-            {
-                return new SolidColorBrush(color);
-            }
-
-            return (Brush)Application.Current.Resources[key];
+            return ShellTheme.ResolveBrushForTheme(ResolveEffectiveTheme(), key);
         }
 
         private static string SerializeBrush(Brush brush)

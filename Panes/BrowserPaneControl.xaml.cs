@@ -1222,86 +1222,42 @@ namespace SelfContainedDeployment.Panes
             return "ShellTextTertiaryBrush";
         }
 
-        private Windows.UI.Color ResolveShellColor(string key, Windows.UI.Color fallbackColor)
+        private ElementTheme ResolveEffectiveTheme()
         {
-            ElementTheme effectiveTheme = _themePreference == ElementTheme.Default
-                ? (ActualTheme == ElementTheme.Light ? ElementTheme.Light : ElementTheme.Dark)
-                : _themePreference;
-
-            return ResolveShellColorForTheme(effectiveTheme, key, fallbackColor);
+            return ShellTheme.ResolveEffectiveTheme(_themePreference, ActualTheme);
         }
 
-        private static Windows.UI.Color ResolveShellColorForTheme(ElementTheme effectiveTheme, string key, Windows.UI.Color fallbackColor)
+        private Windows.UI.Color ResolveShellColor(string key, Windows.UI.Color fallbackColor)
         {
-
-            Windows.UI.Color color = (effectiveTheme, key) switch
-            {
-                (ElementTheme.Light, "ShellPageBackgroundBrush") => Windows.UI.Color.FromArgb(0xFF, 0xF2, 0xF5, 0xF8),
-                (ElementTheme.Light, "ShellSurfaceBackgroundBrush") => Windows.UI.Color.FromArgb(0xFF, 0xF9, 0xFB, 0xFD),
-                (ElementTheme.Light, "ShellMutedSurfaceBrush") => Windows.UI.Color.FromArgb(0xFF, 0xF2, 0xF6, 0xFA),
-                (ElementTheme.Light, "ShellNavActiveBrush") => Windows.UI.Color.FromArgb(0xFF, 0xDF, 0xE8, 0xF1),
-                (ElementTheme.Light, "ShellBorderBrush") => Windows.UI.Color.FromArgb(0xFF, 0xC7, 0xD2, 0xDD),
-                (ElementTheme.Light, "ShellPaneActiveBorderBrush") => Windows.UI.Color.FromArgb(0xFF, 0x33, 0x41, 0x55),
-                (ElementTheme.Light, "ShellTextPrimaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0x1A, 0x1E, 0x23),
-                (ElementTheme.Light, "ShellTextSecondaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0x39, 0x42, 0x4D),
-                (ElementTheme.Light, "ShellTextTertiaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0x55, 0x60, 0x6D),
-                (ElementTheme.Light, "ShellSuccessBrush") => Windows.UI.Color.FromArgb(0xFF, 0x16, 0xA3, 0x4A),
-                (ElementTheme.Light, "ShellWarningBrush") => Windows.UI.Color.FromArgb(0xFF, 0xCA, 0x8A, 0x04),
-                (ElementTheme.Light, "ShellInfoBrush") => Windows.UI.Color.FromArgb(0xFF, 0x25, 0x63, 0xEB),
-                (ElementTheme.Dark, "ShellPageBackgroundBrush") => Windows.UI.Color.FromArgb(0xFF, 0x0C, 0x0D, 0x10),
-                (ElementTheme.Dark, "ShellSurfaceBackgroundBrush") => Windows.UI.Color.FromArgb(0xFF, 0x10, 0x12, 0x16),
-                (ElementTheme.Dark, "ShellMutedSurfaceBrush") => Windows.UI.Color.FromArgb(0xFF, 0x14, 0x16, 0x1B),
-                (ElementTheme.Dark, "ShellNavActiveBrush") => Windows.UI.Color.FromArgb(0xFF, 0x17, 0x1A, 0x20),
-                (ElementTheme.Dark, "ShellBorderBrush") => Windows.UI.Color.FromArgb(0xFF, 0x1E, 0x21, 0x27),
-                (ElementTheme.Dark, "ShellPaneActiveBorderBrush") => Windows.UI.Color.FromArgb(0xFF, 0xC9, 0xCD, 0xD4),
-                (ElementTheme.Dark, "ShellTextPrimaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0xF3, 0xF4, 0xF6),
-                (ElementTheme.Dark, "ShellTextSecondaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0xA7, 0xAD, 0xB7),
-                (ElementTheme.Dark, "ShellTextTertiaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0x7A, 0x80, 0x8B),
-                (ElementTheme.Dark, "ShellSuccessBrush") => Windows.UI.Color.FromArgb(0xFF, 0x4A, 0xDE, 0x80),
-                (ElementTheme.Dark, "ShellWarningBrush") => Windows.UI.Color.FromArgb(0xFF, 0xFB, 0xBF, 0x24),
-                (ElementTheme.Dark, "ShellInfoBrush") => Windows.UI.Color.FromArgb(0xFF, 0x60, 0xA5, 0xFA),
-                _ => default,
-            };
-
-            return color != default ? color : fallbackColor;
+            return ShellTheme.ResolveColorForTheme(ResolveEffectiveTheme(), key, fallbackColor);
         }
 
         private Brush ResolveShellBrush(string key)
         {
-            Windows.UI.Color color = ResolveShellColor(key, default);
-            if (color != default)
-            {
-                return new SolidColorBrush(color);
-            }
-
-            return (Brush)Application.Current.Resources[key];
+            return ShellTheme.ResolveBrushForTheme(ResolveEffectiveTheme(), key);
         }
 
         private string ResolveCssColor(string key, Windows.UI.Color fallbackColor)
         {
-            Windows.UI.Color color = ResolveShellBrush(key) is SolidColorBrush solid
-                ? solid.Color
-                : fallbackColor;
+            Windows.UI.Color color = ResolveShellColor(key, fallbackColor);
             return $"#{color.R:X2}{color.G:X2}{color.B:X2}";
         }
 
         private string ResolveCssColor(ElementTheme theme, string key, Windows.UI.Color fallbackColor)
         {
-            Windows.UI.Color color = ResolveShellColorForTheme(theme, key, fallbackColor);
+            Windows.UI.Color color = ShellTheme.ResolveColorForTheme(theme, key, fallbackColor);
             return $"#{color.R:X2}{color.G:X2}{color.B:X2}";
         }
 
         private string ResolveCssColor(string key, byte alpha, Windows.UI.Color fallbackColor)
         {
-            Windows.UI.Color color = ResolveShellBrush(key) is SolidColorBrush solid
-                ? solid.Color
-                : fallbackColor;
+            Windows.UI.Color color = ResolveShellColor(key, fallbackColor);
             return $"rgba({color.R}, {color.G}, {color.B}, {(alpha / 255d).ToString("0.###", CultureInfo.InvariantCulture)})";
         }
 
         private string ResolveCssColor(ElementTheme theme, string key, byte alpha, Windows.UI.Color fallbackColor)
         {
-            Windows.UI.Color color = ResolveShellColorForTheme(theme, key, fallbackColor);
+            Windows.UI.Color color = ShellTheme.ResolveColorForTheme(theme, key, fallbackColor);
             return $"rgba({color.R}, {color.G}, {color.B}, {(alpha / 255d).ToString("0.###", CultureInfo.InvariantCulture)})";
         }
 
