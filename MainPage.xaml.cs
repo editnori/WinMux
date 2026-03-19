@@ -179,6 +179,7 @@ namespace SelfContainedDeployment
         private readonly Dictionary<string, TreeViewNode> _inspectorDirectoryNodesByPath = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<TreeViewNode, InspectorDirectoryTreeItem> _inspectorDirectoryItemsByNode = new();
         private readonly Dictionary<string, InspectorDirectoryUiCache> _inspectorDirectoryUiCacheByKey = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, InspectorDirectoryUiCache> _inspectorDirectoryUiCacheByRootPath = new(StringComparer.OrdinalIgnoreCase);
         private int _paneFocusRequestId;
         private int _visibleDeferredPaneMaterializationRequestId;
         private bool _lifetimeResourcesReleased;
@@ -429,6 +430,7 @@ namespace SelfContainedDeployment
             _inspectorDirectoryNodesByPath.Clear();
             _inspectorDirectoryItemsByNode.Clear();
             _inspectorDirectoryUiCacheByKey.Clear();
+            _inspectorDirectoryUiCacheByRootPath.Clear();
             _baselineCaptureInFlightThreadIds.Clear();
             _lastDiffFileListRenderKey = null;
             CancelPendingInspectorDirectoryBuilds();
@@ -1982,7 +1984,7 @@ namespace SelfContainedDeployment
                 _activeThread.SelectedPaneId = pane.Id;
                 EnsureThreadPanesMaterialized(_activeProject, _activeThread);
                 WorkspacePaneRecord selectedPane = GetSelectedPane(_activeThread) ?? pane;
-                SyncTabViewItemWithPane(selectedPane);
+                UpdateTabViewItem(selectedPane);
                 LogAutomationEvent("shell", "pane.selected", $"Selected pane {selectedPane.Id}", new Dictionary<string, string>
                 {
                     ["paneId"] = selectedPane.Id,
@@ -2266,12 +2268,13 @@ namespace SelfContainedDeployment
                 return false;
             }
 
-            List<DiffPaneRecord> visibleDiffPanes = GetVisiblePanes(thread)
-                .OfType<DiffPaneRecord>()
-                .ToList();
-            if (visibleDiffPanes.Any(diffPane => diffPane.DiffPane.DisplayMode == DiffPaneDisplayMode.FullPatchReview))
+            foreach (WorkspacePaneRecord pane in GetVisiblePanes(thread))
             {
-                return true;
+                if (pane is DiffPaneRecord diffPane &&
+                    diffPane.DiffPane.DisplayMode == DiffPaneDisplayMode.FullPatchReview)
+                {
+                    return true;
+                }
             }
 
             string fallbackPath = ReferenceEquals(thread, _activeThread)
@@ -2316,13 +2319,24 @@ namespace SelfContainedDeployment
                 return new List<string>();
             }
 
-            return GetVisiblePanes(thread)
-                .OfType<DiffPaneRecord>()
-                .Where(diffPane => diffPane.DiffPane.DisplayMode == DiffPaneDisplayMode.FileCompare)
-                .Select(diffPane => ResolveVisibleDiffPanePath(diffPane, fallbackPath))
-                .Where(path => !string.IsNullOrWhiteSpace(path))
-                .Distinct(StringComparer.Ordinal)
-                .ToList();
+            List<string> paths = new();
+            HashSet<string> uniquePaths = new(StringComparer.Ordinal);
+            foreach (WorkspacePaneRecord pane in GetVisiblePanes(thread))
+            {
+                if (pane is not DiffPaneRecord diffPane ||
+                    diffPane.DiffPane.DisplayMode != DiffPaneDisplayMode.FileCompare)
+                {
+                    continue;
+                }
+
+                string path = ResolveVisibleDiffPanePath(diffPane, fallbackPath);
+                if (!string.IsNullOrWhiteSpace(path) && uniquePaths.Add(path))
+                {
+                    paths.Add(path);
+                }
+            }
+
+            return paths;
         }
 
         private bool SnapshotSatisfiesGitRefreshNeeds(
@@ -2354,11 +2368,22 @@ namespace SelfContainedDeployment
                 return false;
             }
 
-            if (!string.IsNullOrWhiteSpace(selectedPath) &&
-                snapshot.ChangedFiles.Count > 0 &&
-                !snapshot.ChangedFiles.Any(file => string.Equals(file.Path, selectedPath, StringComparison.Ordinal)))
+            if (!string.IsNullOrWhiteSpace(selectedPath) && snapshot.ChangedFiles.Count > 0)
             {
-                return false;
+                bool hasSelectedPath = false;
+                foreach (GitChangedFile file in snapshot.ChangedFiles)
+                {
+                    if (string.Equals(file.Path, selectedPath, StringComparison.Ordinal))
+                    {
+                        hasSelectedPath = true;
+                        break;
+                    }
+                }
+
+                if (!hasSelectedPath)
+                {
+                    return false;
+                }
             }
 
             if (includeSelectedDiff && !HasSelectedDiffAvailable(snapshot, selectedPath))
@@ -2427,11 +2452,42 @@ namespace SelfContainedDeployment
             GitThreadSnapshot adoptedSnapshot = GitStatusService.CloneSnapshot(newestThread.LiveSnapshot);
             MergeCachedDiffTexts(thread.LiveSnapshot, adoptedSnapshot);
             GitStatusService.SelectDiffPath(adoptedSnapshot, selectedPath);
-            ApplyReusedActiveGitSnapshot(adoptedSnapshot, newestCapturedAt);
+            CommitActiveGitSnapshot(adoptedSnapshot, newestCapturedAt, ensureBaselineCapture: false, logRefresh: false, updateHeader: true);
             return true;
         }
 
-        private void ApplyReusedActiveGitSnapshot(GitThreadSnapshot snapshot, DateTimeOffset capturedAt)
+        private static void SetThreadLiveSnapshot(WorkspaceThread thread, GitThreadSnapshot snapshot, DateTimeOffset capturedAt)
+        {
+            if (thread is null)
+            {
+                return;
+            }
+
+            if (snapshot is null)
+            {
+                thread.LiveSnapshot = null;
+                thread.LiveSnapshotCapturedAt = capturedAt;
+                thread.ChangedFileCount = 0;
+                thread.SelectedDiffPath = null;
+                return;
+            }
+
+            thread.BranchName = snapshot.BranchName;
+            thread.WorktreePath = string.IsNullOrWhiteSpace(thread.WorktreePath)
+                ? snapshot.WorktreePath
+                : thread.WorktreePath;
+            thread.ChangedFileCount = snapshot.ChangedFiles.Count;
+            thread.SelectedDiffPath = snapshot.SelectedPath;
+            thread.LiveSnapshot = snapshot;
+            thread.LiveSnapshotCapturedAt = capturedAt;
+        }
+
+        private void CommitActiveGitSnapshot(
+            GitThreadSnapshot snapshot,
+            DateTimeOffset capturedAt,
+            bool ensureBaselineCapture,
+            bool logRefresh,
+            bool updateHeader = false)
         {
             if (_activeThread is null || snapshot is null)
             {
@@ -2440,17 +2496,33 @@ namespace SelfContainedDeployment
 
             MergeCachedDiffTexts(_activeGitSnapshot, snapshot);
             _activeGitSnapshot = snapshot;
-            _activeThread.BranchName = snapshot.BranchName;
-            _activeThread.WorktreePath = string.IsNullOrWhiteSpace(_activeThread.WorktreePath)
-                ? snapshot.WorktreePath
-                : _activeThread.WorktreePath;
-            _activeThread.ChangedFileCount = snapshot.ChangedFiles.Count;
-            _activeThread.SelectedDiffPath = snapshot.SelectedPath;
-            _activeThread.LiveSnapshot = GitStatusService.CloneSnapshot(snapshot);
-            _activeThread.LiveSnapshotCapturedAt = capturedAt;
+            SetThreadLiveSnapshot(_activeThread, snapshot, capturedAt);
+            if (ensureBaselineCapture && EnableAutomaticBaselineCapture)
+            {
+                EnsureThreadBaselineCapture(_activeThread, _activeProject, snapshot);
+            }
             ApplyGitSnapshotToUi();
             QueueProjectTreeRefresh();
-            UpdateHeader();
+
+            if (updateHeader)
+            {
+                UpdateHeader();
+            }
+
+            if (!logRefresh)
+            {
+                return;
+            }
+
+            LogAutomationEvent("git", "thread.snapshot_refreshed", string.IsNullOrWhiteSpace(snapshot.Error) ? "Refreshed thread git snapshot" : snapshot.Error, new Dictionary<string, string>
+            {
+                ["threadId"] = _activeThread.Id,
+                ["projectId"] = _activeProject?.Id ?? string.Empty,
+                ["branch"] = snapshot.BranchName ?? string.Empty,
+                ["worktreePath"] = snapshot.WorktreePath ?? string.Empty,
+                ["changedFileCount"] = snapshot.ChangedFiles.Count.ToString(),
+                ["selectedPath"] = snapshot.SelectedPath ?? string.Empty,
+            });
         }
 
         private void QueueVisibleDiffHydrationIfNeeded(
@@ -3509,7 +3581,10 @@ namespace SelfContainedDeployment
             bool shouldRebuild = forceRebuild ||
                 !string.Equals(_lastInspectorDirectoryRootPath, rootPath, StringComparison.OrdinalIgnoreCase);
             bool rootChanged = !string.Equals(_lastInspectorDirectoryRootPath, rootPath, StringComparison.OrdinalIgnoreCase);
-            IReadOnlyList<GitChangedFile> liveFiles = ResolveDisplayedGitSnapshot()?.ChangedFiles?.ToList() ?? new List<GitChangedFile>();
+            GitThreadSnapshot displayedSnapshot = ResolveDisplayedGitSnapshot();
+            IReadOnlyList<GitChangedFile> liveFiles = displayedSnapshot?.ChangedFiles is { } changedFiles
+                ? changedFiles
+                : Array.Empty<GitChangedFile>();
             string renderKey = BuildInspectorDirectoryRenderKey(liveFiles);
             if (liveFiles.Count > 0)
             {
@@ -3666,7 +3741,7 @@ namespace SelfContainedDeployment
                 ["rootPath"] = rootPath ?? string.Empty,
             });
             NativeAutomationDiagnostics.IncrementCounter("inspectorFileScan.count");
-            List<EditorPaneFileEntry> files = EditorPaneControl.EnumerateProjectFilesForRoot(rootPath, bypassCache, cancellationToken);
+            IReadOnlyList<EditorPaneFileEntry> files = EditorPaneControl.EnumerateProjectFilesForRoot(rootPath, bypassCache, cancellationToken);
             Dictionary<string, InspectorDirectoryDecoration> decorationsByPath = BuildInspectorDirectoryDecorations(changedFiles);
             Dictionary<string, InspectorDirectoryNodeModel> rootNodes = new(StringComparer.OrdinalIgnoreCase);
             foreach (EditorPaneFileEntry file in files)
@@ -3717,9 +3792,8 @@ namespace SelfContainedDeployment
 
         private bool TryGetInspectorDirectoryUiForRoot(string rootPath, out InspectorDirectoryUiCache uiCache)
         {
-            uiCache = _inspectorDirectoryUiCacheByKey.Values
-                .LastOrDefault(candidate => string.Equals(candidate.RootPath, rootPath, StringComparison.OrdinalIgnoreCase));
-            return uiCache is not null;
+            return _inspectorDirectoryUiCacheByRootPath.TryGetValue(rootPath ?? string.Empty, out uiCache) &&
+                uiCache is not null;
         }
 
         private void ApplyInspectorDirectoryBuildResult(InspectorDirectoryBuildResult result, string correlationId = null)
@@ -3773,12 +3847,20 @@ namespace SelfContainedDeployment
             }
 
             _inspectorDirectoryUiCacheByKey[BuildInspectorDirectoryCacheKey(uiCache.RootPath, uiCache.RenderKey)] = uiCache;
+            _inspectorDirectoryUiCacheByRootPath[uiCache.RootPath ?? string.Empty] = uiCache;
             while (_inspectorDirectoryUiCacheByKey.Count > 6)
             {
                 string oldestKey = _inspectorDirectoryUiCacheByKey.Keys.FirstOrDefault();
                 if (string.IsNullOrWhiteSpace(oldestKey))
                 {
                     break;
+                }
+
+                if (_inspectorDirectoryUiCacheByKey.TryGetValue(oldestKey, out InspectorDirectoryUiCache evictedUi) &&
+                    _inspectorDirectoryUiCacheByRootPath.TryGetValue(evictedUi.RootPath ?? string.Empty, out InspectorDirectoryUiCache cachedRootUi) &&
+                    ReferenceEquals(cachedRootUi, evictedUi))
+                {
+                    _inspectorDirectoryUiCacheByRootPath.Remove(evictedUi.RootPath ?? string.Empty);
                 }
 
                 _inspectorDirectoryUiCacheByKey.Remove(oldestKey);
@@ -3882,8 +3964,35 @@ namespace SelfContainedDeployment
 
         private static string BuildInspectorDirectoryRenderKey(IReadOnlyList<GitChangedFile> changedFiles)
         {
-            return string.Join("|", (changedFiles ?? Array.Empty<GitChangedFile>())
-                .Select(file => $"{file.Path}:{file.Status}:{file.AddedLines}:{file.RemovedLines}"));
+            if (changedFiles is null || changedFiles.Count == 0)
+            {
+                return string.Empty;
+            }
+
+            StringBuilder builder = new();
+            foreach (GitChangedFile file in changedFiles)
+            {
+                if (file is null)
+                {
+                    continue;
+                }
+
+                if (builder.Length > 0)
+                {
+                    builder.Append('|');
+                }
+
+                builder
+                    .Append(file.Path ?? string.Empty)
+                    .Append(':')
+                    .Append(file.Status)
+                    .Append(':')
+                    .Append(file.AddedLines)
+                    .Append(':')
+                    .Append(file.RemovedLines);
+            }
+
+            return builder.ToString();
         }
 
         private static bool ShouldExpandInspectorDirectoryNode(InspectorDirectoryNodeModel node, int depth)
@@ -5363,9 +5472,7 @@ namespace SelfContainedDeployment
                 {
                     EnsureThreadPanesMaterialized(_activeProject, _activeThread);
                     _activeProject.SelectedThreadId = _activeThread.Id;
-                    _activeGitSnapshot = _activeThread.LiveSnapshot is null
-                        ? null
-                        : GitStatusService.CloneSnapshot(_activeThread.LiveSnapshot);
+                    _activeGitSnapshot = _activeThread.LiveSnapshot;
                 }
 
                 ShellSplitView.IsPaneOpen = snapshot.PaneOpen;
@@ -6293,7 +6400,7 @@ namespace SelfContainedDeployment
             }
 
             thread.Panes[paneIndex] = materializedPane;
-            SyncTabViewItemWithPane(materializedPane);
+            UpdateTabViewItem(materializedPane);
             if (!ReferenceEquals(thread, _activeThread))
             {
                 return true;
@@ -6611,7 +6718,6 @@ namespace SelfContainedDeployment
                     {
                         _lastPaneWorkspaceRenderKey = null;
                         RefreshTabView();
-                        RenderPaneWorkspace();
                         QueueSelectedPaneFocus();
                         RequestLayoutForVisiblePanes();
                     }
@@ -7006,9 +7112,7 @@ namespace SelfContainedDeployment
             bool rootChanged = !string.Equals(previousRootPath, nextRootPath, StringComparison.OrdinalIgnoreCase);
             if (!ReferenceEquals(previousThread, thread))
             {
-                _activeGitSnapshot = thread.LiveSnapshot is null
-                    ? null
-                    : GitStatusService.CloneSnapshot(thread.LiveSnapshot);
+                _activeGitSnapshot = thread.LiveSnapshot;
                 if (!deferWorkspaceRefresh)
                 {
                     ApplyGitSnapshotToUi();
@@ -7170,8 +7274,7 @@ namespace SelfContainedDeployment
                 return;
             }
 
-            thread.LiveSnapshot = snapshot;
-            thread.LiveSnapshotCapturedAt = DateTimeOffset.UtcNow;
+            SetThreadLiveSnapshot(thread, snapshot, DateTimeOffset.UtcNow);
         }
 
         private bool RequiresThreadLiveSnapshotWarmup(WorkspaceThread thread)
@@ -8214,9 +8317,13 @@ namespace SelfContainedDeployment
                 return;
             }
 
-            List<TabViewItem> desiredItems = _activeThread.Panes
-                .Select(GetOrCreateTabViewItem)
-                .ToList();
+            List<TabViewItem> desiredItems = new(_activeThread.Panes.Count);
+            HashSet<string> desiredPaneIds = new(StringComparer.Ordinal);
+            foreach (WorkspacePaneRecord pane in _activeThread.Panes)
+            {
+                desiredPaneIds.Add(pane.Id);
+                desiredItems.Add(PrepareTabViewItem(pane));
+            }
 
             int selectionGeneration = ++_tabSelectionChangeGeneration;
             bool previousSuppression = _suppressTabSelectionChanged;
@@ -8236,12 +8343,16 @@ namespace SelfContainedDeployment
                 }
                 else
                 {
-                    foreach (TabViewItem existingItem in TerminalTabs.TabItems.OfType<TabViewItem>().ToList())
+                    for (int index = TerminalTabs.TabItems.Count - 1; index >= 0; index--)
                     {
-                        if (!desiredItems.Contains(existingItem))
+                        if (TerminalTabs.TabItems[index] is not TabViewItem existingItem ||
+                            existingItem.Tag is not WorkspacePaneRecord existingPane ||
+                            desiredPaneIds.Contains(existingPane.Id))
                         {
-                            TerminalTabs.TabItems.Remove(existingItem);
+                            continue;
                         }
+
+                        TerminalTabs.TabItems.RemoveAt(index);
                     }
 
                     for (int index = 0; index < desiredItems.Count; index++)
@@ -8309,15 +8420,13 @@ namespace SelfContainedDeployment
                 _tabItemsById[pane.Id] = item;
             }
 
-            item.Tag = pane;
-            AutomationProperties.SetName(item, FormatTabHeader(pane.Title, pane.Kind, pane.IsExited));
-            item.ContextFlyout ??= BuildPaneContextMenu(pane);
-            if (!TryUpdatePaneTabHeader(item, pane))
-            {
-                item.Header = BuildPaneTabHeader(pane);
-            }
-            UpdatePaneTabChrome(item, pane);
-            item.IsClosable = true;
+            return item;
+        }
+
+        private TabViewItem PrepareTabViewItem(WorkspacePaneRecord pane)
+        {
+            TabViewItem item = GetOrCreateTabViewItem(pane);
+            UpdateTabViewItem(item, pane);
             return item;
         }
 
@@ -8328,27 +8437,26 @@ namespace SelfContainedDeployment
                 return;
             }
 
-            TabViewItem item = GetOrCreateTabViewItem(pane);
-            if (!TryUpdatePaneTabHeader(item, pane))
-            {
-                item.Header = BuildPaneTabHeader(pane);
-            }
-            UpdatePaneTabChrome(item, pane);
+            UpdateTabViewItem(GetOrCreateTabViewItem(pane), pane);
         }
 
-        private void SyncTabViewItemWithPane(WorkspacePaneRecord pane)
+        private void UpdateTabViewItem(TabViewItem item, WorkspacePaneRecord pane)
         {
-            if (pane is null)
+            if (item is null || pane is null)
             {
                 return;
             }
 
-            if (_tabItemsById.TryGetValue(pane.Id, out TabViewItem item))
+            item.Tag = pane;
+            AutomationProperties.SetName(item, FormatTabHeader(pane.Title, pane.Kind, pane.IsExited));
+            item.ContextFlyout ??= BuildPaneContextMenu(pane);
+            if (!TryUpdatePaneTabHeader(item, pane))
             {
-                item.Tag = pane;
+                item.Header = BuildPaneTabHeader(pane);
             }
 
-            UpdateTabViewItem(pane);
+            UpdatePaneTabChrome(item, pane);
+            item.IsClosable = true;
         }
 
         private bool TryUpdatePaneTabHeader(TabViewItem item, WorkspacePaneRecord pane)
@@ -9609,7 +9717,7 @@ namespace SelfContainedDeployment
             _activeThread.SelectedPaneId = pane.Id;
             EnsureThreadPanesMaterialized(_activeProject, _activeThread);
             pane = GetSelectedPane(_activeThread) ?? pane;
-            SyncTabViewItemWithPane(pane);
+            UpdateTabViewItem(pane);
             if (!string.IsNullOrWhiteSpace(_activeThread.ZoomedPaneId) &&
                 !string.Equals(_activeThread.ZoomedPaneId, pane.Id, StringComparison.Ordinal))
             {
@@ -9875,7 +9983,7 @@ namespace SelfContainedDeployment
                 _activeThread?.DiffReviewSource == DiffReviewSourceKind.Live &&
                 _activeThread.LiveSnapshot is not null)
             {
-                _activeGitSnapshot = GitStatusService.CloneSnapshot(_activeThread.LiveSnapshot);
+                _activeGitSnapshot = _activeThread.LiveSnapshot;
                 ApplyGitSnapshotToUi();
             }
             UpdateHeader();
@@ -9990,7 +10098,7 @@ namespace SelfContainedDeployment
 
                 if (thread.BaselineSnapshot is null)
                 {
-                    thread.BaselineSnapshot = GitStatusService.CloneSnapshot(checkpointSnapshot);
+                    thread.BaselineSnapshot = checkpointSnapshot;
                     LogAutomationEvent("git", "thread.baseline_captured", "Captured thread baseline from checkpoint flow", new Dictionary<string, string>
                     {
                         ["threadId"] = thread.Id,
@@ -10025,29 +10133,7 @@ namespace SelfContainedDeployment
 
         private void ApplyActiveGitSnapshot(GitThreadSnapshot snapshot)
         {
-            MergeCachedDiffTexts(_activeGitSnapshot, snapshot);
-            _activeGitSnapshot = snapshot;
-            _activeThread.BranchName = snapshot.BranchName;
-            _activeThread.WorktreePath = string.IsNullOrWhiteSpace(_activeThread.WorktreePath) ? snapshot.WorktreePath : _activeThread.WorktreePath;
-            _activeThread.ChangedFileCount = snapshot.ChangedFiles.Count;
-            _activeThread.SelectedDiffPath = snapshot.SelectedPath;
-            _activeThread.LiveSnapshot = GitStatusService.CloneSnapshot(snapshot);
-            _activeThread.LiveSnapshotCapturedAt = DateTimeOffset.UtcNow;
-            if (EnableAutomaticBaselineCapture)
-            {
-                EnsureThreadBaselineCapture(_activeThread, _activeProject, snapshot);
-            }
-            ApplyGitSnapshotToUi();
-            QueueProjectTreeRefresh();
-            LogAutomationEvent("git", "thread.snapshot_refreshed", string.IsNullOrWhiteSpace(snapshot.Error) ? "Refreshed thread git snapshot" : snapshot.Error, new Dictionary<string, string>
-            {
-                ["threadId"] = _activeThread.Id,
-                ["projectId"] = _activeProject?.Id ?? string.Empty,
-                ["branch"] = snapshot.BranchName ?? string.Empty,
-                ["worktreePath"] = snapshot.WorktreePath ?? string.Empty,
-                ["changedFileCount"] = snapshot.ChangedFiles.Count.ToString(),
-                ["selectedPath"] = snapshot.SelectedPath ?? string.Empty,
-            });
+            CommitActiveGitSnapshot(snapshot, DateTimeOffset.UtcNow, ensureBaselineCapture: true, logRefresh: true);
         }
 
         private void EnsureThreadBaselineCapture(WorkspaceThread thread, WorkspaceProject project, GitThreadSnapshot liveSnapshot)
@@ -10085,7 +10171,7 @@ namespace SelfContainedDeployment
 
                         if (thread.BaselineSnapshot is null)
                         {
-                            thread.BaselineSnapshot = GitStatusService.CloneSnapshot(task.Result);
+                            thread.BaselineSnapshot = task.Result;
                             QueueSessionSave();
                             LogAutomationEvent("git", "thread.baseline_captured", "Captured thread baseline", new Dictionary<string, string>
                             {
@@ -10131,8 +10217,13 @@ namespace SelfContainedDeployment
                 return;
             }
 
-            int totalAddedLines = displayedSnapshot.ChangedFiles.Sum(file => file.AddedLines);
-            int totalRemovedLines = displayedSnapshot.ChangedFiles.Sum(file => file.RemovedLines);
+            int totalAddedLines = 0;
+            int totalRemovedLines = 0;
+            foreach (GitChangedFile file in displayedSnapshot.ChangedFiles)
+            {
+                totalAddedLines += file.AddedLines;
+                totalRemovedLines += file.RemovedLines;
+            }
             if (ShouldRefreshReviewInspectorUi())
             {
                 DiffBranchText.Text = string.IsNullOrWhiteSpace(displayedSnapshot.BranchName)
@@ -10183,8 +10274,20 @@ namespace SelfContainedDeployment
                 return false;
             }
 
-            return (_inspectorOpen && _activeInspectorSection == InspectorSection.Review) ||
-                GetVisiblePanes(_activeThread).OfType<DiffPaneRecord>().Any();
+            if (_inspectorOpen && _activeInspectorSection == InspectorSection.Review)
+            {
+                return true;
+            }
+
+            foreach (WorkspacePaneRecord pane in GetVisiblePanes(_activeThread))
+            {
+                if (pane is DiffPaneRecord)
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private bool ShouldRefreshReviewInspectorUi()
@@ -10305,15 +10408,33 @@ namespace SelfContainedDeployment
                 return false;
             }
 
-            return !string.IsNullOrWhiteSpace(snapshot.ChangedFiles
-                .FirstOrDefault(file => string.Equals(file.Path, resolvedPath, StringComparison.Ordinal))?.DiffText);
+            foreach (GitChangedFile file in snapshot.ChangedFiles)
+            {
+                if (string.Equals(file.Path, resolvedPath, StringComparison.Ordinal))
+                {
+                    return !string.IsNullOrWhiteSpace(file.DiffText);
+                }
+            }
+
+            return false;
         }
 
         private static bool HasCompleteDiffSet(GitThreadSnapshot snapshot)
         {
-            return snapshot is not null &&
-                snapshot.ChangedFiles.Count > 1 &&
-                snapshot.ChangedFiles.All(file => !string.IsNullOrWhiteSpace(file.DiffText));
+            if (snapshot is null || snapshot.ChangedFiles.Count <= 1)
+            {
+                return false;
+            }
+
+            foreach (GitChangedFile file in snapshot.ChangedFiles)
+            {
+                if (string.IsNullOrWhiteSpace(file.DiffText))
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         private async System.Threading.Tasks.Task EnsureSelectedDiffReadyAsync(WorkspaceThread thread, WorkspaceProject project, string selectedPath)
@@ -10465,7 +10586,10 @@ namespace SelfContainedDeployment
 
         private static void MergeCachedDiffTexts(GitThreadSnapshot cachedSnapshot, GitThreadSnapshot nextSnapshot)
         {
-            if (cachedSnapshot is null || nextSnapshot is null || nextSnapshot.ChangedFiles.Count == 0)
+            if (cachedSnapshot is null ||
+                nextSnapshot is null ||
+                ReferenceEquals(cachedSnapshot, nextSnapshot) ||
+                nextSnapshot.ChangedFiles.Count == 0)
             {
                 return;
             }
@@ -10483,9 +10607,14 @@ namespace SelfContainedDeployment
                 return;
             }
 
-            Dictionary<string, GitChangedFile> cachedFilesByPath = cachedSnapshot.ChangedFiles
-                .Where(file => !string.IsNullOrWhiteSpace(file.Path))
-                .ToDictionary(file => file.Path, StringComparer.Ordinal);
+            Dictionary<string, GitChangedFile> cachedFilesByPath = new(cachedSnapshot.ChangedFiles.Count, StringComparer.Ordinal);
+            foreach (GitChangedFile cachedFile in cachedSnapshot.ChangedFiles)
+            {
+                if (!string.IsNullOrWhiteSpace(cachedFile?.Path))
+                {
+                    cachedFilesByPath[cachedFile.Path] = cachedFile;
+                }
+            }
 
             foreach (GitChangedFile changedFile in nextSnapshot.ChangedFiles)
             {
@@ -10509,9 +10638,14 @@ namespace SelfContainedDeployment
 
             if (string.IsNullOrWhiteSpace(nextSnapshot.SelectedDiff) && !string.IsNullOrWhiteSpace(nextSnapshot.SelectedPath))
             {
-                GitChangedFile selectedFile = nextSnapshot.ChangedFiles
-                    .FirstOrDefault(file => string.Equals(file.Path, nextSnapshot.SelectedPath, StringComparison.Ordinal));
-                nextSnapshot.SelectedDiff = selectedFile?.DiffText;
+                foreach (GitChangedFile file in nextSnapshot.ChangedFiles)
+                {
+                    if (string.Equals(file.Path, nextSnapshot.SelectedPath, StringComparison.Ordinal))
+                    {
+                        nextSnapshot.SelectedDiff = file.DiffText;
+                        break;
+                    }
+                }
             }
         }
 

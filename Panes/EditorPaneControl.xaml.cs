@@ -164,7 +164,7 @@ namespace SelfContainedDeployment.Panes
         {
             public DateTimeOffset CapturedAt { get; init; }
 
-            public List<EditorPaneFileEntry> Files { get; init; } = new();
+            public EditorPaneFileEntry[] Files { get; init; } = Array.Empty<EditorPaneFileEntry>();
         }
 
         private readonly List<EditorPaneFileEntry> _files = new();
@@ -466,7 +466,7 @@ namespace SelfContainedDeployment.Panes
             RaiseStateChanged();
         }
 
-        internal static List<EditorPaneFileEntry> EnumerateProjectFilesForRoot(string rootPath, bool bypassCache = false, CancellationToken cancellationToken = default)
+        internal static IReadOnlyList<EditorPaneFileEntry> EnumerateProjectFilesForRoot(string rootPath, bool bypassCache = false, CancellationToken cancellationToken = default)
         {
             return EnumerateProjectFiles(rootPath, bypassCache, cancellationToken);
         }
@@ -864,7 +864,7 @@ namespace SelfContainedDeployment.Panes
                 return false;
             }
 
-            List<EditorPaneFileEntry> files = await Task.Run(() => EnumerateProjectFiles(rootPath, bypassCache)).ConfigureAwait(true);
+            IReadOnlyList<EditorPaneFileEntry> files = await Task.Run(() => EnumerateProjectFiles(rootPath, bypassCache)).ConfigureAwait(true);
             if (_disposed)
             {
                 return false;
@@ -1818,13 +1818,13 @@ namespace SelfContainedDeployment.Panes
                 : normalized;
         }
 
-        private static List<EditorPaneFileEntry> EnumerateProjectFiles(string rootPath, bool bypassCache = false, CancellationToken cancellationToken = default)
+        private static IReadOnlyList<EditorPaneFileEntry> EnumerateProjectFiles(string rootPath, bool bypassCache = false, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
             string normalizedRootPath = NormalizeRootPath(rootPath);
             if (string.IsNullOrWhiteSpace(normalizedRootPath) || !Directory.Exists(normalizedRootPath))
             {
-                return new List<EditorPaneFileEntry>();
+                return Array.Empty<EditorPaneFileEntry>();
             }
 
             if (!bypassCache)
@@ -1836,7 +1836,7 @@ namespace SelfContainedDeployment.Panes
                     if (ProjectFileCache.TryGetValue(normalizedRootPath, out CachedProjectFileSnapshot cached) &&
                         now - cached.CapturedAt <= ProjectFileCacheLifetime)
                     {
-                        return CloneFileEntries(cached.Files);
+                        return cached.Files;
                     }
                 }
             }
@@ -1858,15 +1858,17 @@ namespace SelfContainedDeployment.Panes
             {
                 DateTimeOffset capturedAt = DateTimeOffset.UtcNow;
                 PruneProjectFileCache(capturedAt);
+                EditorPaneFileEntry[] cachedFiles = ordered.Count == 0
+                    ? Array.Empty<EditorPaneFileEntry>()
+                    : ordered.ToArray();
                 ProjectFileCache[normalizedRootPath] = new CachedProjectFileSnapshot
                 {
                     CapturedAt = capturedAt,
-                    Files = CloneFileEntries(ordered),
+                    Files = cachedFiles,
                 };
                 PruneProjectFileCache(capturedAt);
+                return cachedFiles;
             }
-
-            return ordered;
         }
 
         private static List<EditorPaneFileEntry> EnumerateProjectFilesCore(string normalizedRootPath, CancellationToken cancellationToken)
@@ -2096,27 +2098,48 @@ namespace SelfContainedDeployment.Panes
 
         private static void PruneProjectFileCache(DateTimeOffset now)
         {
-            string[] expiredRoots = ProjectFileCache
-                .Where(entry => now - entry.Value.CapturedAt > ProjectFileCacheLifetime)
-                .Select(entry => entry.Key)
-                .ToArray();
-            foreach (string expiredRoot in expiredRoots)
-            {
-                ProjectFileCache.Remove(expiredRoot);
-            }
+            List<string> expiredRoots = null;
+            string oldestRoot = null;
+            DateTimeOffset oldestCapturedAt = DateTimeOffset.MaxValue;
 
-            while (ProjectFileCache.Count > MaxProjectFileCacheEntries)
+            foreach ((string root, CachedProjectFileSnapshot snapshot) in ProjectFileCache)
             {
-                string oldestRoot = ProjectFileCache
-                    .OrderBy(entry => entry.Value.CapturedAt)
-                    .Select(entry => entry.Key)
-                    .FirstOrDefault();
-                if (string.IsNullOrWhiteSpace(oldestRoot))
+                if (now - snapshot.CapturedAt > ProjectFileCacheLifetime)
                 {
-                    break;
+                    expiredRoots ??= new List<string>();
+                    expiredRoots.Add(root);
+                    continue;
                 }
 
+                if (snapshot.CapturedAt < oldestCapturedAt)
+                {
+                    oldestCapturedAt = snapshot.CapturedAt;
+                    oldestRoot = root;
+                }
+            }
+
+            if (expiredRoots is not null)
+            {
+                foreach (string expiredRoot in expiredRoots)
+                {
+                    ProjectFileCache.Remove(expiredRoot);
+                }
+            }
+
+            while (ProjectFileCache.Count > MaxProjectFileCacheEntries &&
+                !string.IsNullOrWhiteSpace(oldestRoot))
+            {
                 ProjectFileCache.Remove(oldestRoot);
+                oldestRoot = null;
+                oldestCapturedAt = DateTimeOffset.MaxValue;
+                foreach ((string root, CachedProjectFileSnapshot snapshot) in ProjectFileCache)
+                {
+                    if (snapshot.CapturedAt < oldestCapturedAt)
+                    {
+                        oldestCapturedAt = snapshot.CapturedAt;
+                        oldestRoot = root;
+                    }
+                }
             }
         }
 
@@ -2283,18 +2306,6 @@ namespace SelfContainedDeployment.Panes
             {
                 return null;
             }
-        }
-
-        private static List<EditorPaneFileEntry> CloneFileEntries(IEnumerable<EditorPaneFileEntry> files)
-        {
-            return files?
-                .Select(file => new EditorPaneFileEntry
-                {
-                    FullPath = file.FullPath,
-                    RelativePath = file.RelativePath,
-                })
-                .ToList()
-                ?? new List<EditorPaneFileEntry>();
         }
 
         private static string NormalizeComparablePath(string path)

@@ -220,6 +220,20 @@ namespace SelfContainedDeployment.Git
                 return null;
             }
 
+            List<GitChangedFile> changedFiles = new(snapshot.ChangedFiles.Count);
+            foreach (GitChangedFile file in snapshot.ChangedFiles)
+            {
+                changedFiles.Add(new GitChangedFile
+                {
+                    Status = file.Status,
+                    Path = file.Path,
+                    OriginalPath = file.OriginalPath,
+                    AddedLines = file.AddedLines,
+                    RemovedLines = file.RemovedLines,
+                    DiffText = file.DiffText,
+                });
+            }
+
             return new GitThreadSnapshot
             {
                 BranchName = snapshot.BranchName,
@@ -230,15 +244,7 @@ namespace SelfContainedDeployment.Git
                 SelectedPath = snapshot.SelectedPath,
                 SelectedDiff = snapshot.SelectedDiff,
                 Error = snapshot.Error,
-                ChangedFiles = snapshot.ChangedFiles.Select(file => new GitChangedFile
-                {
-                    Status = file.Status,
-                    Path = file.Path,
-                    OriginalPath = file.OriginalPath,
-                    AddedLines = file.AddedLines,
-                    RemovedLines = file.RemovedLines,
-                    DiffText = file.DiffText,
-                }).ToList(),
+                ChangedFiles = changedFiles,
             };
         }
 
@@ -249,17 +255,23 @@ namespace SelfContainedDeployment.Git
                 return;
             }
 
-            string resolvedPath = selectedPath;
-            bool selectedPathExists = !string.IsNullOrWhiteSpace(resolvedPath) &&
-                snapshot.ChangedFiles.Any(file => string.Equals(file.Path, resolvedPath, StringComparison.Ordinal));
-            if (!selectedPathExists)
+            GitChangedFile selectedFile = null;
+            GitChangedFile firstFile = snapshot.ChangedFiles.Count > 0 ? snapshot.ChangedFiles[0] : null;
+            if (!string.IsNullOrWhiteSpace(selectedPath))
             {
-                resolvedPath = snapshot.ChangedFiles.FirstOrDefault()?.Path;
+                foreach (GitChangedFile file in snapshot.ChangedFiles)
+                {
+                    if (string.Equals(file.Path, selectedPath, StringComparison.Ordinal))
+                    {
+                        selectedFile = file;
+                        break;
+                    }
+                }
             }
 
-            snapshot.SelectedPath = resolvedPath;
-            GitChangedFile changedFile = snapshot.ChangedFiles.FirstOrDefault(file => string.Equals(file.Path, resolvedPath, StringComparison.Ordinal));
-            snapshot.SelectedDiff = changedFile?.DiffText;
+            selectedFile ??= firstFile;
+            snapshot.SelectedPath = selectedFile?.Path;
+            snapshot.SelectedDiff = selectedFile?.DiffText;
         }
 
         public static void EnsureCompareTexts(string workingPath, GitChangedFile changedFile)
