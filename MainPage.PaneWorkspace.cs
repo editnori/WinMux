@@ -967,6 +967,12 @@ namespace SelfContainedDeployment
             }
 
             _activeThread.SelectedPaneId = pane.Id;
+            _ignoreNonSelectedPaneInteractionUntil = DateTimeOffset.UtcNow.Add(CrossPaneInteractionSuppressionWindow);
+            if (pane is not TerminalPaneRecord)
+            {
+                CancelPendingTerminalFocusRequests(_activeThread, pane.Id);
+            }
+
             EnsureThreadPanesMaterialized(_activeProject, _activeThread);
             pane = GetSelectedPane(_activeThread) ?? pane;
             UpdateTabViewItem(pane);
@@ -1005,6 +1011,24 @@ namespace SelfContainedDeployment
                 ["projectId"] = _activeProject?.Id ?? string.Empty,
                 ["focusPane"] = focusPane.ToString(),
             });
+        }
+
+        private void CancelPendingTerminalFocusRequests(WorkspaceThread thread, string selectedPaneId)
+        {
+            if (thread is null)
+            {
+                return;
+            }
+
+            foreach (TerminalPaneRecord terminalPane in thread.Panes.OfType<TerminalPaneRecord>())
+            {
+                if (string.Equals(terminalPane.Id, selectedPaneId, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                terminalPane.Terminal.CancelPendingProgrammaticFocus();
+            }
         }
 
         private void UpdatePaneSelectionChrome()

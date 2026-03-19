@@ -509,7 +509,6 @@ namespace SelfContainedDeployment.Terminal
         public void FocusTerminal()
         {
             EnsureNativeTerminalViewCreated();
-            RaiseInteractionRequested();
             if (!CanReceiveProgrammaticFocus())
             {
                 _pendingProgrammaticFocus = true;
@@ -518,6 +517,11 @@ namespace SelfContainedDeployment.Terminal
             }
 
             TryApplyProgrammaticFocus("requested");
+        }
+
+        public void CancelPendingProgrammaticFocus()
+        {
+            _pendingProgrammaticFocus = false;
         }
 
         public Task WarmupAsync()

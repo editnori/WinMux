@@ -118,7 +118,6 @@ namespace SelfContainedDeployment.Panes
             InitializeComponent();
             ActualThemeChanged += OnActualThemeChanged;
             PointerPressed += (_, _) => RaiseInteractionRequested();
-            GotFocus += OnInteractionRequested;
             SizeChanged += OnBrowserPaneSizeChanged;
             AddressBox.GotFocus += OnAddressBoxGotFocus;
             _layoutTimer = DispatcherQueue.CreateTimer();
@@ -428,10 +427,8 @@ namespace SelfContainedDeployment.Panes
             _disposed = true;
             _layoutTimer.Stop();
             ActualThemeChanged -= OnActualThemeChanged;
-            GotFocus -= OnInteractionRequested;
             SizeChanged -= OnBrowserPaneSizeChanged;
             AddressBox.GotFocus -= OnAddressBoxGotFocus;
-            BrowserView.GotFocus -= OnInteractionRequested;
             if (BrowserView.CoreWebView2 is not null)
             {
                 BrowserView.CoreWebView2.NavigationCompleted -= OnNavigationCompleted;
@@ -694,7 +691,6 @@ namespace SelfContainedDeployment.Panes
                 core.NewWindowRequested += OnNewWindowRequested;
                 core.AddWebResourceRequestedFilter($"{InternalStartPageUri}*", CoreWebView2WebResourceContext.Document);
                 core.WebResourceRequested += OnWebResourceRequested;
-                BrowserView.GotFocus += OnInteractionRequested;
                 _initialized = true;
                 LogBrowserEvent("webview.configure", "Attached browser event handlers", new Dictionary<string, string>
                 {

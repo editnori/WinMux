@@ -239,8 +239,6 @@ namespace SelfContainedDeployment.Panes
             Interlocked.Increment(ref _liveEditorCount);
             InitializeComponent();
             PointerPressed += (_, _) => RaiseInteractionRequested();
-            GotFocus += (_, _) => RaiseInteractionRequested();
-            EditorView.GotFocus += OnEditorViewGotFocus;
             ActualThemeChanged += OnActualThemeChanged;
             SizeChanged += OnEditorSizeChanged;
             _layoutTimer = DispatcherQueue.CreateTimer();
@@ -391,7 +389,6 @@ namespace SelfContainedDeployment.Panes
             CancelPendingDocumentApply();
             ActualThemeChanged -= OnActualThemeChanged;
             SizeChanged -= OnEditorSizeChanged;
-            EditorView.GotFocus -= OnEditorViewGotFocus;
             _files.Clear();
             _fileListLoaded = false;
             _selectedFullPath = null;
@@ -603,11 +600,6 @@ namespace SelfContainedDeployment.Panes
         private void OnUnloaded(object sender, RoutedEventArgs e)
         {
             _layoutTimer.Stop();
-        }
-
-        private void OnEditorViewGotFocus(object sender, RoutedEventArgs e)
-        {
-            RaiseInteractionRequested();
         }
 
         private void OnActualThemeChanged(FrameworkElement sender, object args)

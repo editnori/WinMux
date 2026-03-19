@@ -36,8 +36,15 @@ namespace Microsoft.Terminal.Wpf {
 
 		}
 
-		private async void TerminalControl_GettingFocus(UIElement sender, GettingFocusEventArgs args) {
-			args.Cancel=true;
+		private void TerminalControl_GettingFocus(UIElement sender, GettingFocusEventArgs args) {
+			try {
+				args.Cancel = true;
+			}
+			catch (ArgumentException) {
+				// WinUI can surface a non-cancelable focus transition during reentrant layout work.
+				// Forward focus to the hosted terminal hwnd anyway instead of crashing the app.
+			}
+
 			termContainer.PassFocus();			
 		}
 

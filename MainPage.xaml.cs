@@ -82,6 +82,8 @@ namespace SelfContainedDeployment
         private string _lastTabStripThreadId;
         private bool _suppressPaneInteractionRequests;
         private bool _suppressThreadNameSync;
+        private static readonly TimeSpan CrossPaneInteractionSuppressionWindow = TimeSpan.FromMilliseconds(140);
+        private DateTimeOffset _ignoreNonSelectedPaneInteractionUntil;
         private DateTimeOffset _suppressSettingsUntil;
         private bool _settingsPageNeedsRefresh = true;
         private bool _settingsPagePreloadStarted;
@@ -101,6 +103,7 @@ namespace SelfContainedDeployment
         private readonly HashSet<string> _baselineCaptureInFlightThreadIds = new(StringComparer.Ordinal);
         private GitThreadSnapshot _activeGitSnapshot;
         private int _latestGitRefreshRequestId;
+        private int _latestSelectedDiffRequestId;
         private bool _gitRefreshInFlight;
         private bool _gitRefreshPending;
         private string _pendingGitSelectedPath;
@@ -2500,7 +2503,7 @@ namespace SelfContainedDeployment
 
             EventHandler interactionRequested = (_, _) =>
             {
-                if (_suppressPaneInteractionRequests || _refreshingTabView)
+                if (ShouldIgnorePaneInteractionRequest(thread, pane))
                 {
                     return;
                 }
@@ -2977,7 +2980,7 @@ namespace SelfContainedDeployment
         {
             void ActivatePaneFromInteraction()
             {
-                if (_suppressPaneInteractionRequests || _refreshingTabView)
+                if (ShouldIgnorePaneInteractionRequest(thread, pane))
                 {
                     return;
                 }
@@ -3010,6 +3013,27 @@ namespace SelfContainedDeployment
                     editorPane.Editor.InteractionRequested += (_, _) => ActivatePaneFromInteraction();
                     break;
             }
+        }
+
+        private bool ShouldIgnorePaneInteractionRequest(WorkspaceThread thread, WorkspacePaneRecord pane)
+        {
+            if (_suppressPaneInteractionRequests || _refreshingTabView)
+            {
+                return true;
+            }
+
+            if (!ReferenceEquals(_activeThread, thread))
+            {
+                return false;
+            }
+
+            if (!IsPaneCurrentlyVisible(thread, pane))
+            {
+                return true;
+            }
+
+            return DateTimeOffset.UtcNow < _ignoreNonSelectedPaneInteractionUntil &&
+                !string.Equals(thread?.SelectedPaneId, pane?.Id, StringComparison.Ordinal);
         }
 
         private void MarkPaneRequiresAttention(WorkspacePaneRecord pane)
@@ -3195,6 +3219,25 @@ namespace SelfContainedDeployment
                 3 => WorkspaceLayoutPreset.Triple,
                 _ => WorkspaceLayoutPreset.Quad,
             };
+        }
+
+        private bool IsPaneCurrentlyVisible(WorkspaceThread thread, WorkspacePaneRecord pane)
+        {
+            if (thread is null || pane is null)
+            {
+                return false;
+            }
+
+            foreach (WorkspacePaneRecord visiblePane in GetVisiblePanes(thread))
+            {
+                if (ReferenceEquals(visiblePane, pane) ||
+                    string.Equals(visiblePane.Id, pane.Id, StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private void SetThreadLayout(string threadId, string value)
@@ -5062,7 +5105,7 @@ namespace SelfContainedDeployment
                 return;
             }
 
-            int requestId = ++_latestGitRefreshRequestId;
+            int requestId = ++_latestSelectedDiffRequestId;
             string worktreePath = thread.WorktreePath ?? project.RootPath;
             GitThreadSnapshot activeSnapshot = _activeGitSnapshot;
             GitChangedFile selectedFile = activeSnapshot?.ChangedFiles
@@ -5075,7 +5118,7 @@ namespace SelfContainedDeployment
                     .Run(() => GitStatusService.Capture(worktreePath, selectedPath))
                     .ConfigureAwait(true);
 
-                if (requestId != _latestGitRefreshRequestId ||
+                if (requestId != _latestSelectedDiffRequestId ||
                     !ReferenceEquals(thread, _activeThread) ||
                     !ReferenceEquals(project, _activeProject))
                 {
@@ -5106,7 +5149,7 @@ namespace SelfContainedDeployment
                 .Run(() => GitStatusService.EnsureDiffText(worktreePath, selectedFile))
                 .ConfigureAwait(true);
 
-            if (requestId != _latestGitRefreshRequestId ||
+            if (requestId != _latestSelectedDiffRequestId ||
                 !ReferenceEquals(thread, _activeThread) ||
                 !ReferenceEquals(project, _activeProject))
             {
@@ -5560,6 +5603,7 @@ namespace SelfContainedDeployment
         {
             if (GetSelectedPane(_activeThread) is not TerminalPaneRecord)
             {
+                _paneFocusRequestId++;
                 return;
             }
 
@@ -5861,7 +5905,7 @@ namespace SelfContainedDeployment
             if (_showingSettings)
             {
                 SettingsFrame.Visibility = Visibility.Visible;
-                PaneWorkspaceShell.Visibility = Visibility.Visible;
+                PaneWorkspaceShell.Visibility = Visibility.Collapsed;
                 PaneWorkspaceShell.Opacity = 0;
                 PaneWorkspaceShell.IsHitTestVisible = false;
                 EmptyThreadStatePanel.Visibility = Visibility.Collapsed;
