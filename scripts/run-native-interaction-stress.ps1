@@ -260,17 +260,30 @@ try {
         return $null
     } -Attempts 60 -DelayMilliseconds 250
 
-    $state = Invoke-AutomationGet "/state"
-    $thread = Get-ActiveThread -State $state
-    $terminalTab = @($thread.tabs) | Where-Object { $_.kind -eq "terminal" } | Select-Object -First 1
-    $editorTab = @($thread.tabs) | Where-Object { $_.kind -eq "editor" } | Select-Object -First 1
-    $browserTab = @($thread.tabs) | Where-Object { $_.kind -eq "browser" } | Select-Object -First 1
-    $diffTab = @($thread.tabs) | Where-Object { $_.kind -eq "diff" } | Select-Object -First 1
+    function Get-StressTabs {
+        $latestState = Invoke-AutomationGet "/state"
+        $latestThread = Get-ActiveThread -State $latestState
+        Assert-True ($null -ne $latestThread) "Stress thread is missing."
 
-    Assert-True ($null -ne $terminalTab) "Stress thread is missing a terminal tab."
-    Assert-True ($null -ne $editorTab) "Stress thread is missing an editor tab."
-    Assert-True ($null -ne $browserTab) "Stress thread is missing a browser tab."
-    Assert-True ($null -ne $diffTab) "Stress thread is missing a diff tab."
+        $terminalTab = @($latestThread.tabs) | Where-Object { $_.kind -eq "terminal" } | Select-Object -First 1
+        $editorTab = @($latestThread.tabs) | Where-Object { $_.kind -eq "editor" } | Select-Object -First 1
+        $browserTab = @($latestThread.tabs) | Where-Object { $_.kind -eq "browser" } | Select-Object -First 1
+        $diffTab = @($latestThread.tabs) | Where-Object { $_.kind -eq "diff" } | Select-Object -First 1
+
+        Assert-True ($null -ne $terminalTab) "Stress thread is missing a terminal tab."
+        Assert-True ($null -ne $editorTab) "Stress thread is missing an editor tab."
+        Assert-True ($null -ne $browserTab) "Stress thread is missing a browser tab."
+        Assert-True ($null -ne $diffTab) "Stress thread is missing a diff tab."
+
+        return [pscustomobject]@{
+            state = $latestState
+            thread = $latestThread
+            terminal = $terminalTab
+            editor = $editorTab
+            browser = $browserTab
+            diff = $diffTab
+        }
+    }
 
     $layouts = @("solo", "dual", "triple", "quad")
     $diffTargets = @("notes.txt", "todo.md")
@@ -278,6 +291,7 @@ try {
     for ($iteration = 1; $iteration -le $Iterations; $iteration++) {
         $layout = $layouts[($iteration - 1) % $layouts.Count]
         $diffTarget = $diffTargets[($iteration - 1) % $diffTargets.Count]
+        $tabSnapshot = Get-StressTabs
 
         $null = Measure-Step -Name "showSettings" -Iteration $iteration -Action {
             $response = Invoke-AutomationPost "/action" @{ action = "showSettings" }
@@ -358,7 +372,7 @@ try {
             } -Attempts 20 -DelayMilliseconds 120
         }
 
-        foreach ($tab in @($terminalTab, $editorTab, $browserTab, $diffTab)) {
+        foreach ($tab in @($tabSnapshot.terminal, $tabSnapshot.editor, $tabSnapshot.browser, $tabSnapshot.diff)) {
             $tabName = "selectTab:$($tab.kind)"
             $null = Measure-Step -Name $tabName -Iteration $iteration -Action {
                 $response = Invoke-AutomationPost "/action" @{

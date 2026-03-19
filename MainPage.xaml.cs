@@ -1072,7 +1072,7 @@ namespace SelfContainedDeployment
                         ShowTerminalShell(queueGitRefresh: false);
                         break;
                     case "showsettings":
-                        ShowSettings();
+                        ShowSettings(bypassSuppression: true);
                         break;
                     case "toggleinspector":
                         ToggleInspector();
@@ -4529,9 +4529,9 @@ namespace SelfContainedDeployment
             });
         }
 
-        private void ShowSettings()
+        private void ShowSettings(bool bypassSuppression = false)
         {
-            if (ShouldSuppressSettingsNavigation())
+            if (!bypassSuppression && ShouldSuppressSettingsNavigation())
             {
                 return;
             }

@@ -18,7 +18,7 @@
     <PublishProfile>Properties\PublishProfiles\win10-$(Platform).pubxml</PublishProfile>
 	<WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
 	<WindowsPackageType>None</WindowsPackageType>
-    <DefaultItemExcludes>$(DefaultItemExcludes);artifacts\**;artifacts/**;vendor\**;vendor/**;bin\**;bin/**;obj\**;obj/**</DefaultItemExcludes>
+    <DefaultItemExcludes>$(DefaultItemExcludes);artifacts\**;artifacts/**;vendor\**;vendor/**;vendor-src\**;vendor-src/**;bin\**;bin/**;obj\**;obj/**</DefaultItemExcludes>
   </PropertyGroup>
 
   <ItemGroup>
@@ -36,9 +36,7 @@
     <Reference Include="EasyWindowsTerminalControl.WinUI">
       <HintPath>vendor\terminal\EasyWindowsTerminalControl.WinUI.dll</HintPath>
     </Reference>
-    <Reference Include="Microsoft.Terminal.WinUI3">
-      <HintPath>vendor\terminal\Microsoft.Terminal.WinUI3.dll</HintPath>
-    </Reference>
+    <ProjectReference Include="vendor-src\Microsoft.Terminal.WinUI3\Microsoft.Terminal.WinUI3.csproj" />
   </ItemGroup>
 
   <Target Name="CopyNativeTerminalAssets" AfterTargets="Build">

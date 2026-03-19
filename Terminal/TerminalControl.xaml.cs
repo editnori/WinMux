@@ -1,6 +1,8 @@
 using EasyWindowsTerminalControl;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
+using Microsoft.UI.Xaml.Automation.Peers;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.Web.WebView2.Core;
@@ -18,7 +20,7 @@ using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.UI;
-using NativeTerminalViewControl = EasyWindowsTerminalControl.EasyTerminalControl;
+using NativeTerminalViewControl = SelfContainedDeployment.Terminal.SafeEasyTerminalControl;
 using DrawingColor = System.Drawing.Color;
 using DrawingSize = System.Drawing.Size;
 using UIColor = Windows.UI.Color;
@@ -62,6 +64,7 @@ namespace SelfContainedDeployment.Terminal
         private bool _replayRestoreInputSent;
         private bool _replayRestorePending;
         private bool _replayRestoreFailed;
+        private bool _pendingProgrammaticFocus;
         private int _cols = 120;
         private int _rows = 32;
         private string _sessionTitle = "Terminal";
@@ -201,10 +204,12 @@ namespace SelfContainedDeployment.Terminal
             _nativeTerminalLoaded = true;
             _rendererReady = true;
             MarkStartupMilestone(ref _rendererReadyMs, "startup.renderer_ready", "Native terminal renderer loaded");
+            ApplyTerminalAutomationIsolation();
             ApplyBackgroundColor();
             UpdateNativeTerminalTheme();
             UpdateTerminalHeader();
             RequestFit();
+            TryFulfillPendingProgrammaticFocus();
             RendererReady?.Invoke(this, EventArgs.Empty);
 
             if (AutoStartSession)
@@ -426,6 +431,7 @@ namespace SelfContainedDeployment.Terminal
                     MarkStartupMilestone(ref _firstDisplayOutputMs, "startup.first_display_output", "Terminal produced visible output");
                     _hasDisplayOutput = true;
                     HideStartupMask();
+                    TryFulfillPendingProgrammaticFocus();
                 }
 
                 if (_replayRestorePending && _process?.HasExited == false)
@@ -484,6 +490,7 @@ namespace SelfContainedDeployment.Terminal
                 _started = false;
                 _replayRestoreTimer.Stop();
                 _postStartInputTimer.Stop();
+                _pendingProgrammaticFocus = false;
                 ResetActiveToolSession(raiseCompletedEvent: false);
                 HideStatus();
                 UpdateTerminalHeader();
@@ -503,13 +510,14 @@ namespace SelfContainedDeployment.Terminal
         {
             EnsureNativeTerminalViewCreated();
             RaiseInteractionRequested();
-            try
+            if (!CanReceiveProgrammaticFocus())
             {
-                Focus(FocusState.Programmatic);
+                _pendingProgrammaticFocus = true;
+                TraceNativeTerminal("Deferred programmatic focus until terminal is interactive");
+                return;
             }
-            catch
-            {
-            }
+
+            TryApplyProgrammaticFocus("requested");
         }
 
         public Task WarmupAsync()
@@ -601,6 +609,7 @@ namespace SelfContainedDeployment.Terminal
             _disposed = true;
             _replayRestoreTimer.Stop();
             _postStartInputTimer.Stop();
+            _pendingProgrammaticFocus = false;
             ResetActiveToolSession(raiseCompletedEvent: false);
 
             if (_process is not null)
@@ -1598,6 +1607,50 @@ namespace SelfContainedDeployment.Terminal
             }
         }
 
+        private bool CanReceiveProgrammaticFocus()
+        {
+            return !_disposed
+                && !_sessionExited
+                && _nativeTerminalLoaded
+                && _rendererReady
+                && _hasDisplayOutput
+                && _nativeTerminalView?.XamlRoot is not null;
+        }
+
+        private void TryFulfillPendingProgrammaticFocus()
+        {
+            if (!_pendingProgrammaticFocus || !CanReceiveProgrammaticFocus())
+            {
+                return;
+            }
+
+            _pendingProgrammaticFocus = false;
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                if (!CanReceiveProgrammaticFocus())
+                {
+                    _pendingProgrammaticFocus = true;
+                    return;
+                }
+
+                TryApplyProgrammaticFocus("deferred");
+            });
+        }
+
+        private void TryApplyProgrammaticFocus(string reason)
+        {
+            try
+            {
+                bool focused = Focus(FocusState.Programmatic);
+                TraceNativeTerminal($"Programmatic focus {reason} result={focused}");
+            }
+            catch (Exception ex)
+            {
+                _pendingProgrammaticFocus = true;
+                TraceNativeTerminal($"Programmatic focus {reason} failed: {ex.Message}");
+            }
+        }
+
         internal static Task<CoreWebView2Environment> GetEnvironmentAsync()
         {
             lock (EnvironmentSync)
@@ -1932,6 +1985,7 @@ namespace SelfContainedDeployment.Terminal
             _nativeTerminalView = new NativeTerminalViewControl
             {
             };
+            ApplyTerminalAutomationIsolation();
             _nativeTerminalView.Loaded += OnNativeTerminalLoaded;
             _nativeTerminalView.GotFocus += (_, _) => RaiseInteractionRequested();
             _nativeTerminalView.PointerPressed += (_, _) => RaiseInteractionRequested();
@@ -1945,6 +1999,24 @@ namespace SelfContainedDeployment.Terminal
                     MarkNativeTerminalReady();
                 }
             });
+        }
+
+        private void ApplyTerminalAutomationIsolation()
+        {
+            if (NativeTerminalHost is not null)
+            {
+                AutomationProperties.SetAccessibilityView(NativeTerminalHost, AccessibilityView.Raw);
+            }
+
+            if (_nativeTerminalView is not null)
+            {
+                AutomationProperties.SetAccessibilityView(_nativeTerminalView, AccessibilityView.Raw);
+            }
+
+            if (_nativeTerminalView?.Terminal is UIElement terminalElement)
+            {
+                AutomationProperties.SetAccessibilityView(terminalElement, AccessibilityView.Raw);
+            }
         }
 
         private static void TraceNativeTerminal(string message)
