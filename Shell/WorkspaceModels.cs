@@ -157,6 +157,43 @@ namespace SelfContainedDeployment.Shell
             return false;
         }
 
+        public static string ResolveHostReadablePath(string projectPath)
+        {
+            return TryResolveHostReadablePath(projectPath, out string hostReadablePath)
+                ? hostReadablePath
+                : null;
+        }
+
+        public static bool TryResolveHostReadablePath(string projectPath, out string hostReadablePath)
+        {
+            hostReadablePath = null;
+            if (string.IsNullOrWhiteSpace(projectPath))
+            {
+                return false;
+            }
+
+            string normalizedPath = NormalizeProjectPath(projectPath);
+            if (TryParseWslSharePath(normalizedPath, out WslSharePath wslSharePath))
+            {
+                hostReadablePath = Path.GetFullPath(wslSharePath.CanonicalUncPath);
+                return true;
+            }
+
+            if (TryConvertToWindowsPath(normalizedPath, out string windowsPath))
+            {
+                hostReadablePath = Path.GetFullPath(windowsPath);
+                return true;
+            }
+
+            if (!normalizedPath.StartsWith("/", StringComparison.Ordinal) && Path.IsPathRooted(normalizedPath))
+            {
+                hostReadablePath = Path.GetFullPath(normalizedPath);
+                return true;
+            }
+
+            return false;
+        }
+
         public static bool EnsureProjectDirectory(string projectPath, out string localPath)
         {
             if (!TryResolveLocalStoragePath(projectPath, out localPath))
@@ -248,16 +285,12 @@ namespace SelfContainedDeployment.Shell
         private static string BuildWslLaunchCommand(string projectPath)
         {
             string normalizedPath = NormalizeProjectPath(projectPath);
-            string bootstrapScript =
-                "if [ -z \"$STARSHIP_CONFIG\" ] && [ ! -f \"$HOME/.config/starship.toml\" ] && [ -f \"$WINMUX_REPO_ROOT/tools/winmux-starship.toml\" ]; then export STARSHIP_CONFIG=\"$WINMUX_REPO_ROOT/tools/winmux-starship.toml\"; fi; " +
-                "exec \"${SHELL:-bash}\" -il";
-
             if (TryParseWslSharePath(normalizedPath, out WslSharePath wslSharePath))
             {
-                return $"wsl.exe --distribution {wslSharePath.DistroName} --cd \"{wslSharePath.LinuxPath}\" sh -lc '{bootstrapScript}'";
+                return $"wsl.exe --distribution {wslSharePath.DistroName} --cd \"{wslSharePath.LinuxPath}\"";
             }
 
-            return $"wsl.exe --cd \"{ResolveDisplayPath(normalizedPath, ShellProfileIds.Wsl)}\" sh -lc '{bootstrapScript}'";
+            return $"wsl.exe --cd \"{ResolveDisplayPath(normalizedPath, ShellProfileIds.Wsl)}\"";
         }
 
         private static bool TryParseWslSharePath(string path, out WslSharePath wslSharePath)
@@ -408,6 +441,8 @@ namespace SelfContainedDeployment.Shell
 
     public sealed class WorkspaceThread
     {
+        private string _worktreePath;
+
         public WorkspaceThread(WorkspaceProject project, string name, string id = null)
         {
             Project = project ?? throw new ArgumentNullException(nameof(project));
@@ -423,7 +458,23 @@ namespace SelfContainedDeployment.Shell
 
         public WorkspaceProject Project { get; }
 
-        public string WorktreePath { get; set; }
+        public string WorktreePath
+        {
+            get => _worktreePath;
+            set
+            {
+                string normalizedPath = string.IsNullOrWhiteSpace(value)
+                    ? null
+                    : ShellProfiles.NormalizeProjectPath(value);
+                if (string.Equals(_worktreePath, normalizedPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+
+                _worktreePath = normalizedPath;
+                NotifyPaneRoots();
+            }
+        }
 
         public string BranchName { get; set; }
 
@@ -498,6 +549,15 @@ namespace SelfContainedDeployment.Shell
             return NoteEntries.FirstOrDefault(candidate => string.Equals(candidate.Id, SelectedNoteId, StringComparison.Ordinal))
                 ?? NoteEntries.FirstOrDefault(candidate => !candidate.IsArchived)
                 ?? NoteEntries.FirstOrDefault();
+        }
+
+        private void NotifyPaneRoots()
+        {
+            string effectiveWorktreePath = _worktreePath ?? Project?.RootPath;
+            foreach (EditorPaneRecord editorPane in Panes.OfType<EditorPaneRecord>())
+            {
+                editorPane.Editor?.UpdateProjectRootPath(effectiveWorktreePath);
+            }
         }
     }
 

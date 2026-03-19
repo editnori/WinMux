@@ -113,6 +113,7 @@ namespace SelfContainedDeployment.Panes
         private const int MaxProjectFileCacheEntries = 12;
         private static readonly object ProjectFileCacheGate = new();
         private static readonly Dictionary<string, CachedProjectFileSnapshot> ProjectFileCache = new(StringComparer.OrdinalIgnoreCase);
+        private static int _liveEditorCount;
         private static readonly EnumerationOptions ProjectFileEnumerationOptions = new()
         {
             IgnoreInaccessible = true,
@@ -213,6 +214,7 @@ namespace SelfContainedDeployment.Panes
 
         public EditorPaneControl()
         {
+            Interlocked.Increment(ref _liveEditorCount);
             InitializeComponent();
             PointerPressed += (_, _) => RaiseInteractionRequested();
             GotFocus += (_, _) => RaiseInteractionRequested();
@@ -357,6 +359,11 @@ namespace SelfContainedDeployment.Panes
 
         public void DisposePane()
         {
+            if (_disposed)
+            {
+                return;
+            }
+
             _disposed = true;
             _layoutTimer.Stop();
             CancelPendingDocumentApply();
@@ -367,11 +374,19 @@ namespace SelfContainedDeployment.Panes
             _fileListLoaded = false;
             _selectedFullPath = null;
             _selectedRelativePath = null;
+            _initializationTask = null;
+            _webViewInitialized = false;
+            _editorReady = false;
 
             if (EditorView.CoreWebView2 is not null)
             {
                 EditorView.CoreWebView2.WebMessageReceived -= OnWebMessageReceived;
                 EditorView.CoreWebView2.NavigationCompleted -= OnNavigationCompleted;
+            }
+
+            if (Interlocked.Decrement(ref _liveEditorCount) <= 0)
+            {
+                TerminalControl.ClearSharedWebViewEnvironmentCache();
             }
         }
 

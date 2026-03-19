@@ -17,6 +17,7 @@ using System.Net;
 using System.Runtime.InteropServices.WindowsRuntime;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Linq;
 using Windows.System;
@@ -59,6 +60,7 @@ namespace SelfContainedDeployment.Panes
 
         private static readonly Dictionary<string, Task<CoreWebView2Environment>> EnvironmentTasks = new(StringComparer.OrdinalIgnoreCase);
         private static readonly object EnvironmentSync = new();
+        private static int _livePaneCount;
         private Task _initializationTask;
         private bool _initialized;
         private bool _disposed;
@@ -68,6 +70,7 @@ namespace SelfContainedDeployment.Panes
         private string _profileSeedStatus = "Isolated WinMux browser profile";
         private string _extensionImportStatus = "No browser extensions are installed in this WinMux profile.";
         private string _credentialAutofillStatus = "No imported WinMux credentials.";
+        private string _credentialAutofillOutcome = "none";
         private readonly List<BrowserTabSession> _browserTabs = new();
         private readonly Dictionary<string, Button> _browserTabButtonsById = new(StringComparer.Ordinal);
         private readonly Dictionary<string, Border> _browserTabDotsById = new(StringComparer.Ordinal);
@@ -106,6 +109,7 @@ namespace SelfContainedDeployment.Panes
 
         public BrowserPaneControl()
         {
+            Interlocked.Increment(ref _livePaneCount);
             InitializeComponent();
             ActualThemeChanged += OnActualThemeChanged;
             PointerPressed += (_, _) => RaiseInteractionRequested();
@@ -140,7 +144,14 @@ namespace SelfContainedDeployment.Panes
             Task<CoreWebView2Environment> environmentTask;
             lock (EnvironmentSync)
             {
-                if (!EnvironmentTasks.TryGetValue(key, out environmentTask))
+                if (EnvironmentTasks.TryGetValue(key, out environmentTask) &&
+                    (environmentTask.IsFaulted || environmentTask.IsCanceled))
+                {
+                    EnvironmentTasks.Remove(key);
+                    environmentTask = null;
+                }
+
+                if (environmentTask is null)
                 {
                     environmentTask = CreateEnvironmentAsync(key);
                     EnvironmentTasks[key] = environmentTask;
@@ -192,6 +203,8 @@ namespace SelfContainedDeployment.Panes
 
         public string CredentialAutofillStatus => _credentialAutofillStatus;
 
+        public string CredentialAutofillOutcome => _credentialAutofillOutcome;
+
         public IReadOnlyList<string> InstalledExtensionNames => _installedExtensions
             .OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
             .Select(item => item.Name)
@@ -213,6 +226,7 @@ namespace SelfContainedDeployment.Panes
             _themePreference = theme;
             RequestedTheme = theme;
             ApplyBrowserSurfaceTheme();
+            ApplyBrowserPreferredColorScheme();
 
             if (_initialized && string.Equals(_currentUri, "winmux://start", StringComparison.OrdinalIgnoreCase))
             {
@@ -224,6 +238,7 @@ namespace SelfContainedDeployment.Panes
 
         private async Task RefreshStartPageForThemeChangeAsync()
         {
+            using var perfScope = NativeAutomationDiagnostics.TrackOperation("browser.start-page.theme-refresh");
             int maskSequence = ShowResizeMask();
             try
             {
@@ -268,7 +283,7 @@ namespace SelfContainedDeployment.Panes
         private void ApplyBrowserSurfaceTheme()
         {
             Windows.UI.Color backgroundColor = ResolveShellColor(
-                "ShellPageBackgroundBrush",
+                "ShellSurfaceBackgroundBrush",
                 Windows.UI.Color.FromArgb(0xFF, 0xF5, 0xF6, 0xF8));
 
             if (BrowserRoot is not null)
@@ -284,6 +299,27 @@ namespace SelfContainedDeployment.Panes
             if (BrowserView is not null)
             {
                 BrowserView.DefaultBackgroundColor = backgroundColor;
+            }
+        }
+
+        private void ApplyBrowserPreferredColorScheme()
+        {
+            try
+            {
+                if (BrowserView?.CoreWebView2?.Profile is null)
+                {
+                    return;
+                }
+
+                ElementTheme effectiveTheme = _themePreference == ElementTheme.Default
+                    ? (ActualTheme == ElementTheme.Light ? ElementTheme.Light : ElementTheme.Dark)
+                    : _themePreference;
+                BrowserView.CoreWebView2.Profile.PreferredColorScheme = effectiveTheme == ElementTheme.Light
+                    ? CoreWebView2PreferredColorScheme.Light
+                    : CoreWebView2PreferredColorScheme.Dark;
+            }
+            catch
+            {
             }
         }
 
@@ -352,8 +388,19 @@ namespace SelfContainedDeployment.Panes
             _browserTabTitlesById.Clear();
             _installedExtensions.Clear();
             _credentialContextMenuMatches.Clear();
+            _currentUri = null;
+            _currentTitle = "Preview";
+            _selectedBrowserTabId = null;
+            _lastStateChangeSignature = null;
+            _lastBrowserTabStripStructureSignature = null;
+            _initializationTask = null;
             _deferredSetupTask = null;
+            _initialized = false;
             BrowserTabStripPanel?.Children.Clear();
+            if (Interlocked.Decrement(ref _livePaneCount) <= 0)
+            {
+                ClearEnvironmentCache();
+            }
         }
 
         public void Navigate(string target)
@@ -929,7 +976,7 @@ namespace SelfContainedDeployment.Panes
                 {
                     Button closeButton = new()
                     {
-                        Style = (Style)Application.Current.Resources["ShellGhostToolbarButtonStyle"],
+                        Style = (Style)Application.Current.Resources["ShellPaneStripButtonStyle"],
                         Tag = tab.Id,
                         Width = compact ? 20 : 22,
                         Height = compact ? 20 : 22,
@@ -1050,8 +1097,8 @@ namespace SelfContainedDeployment.Panes
             double targetTitleWidth = ResolveBrowserTabTitleWidth();
             bool refreshTabStrip = compact != _lastCompactLayout ||
                 Math.Abs(targetTitleWidth - _lastBrowserTabTitleWidth) >= 2;
-            BrowserChromeBorder.Padding = compact ? new Thickness(6, 4, 6, 4) : new Thickness(6, 5, 6, 4);
-            BrowserChromeGrid.RowSpacing = compact ? 4 : 5;
+            BrowserChromeBorder.Padding = compact ? new Thickness(6, 3, 38, 3) : new Thickness(7, 2, 40, 4);
+            BrowserChromeGrid.RowSpacing = 4;
             BrowserTabStripPanel.Spacing = compact ? 3 : 4;
             BrowserTabStripScroller.VerticalAlignment = VerticalAlignment.Center;
 
@@ -1059,7 +1106,7 @@ namespace SelfContainedDeployment.Panes
             AddressBox.Height = chromeButtonSize;
             AddressBox.MinWidth = compact ? 120 : 180;
 
-            ApplyChromeButtonMetrics(AddBrowserTabButton, compact ? 22 : 24);
+            ApplyChromeButtonMetrics(AddBrowserTabButton, compact ? 24 : 26);
             ApplyChromeButtonMetrics(BrowserBackButton, chromeButtonSize);
             ApplyChromeButtonMetrics(BrowserForwardButton, chromeButtonSize);
             ApplyChromeButtonMetrics(BrowserHomeButton, chromeButtonSize);
@@ -1189,15 +1236,15 @@ namespace SelfContainedDeployment.Panes
 
             Windows.UI.Color color = (effectiveTheme, key) switch
             {
-                (ElementTheme.Light, "ShellPageBackgroundBrush") => Windows.UI.Color.FromArgb(0xFF, 0xF5, 0xF6, 0xF8),
-                (ElementTheme.Light, "ShellSurfaceBackgroundBrush") => Windows.UI.Color.FromArgb(0xFF, 0xFB, 0xFC, 0xFD),
-                (ElementTheme.Light, "ShellMutedSurfaceBrush") => Windows.UI.Color.FromArgb(0xFF, 0xEE, 0xF1, 0xF4),
-                (ElementTheme.Light, "ShellNavActiveBrush") => Windows.UI.Color.FromArgb(0xFF, 0xE7, 0xEB, 0xF0),
-                (ElementTheme.Light, "ShellBorderBrush") => Windows.UI.Color.FromArgb(0xFF, 0xE1, 0xE5, 0xEA),
-                (ElementTheme.Light, "ShellPaneActiveBorderBrush") => Windows.UI.Color.FromArgb(0xFF, 0x2C, 0x2D, 0x31),
-                (ElementTheme.Light, "ShellTextPrimaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0x1B, 0x1F, 0x24),
-                (ElementTheme.Light, "ShellTextSecondaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0x59, 0x60, 0x6A),
-                (ElementTheme.Light, "ShellTextTertiaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0x7E, 0x86, 0x91),
+                (ElementTheme.Light, "ShellPageBackgroundBrush") => Windows.UI.Color.FromArgb(0xFF, 0xF2, 0xF5, 0xF8),
+                (ElementTheme.Light, "ShellSurfaceBackgroundBrush") => Windows.UI.Color.FromArgb(0xFF, 0xF9, 0xFB, 0xFD),
+                (ElementTheme.Light, "ShellMutedSurfaceBrush") => Windows.UI.Color.FromArgb(0xFF, 0xF2, 0xF6, 0xFA),
+                (ElementTheme.Light, "ShellNavActiveBrush") => Windows.UI.Color.FromArgb(0xFF, 0xDF, 0xE8, 0xF1),
+                (ElementTheme.Light, "ShellBorderBrush") => Windows.UI.Color.FromArgb(0xFF, 0xC7, 0xD2, 0xDD),
+                (ElementTheme.Light, "ShellPaneActiveBorderBrush") => Windows.UI.Color.FromArgb(0xFF, 0x33, 0x41, 0x55),
+                (ElementTheme.Light, "ShellTextPrimaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0x1A, 0x1E, 0x23),
+                (ElementTheme.Light, "ShellTextSecondaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0x39, 0x42, 0x4D),
+                (ElementTheme.Light, "ShellTextTertiaryBrush") => Windows.UI.Color.FromArgb(0xFF, 0x55, 0x60, 0x6D),
                 (ElementTheme.Light, "ShellSuccessBrush") => Windows.UI.Color.FromArgb(0xFF, 0x16, 0xA3, 0x4A),
                 (ElementTheme.Light, "ShellWarningBrush") => Windows.UI.Color.FromArgb(0xFF, 0xCA, 0x8A, 0x04),
                 (ElementTheme.Light, "ShellInfoBrush") => Windows.UI.Color.FromArgb(0xFF, 0x25, 0x63, 0xEB),
@@ -1350,17 +1397,19 @@ namespace SelfContainedDeployment.Panes
                 return;
             }
 
+            bool lightTheme = (_themePreference == ElementTheme.Default ? ActualTheme : _themePreference) == ElementTheme.Light;
+
             if (active)
             {
-                button.Background = CreateTintedBrush(ResolveShellBrush("ShellPaneActiveBorderBrush"), 0x08, Windows.UI.Color.FromArgb(0xFF, 0x2C, 0x2D, 0x31));
-                button.BorderBrush = CreateTintedBrush(ResolveShellBrush("ShellPaneActiveBorderBrush"), 0x2C, Windows.UI.Color.FromArgb(0xFF, 0x2C, 0x2D, 0x31));
+                button.Background = CreateTintedBrush(ResolveShellBrush("ShellPaneActiveBorderBrush"), lightTheme ? (byte)0x10 : (byte)0x08, Windows.UI.Color.FromArgb(0xFF, 0x33, 0x41, 0x55));
+                button.BorderBrush = CreateTintedBrush(ResolveShellBrush("ShellPaneActiveBorderBrush"), lightTheme ? (byte)0x54 : (byte)0x2C, Windows.UI.Color.FromArgb(0xFF, 0x33, 0x41, 0x55));
                 button.Foreground = ResolveShellBrush("ShellTextPrimaryBrush");
                 button.BorderThickness = new Thickness(1);
                 return;
             }
 
-            button.Background = CreateTintedBrush(ResolveShellBrush("ShellBorderBrush"), 0x03, Windows.UI.Color.FromArgb(0xFF, 0x7E, 0x86, 0x91));
-            button.BorderBrush = CreateTintedBrush(ResolveShellBrush("ShellBorderBrush"), 0x12, Windows.UI.Color.FromArgb(0xFF, 0x7E, 0x86, 0x91));
+            button.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x00, 0x00, 0x00, 0x00));
+            button.BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(0x00, 0x00, 0x00, 0x00));
             button.Foreground = ResolveShellBrush("ShellTextSecondaryBrush");
             button.BorderThickness = new Thickness(1);
         }
@@ -1409,6 +1458,7 @@ namespace SelfContainedDeployment.Panes
         private void OnActualThemeChanged(FrameworkElement sender, object args)
         {
             ApplyBrowserSurfaceTheme();
+            ApplyBrowserPreferredColorScheme();
 
             if (_themePreference == ElementTheme.Default && string.Equals(_currentUri, "winmux://start", StringComparison.OrdinalIgnoreCase))
             {
@@ -2065,6 +2115,7 @@ namespace SelfContainedDeployment.Panes
             if (BrowserCredentialStore.GetCredentialCount() == 0)
             {
                 _credentialAutofillStatus = "No imported WinMux credentials.";
+                _credentialAutofillOutcome = "none";
                 return;
             }
 
@@ -2074,6 +2125,7 @@ namespace SelfContainedDeployment.Panes
                 : string.Equals(match.MatchScope, "origin", StringComparison.OrdinalIgnoreCase)
                     ? $"Imported WinMux credentials matched this page origin ({match.Origin})."
                     : $"Imported WinMux credentials matched this host ({match.Host}).";
+            _credentialAutofillOutcome = match is null ? "no-match" : "match-available";
         }
 
         private async Task TryAutofillMatchingCredentialsAsync()
@@ -2217,6 +2269,7 @@ namespace SelfContainedDeployment.Panes
                 });
                 if (!string.IsNullOrWhiteSpace(payload?.BlockedReason))
                 {
+                    _credentialAutofillOutcome = "blocked";
                     _credentialAutofillStatus = payload.BlockedReason switch
                     {
                         "new-password-form" => "WinMux blocked autofill on a sign-up or password-reset form.",
@@ -2224,8 +2277,15 @@ namespace SelfContainedDeployment.Panes
                         _ => "WinMux blocked autofill on an unsafe form.",
                     };
                 }
+                else if ((payload?.HasPasswordField == true && !payload.FilledPassword) ||
+                    (payload?.HasUsernameField == true && !payload.FilledUsername && !string.IsNullOrWhiteSpace(match.Username)))
+                {
+                    _credentialAutofillOutcome = "failed";
+                    _credentialAutofillStatus = "Imported WinMux credentials could not populate editable login fields on this page.";
+                }
                 else
                 {
+                    _credentialAutofillOutcome = "autofilled";
                     _credentialAutofillStatus = string.IsNullOrWhiteSpace(match.Username)
                         ? $"Imported WinMux credentials autofilled for {match.Host}."
                         : $"Imported WinMux credentials autofilled using {match.Username}.";
@@ -2243,6 +2303,7 @@ namespace SelfContainedDeployment.Panes
             }
             catch (Exception ex)
             {
+                _credentialAutofillOutcome = "failed";
                 _credentialAutofillStatus = $"Imported WinMux credentials failed to autofill for {match.Host}.";
                 LogBrowserEvent("credentials.autofill_failed", $"WinMux credential autofill failed for {match.Host}: {ex.Message}", new Dictionary<string, string>
                 {
@@ -2334,7 +2395,14 @@ namespace SelfContainedDeployment.Panes
 
             lock (EnvironmentSync)
             {
-                if (!EnvironmentTasks.TryGetValue(key, out environmentTask))
+                if (EnvironmentTasks.TryGetValue(key, out environmentTask) &&
+                    (environmentTask.IsFaulted || environmentTask.IsCanceled))
+                {
+                    EnvironmentTasks.Remove(key);
+                    environmentTask = null;
+                }
+
+                if (environmentTask is null)
                 {
                     environmentTask = CreateEnvironmentForProfileRootAsync(key);
                     EnvironmentTasks[key] = environmentTask;
@@ -2342,6 +2410,14 @@ namespace SelfContainedDeployment.Panes
             }
 
             return await environmentTask.ConfigureAwait(true);
+        }
+
+        private static void ClearEnvironmentCache()
+        {
+            lock (EnvironmentSync)
+            {
+                EnvironmentTasks.Clear();
+            }
         }
 
         private static string GetBrowserProfileRootPath()

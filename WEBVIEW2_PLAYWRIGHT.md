@@ -1,6 +1,6 @@
 # WebView2 + Playwright
 
-This repo can expose the embedded terminal renderer inside the native WinUI app over the Chrome DevTools Protocol.
+This repo can expose the embedded WebView2 browser/editor surfaces inside the native WinUI app over the Chrome DevTools Protocol.
 
 What this gives you:
 
@@ -18,7 +18,7 @@ What this gives you:
 - capture annotated native screenshots with overlay labels
 - inspect terminal scrollback, visible rows, cursor, selection, and session metadata
 - inspect browser panes through native browser state, eval, and screenshot endpoints
-- inspect the real `WebView2` surface that the native app is using
+- inspect the real `WebView2` browser/editor surfaces that the native app is using
 - attach Playwright to the running native app renderer
 - reload renderer HTML, CSS, and JS from the repo `Web/` folder without rebuilding native code
 
@@ -40,7 +40,7 @@ This does four things:
 
 1. Builds the WinUI app.
 2. Launches it with `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222 --remote-debugging-address=0.0.0.0`.
-3. Points the embedded renderer at the repo `Web/` folder through `NATIVE_TERMINAL_WEB_ROOT`.
+3. Points the WebView2-backed pane assets at the repo `Web/` folder through `NATIVE_TERMINAL_WEB_ROOT`.
 4. Starts the native automation endpoint on port `9331`.
 
 The launcher also exposes the debug port on an address that WSL can reach, so the local Playwright install inside this repo can attach from `js_repl` or from the Node helpers.
@@ -92,7 +92,7 @@ bun run native:screenshot
 bun run native:screenshot:annotated
 ```
 
-## Capture the current renderer
+## Capture the current WebView2 surface
 
 ```bash
 bun run webview2:screenshot
@@ -133,13 +133,13 @@ const resolv = await fs.readFile("/etc/resolv.conf", "utf8");
 const nameserver = resolv.split(/\r?\n/).find((line) => line.startsWith("nameserver "))?.split(/\s+/)[1];
 browser = await chromium.connectOverCDP(`http://${nameserver ?? "127.0.0.1"}:9222`);
 context = browser.contexts()[0];
-page = context.pages().find((p) => p.url().includes("terminal-host.html")) ?? context.pages()[0];
+page = context.pages().find((p) => !p.url().startsWith("devtools://")) ?? context.pages()[0];
 
 console.log(await page.title());
 console.log(page.url());
 ```
 
-Renderer-only iteration loop:
+WebView-only iteration loop:
 
 1. Edit files under `Web/`.
 2. Reload the attached page:
@@ -148,7 +148,7 @@ Renderer-only iteration loop:
 await page.reload({ waitUntil: "domcontentloaded" });
 ```
 
-Native shell or startup changes still require relaunching the app.
+Native shell or WebView asset changes still require relaunching the app.
 
 The native automation loop covers the shell-level gaps that CDP cannot:
 
@@ -165,7 +165,7 @@ The native automation loop covers the shell-level gaps that CDP cannot:
 - terminal inspection
 - native window screenshots
 
-Browser panes now use one shared WinMux WebView2 profile instead of per-project profiles. That improves persistence across projects, but it still is not the same thing as reusing the live Chrome profile or full Google Sync. `webview2:targets` remains best for the terminal renderer, while browser-pane inspection should go through `native:browser-state`, `native:browser-eval`, and `native:browser-screenshot`.
+Browser panes now use one shared WinMux WebView2 profile instead of per-project profiles. That improves persistence across projects, but it still is not the same thing as reusing the live Chrome profile or full Google Sync. `webview2:targets` is now primarily for browser/editor-pane inspection, while terminal panes are native-hosted and should be inspected through `native:terminal-state`, native screenshots, and event logs.
 
 Terminal-side WSL agents should not assume direct CDP access to the browser pane. Use the built-in bridge instead:
 

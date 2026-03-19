@@ -1,6 +1,6 @@
 # WinMux
 
-WinMux is a native Windows workspace shell built with WinUI 3, ConPTY, and WebView2.
+WinMux is a native Windows workspace shell built with WinUI 3, ConPTY, a Windows Terminal-backed native terminal surface, and WebView2 browser/editor panes.
 
 It combines terminals, browser panes, editor panes, patch review, worktree-aware threads, session restore, and a full native automation surface that can be driven from Bun. The repo is set up so a human can use the shell directly while an LLM can inspect, drive, screenshot, and record the exact same native app.
 
@@ -80,7 +80,7 @@ That means an LLM can:
 
 ```bash
 bun install
-bun run webview2:start
+dotnet run --project .\SelfContainedDeployment.csproj -p:Platform=x64
 ```
 
 Once the app is running, the main automation helpers are:
@@ -91,6 +91,14 @@ bun run native:state
 bun run native:ui-tree
 bun run native:screenshot
 ```
+
+For browser/editor WebView2 debugging, launch the alternate debug flow:
+
+```bash
+bun run webview2:start
+```
+
+That path is now for the WebView2-backed panes and CDP tooling. The terminal pane itself is no longer hosted in WebView2.
 
 ## Cinematic recordings
 
@@ -170,9 +178,9 @@ Tagged pushes like `alpha-v0.1.4` run `.github/workflows/windows-release.yml`, p
 ## Repo structure
 
 - `MainPage.*`: native shell layout and workspace model
-- `Terminal/`: ConPTY terminal host and WebView2 renderer bridge
+- `Terminal/`: ConPTY shell coordination plus the native Windows Terminal-backed pane host
 - `Panes/`: browser, editor, and diff panes
-- `Web/`: shared terminal/editor frontend assets
+- `Web/`: WebView2 assets used by browser/editor surfaces and legacy terminal-host references
 - `Automation/`: native automation server and recording support
 - `scripts/`: Bun/PowerShell helpers for automation, demos, and recordings
 

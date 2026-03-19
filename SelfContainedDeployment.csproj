@@ -18,16 +18,58 @@
     <PublishProfile>Properties\PublishProfiles\win10-$(Platform).pubxml</PublishProfile>
 	<WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
 	<WindowsPackageType>None</WindowsPackageType>
-    <DefaultItemExcludes>$(DefaultItemExcludes);artifacts\**;artifacts/**</DefaultItemExcludes>
+    <DefaultItemExcludes>$(DefaultItemExcludes);artifacts\**;artifacts/**;vendor\**;vendor/**;bin\**;bin/**;obj\**;obj/**</DefaultItemExcludes>
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="CI.Microsoft.Windows.Console.ConPTY" Version="1.22.250314001" GeneratePathProperty="true" />
+    <PackageReference Include="CI.Microsoft.Terminal.Wpf" Version="1.22.250204002" GeneratePathProperty="true" ExcludeAssets="all" PrivateAssets="all" />
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.260209005" />
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.4654" />
     <PackageReference Include="Microsoft.Windows.CsWin32" Version="0.2.164-beta" PrivateAssets="all" />
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.3179.45" />
     <PackageReference Include="System.Drawing.Common" Version="8.0.0" />
+    <PackageReference Include="WinUIEx" Version="2.5.1" />
   </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="EasyWindowsTerminalControl.WinUI">
+      <HintPath>vendor\terminal\EasyWindowsTerminalControl.WinUI.dll</HintPath>
+    </Reference>
+    <Reference Include="Microsoft.Terminal.WinUI3">
+      <HintPath>vendor\terminal\Microsoft.Terminal.WinUI3.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+  <Target Name="CopyNativeTerminalAssets" AfterTargets="Build">
+    <PropertyGroup>
+      <NativeTerminalRuntimeRid Condition="'$(Platform)' == 'ARM64'">win-arm64</NativeTerminalRuntimeRid>
+      <NativeTerminalRuntimeRid Condition="'$(Platform)' == 'x86'">win-x86</NativeTerminalRuntimeRid>
+      <NativeTerminalRuntimeRid Condition="'$(NativeTerminalRuntimeRid)' == ''">win-x64</NativeTerminalRuntimeRid>
+      <NativeConPtyRid Condition="'$(Platform)' == 'ARM64'">win10-arm64</NativeConPtyRid>
+      <NativeConPtyRid Condition="'$(Platform)' == 'x86'">win10-x86</NativeConPtyRid>
+      <NativeConPtyRid Condition="'$(NativeConPtyRid)' == ''">win10-x64</NativeConPtyRid>
+    </PropertyGroup>
+    <MakeDir Directories="$(OutDir)Microsoft.Terminal.WinUI3" />
+    <Copy SourceFiles="$(PkgCI_Microsoft_Terminal_Wpf)\runtimes\$(NativeTerminalRuntimeRid)\native\Microsoft.Terminal.Control.dll"
+          DestinationFiles="$(OutDir)Microsoft.Terminal.Control.dll"
+          SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(PkgCI_Microsoft_Windows_Console_ConPTY)\runtimes\$(NativeConPtyRid)\native\conpty.dll"
+          DestinationFiles="$(OutDir)conpty.dll"
+          SkipUnchangedFiles="true" />
+    <Copy SourceFiles="vendor\terminal-assets\TerminalControl.xaml"
+          DestinationFiles="$(OutDir)TerminalControl.xaml"
+          SkipUnchangedFiles="true" />
+    <Copy SourceFiles="vendor\terminal-assets\TerminalControl.xbf"
+          DestinationFiles="$(OutDir)TerminalControl.xbf"
+          SkipUnchangedFiles="true" />
+    <Copy SourceFiles="vendor\terminal-assets\TerminalControl.xaml"
+          DestinationFiles="$(OutDir)Microsoft.Terminal.WinUI3\TerminalControl.xaml"
+          SkipUnchangedFiles="true" />
+    <Copy SourceFiles="vendor\terminal-assets\TerminalControl.xbf"
+          DestinationFiles="$(OutDir)Microsoft.Terminal.WinUI3\TerminalControl.xbf"
+          SkipUnchangedFiles="true" />
+  </Target>
 
   <ItemGroup>
     <Manifest Include="$(ApplicationManifest)" />

@@ -238,8 +238,6 @@ namespace SelfContainedDeployment.Git
                     AddedLines = file.AddedLines,
                     RemovedLines = file.RemovedLines,
                     DiffText = file.DiffText,
-                    OriginalText = file.OriginalText,
-                    ModifiedText = file.ModifiedText,
                 }).ToList(),
             };
         }

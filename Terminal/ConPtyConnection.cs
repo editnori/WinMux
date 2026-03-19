@@ -180,7 +180,7 @@ namespace SelfContainedDeployment.Terminal
             }
         }
 
-        private static IReadOnlyDictionary<string, string> BuildLaunchEnvironment(string workingDirectory, IReadOnlyDictionary<string, string> overrides)
+        internal static IReadOnlyDictionary<string, string> BuildLaunchEnvironment(string workingDirectory, IReadOnlyDictionary<string, string> overrides)
         {
             Dictionary<string, string> values = new(GetBaseLaunchEnvironment(), StringComparer.OrdinalIgnoreCase)
             {
@@ -291,7 +291,7 @@ namespace SelfContainedDeployment.Terminal
                 : $"{existing}:{entry}";
         }
 
-        private static IntPtr BuildEnvironmentBlockPointer(IReadOnlyDictionary<string, string> values)
+        internal static IntPtr BuildEnvironmentBlockPointer(IReadOnlyDictionary<string, string> values)
         {
             if (values is null || values.Count == 0)
             {

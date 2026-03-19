@@ -137,14 +137,14 @@
             <SolidColorBrush x:Key="ShellPageBackgroundBrush" Color="#F2F5F8" />
             <SolidColorBrush x:Key="ShellPaneBackgroundBrush" Color="#F2F5F8" />
             <SolidColorBrush x:Key="ShellSurfaceBackgroundBrush" Color="#F9FBFD" />
-            <SolidColorBrush x:Key="ShellMutedSurfaceBrush" Color="#E7ECF2" />
+            <SolidColorBrush x:Key="ShellMutedSurfaceBrush" Color="#F2F6FA" />
             <SolidColorBrush x:Key="ShellBrandMarkBackgroundBrush" Color="#F9FBFD" />
-            <SolidColorBrush x:Key="ShellBrandMarkBorderBrush" Color="#CBD5E0" />
-            <SolidColorBrush x:Key="ShellBorderBrush" Color="#D6DEE7" />
-            <SolidColorBrush x:Key="ShellPaneDividerBrush" Color="#DCE5EE" />
+            <SolidColorBrush x:Key="ShellBrandMarkBorderBrush" Color="#CCD6E0" />
+            <SolidColorBrush x:Key="ShellBorderBrush" Color="#B8C6D4" />
+            <SolidColorBrush x:Key="ShellPaneDividerBrush" Color="#C6D3DF" />
             <SolidColorBrush x:Key="ShellPaneActiveBorderBrush" Color="#334155" />
-            <SolidColorBrush x:Key="ShellNavHoverBrush" Color="#E2EAF2" />
-            <SolidColorBrush x:Key="ShellNavActiveBrush" Color="#D6E1EC" />
+            <SolidColorBrush x:Key="ShellNavHoverBrush" Color="#E7EEF5" />
+            <SolidColorBrush x:Key="ShellNavActiveBrush" Color="#DFE8F1" />
             <SolidColorBrush x:Key="ShellTextPrimaryBrush" Color="#1A1E23" />
             <SolidColorBrush x:Key="ShellTextSecondaryBrush" Color="#39424D" />
             <SolidColorBrush x:Key="ShellTextTertiaryBrush" Color="#55606D" />
@@ -212,7 +212,12 @@
                             Background="{TemplateBinding Background}"
                             BorderBrush="{TemplateBinding BorderBrush}"
                             BorderThickness="{TemplateBinding BorderThickness}"
-                            CornerRadius="{TemplateBinding CornerRadius}">
+                            CornerRadius="{TemplateBinding CornerRadius}"
+                            RenderTransformOrigin="0.5,0.5">
+                        <Border.RenderTransform>
+                            <ScaleTransform ScaleX="1"
+                                            ScaleY="1" />
+                        </Border.RenderTransform>
                         <ContentPresenter x:Name="ContentPresenter"
                                           Content="{TemplateBinding Content}"
                                           Margin="{TemplateBinding Padding}"
@@ -222,7 +227,18 @@
 
                     <VisualStateManager.VisualStateGroups>
                         <VisualStateGroup x:Name="CommonStates">
-                            <VisualState x:Name="Normal" />
+                            <VisualState x:Name="Normal">
+                                <Storyboard>
+                                    <DoubleAnimation Storyboard.TargetName="RootBorder"
+                                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)"
+                                                     To="1"
+                                                     Duration="0:0:0.16" />
+                                    <DoubleAnimation Storyboard.TargetName="RootBorder"
+                                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)"
+                                                     To="1"
+                                                     Duration="0:0:0.16" />
+                                </Storyboard>
+                            </VisualState>
                             <VisualState x:Name="PointerOver">
                                 <Storyboard>
                                     <ObjectAnimationUsingKeyFrames Storyboard.TargetName="RootBorder" Storyboard.TargetProperty="Background">
@@ -234,6 +250,14 @@
                                     <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ContentPresenter" Storyboard.TargetProperty="Foreground">
                                         <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource ShellTextPrimaryBrush}" />
                                     </ObjectAnimationUsingKeyFrames>
+                                    <DoubleAnimation Storyboard.TargetName="RootBorder"
+                                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)"
+                                                     To="1.03"
+                                                     Duration="0:0:0.14" />
+                                    <DoubleAnimation Storyboard.TargetName="RootBorder"
+                                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)"
+                                                     To="1.03"
+                                                     Duration="0:0:0.14" />
                                 </Storyboard>
                             </VisualState>
                             <VisualState x:Name="Pressed">
@@ -247,6 +271,14 @@
                                     <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ContentPresenter" Storyboard.TargetProperty="Foreground">
                                         <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource ShellTextPrimaryBrush}" />
                                     </ObjectAnimationUsingKeyFrames>
+                                    <DoubleAnimation Storyboard.TargetName="RootBorder"
+                                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)"
+                                                     To="0.985"
+                                                     Duration="0:0:0.08" />
+                                    <DoubleAnimation Storyboard.TargetName="RootBorder"
+                                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)"
+                                                     To="0.985"
+                                                     Duration="0:0:0.08" />
                                 </Storyboard>
                             </VisualState>
                             <VisualState x:Name="Disabled">
@@ -318,25 +350,30 @@
         <Setter Property="Padding" Value="0" />
         <Setter Property="Background" Value="{ThemeResource ShellPageBackgroundBrush}" />
         <Setter Property="BorderBrush" Value="{ThemeResource ShellBorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="4" />
         <Setter Property="HorizontalContentAlignment" Value="Center" />
     </Style>
 
     <Style x:Key="ShellPaneStripButtonStyle" TargetType="Button" BasedOn="{StaticResource ShellFlatButtonBaseStyle}">
-        <Setter Property="Width" Value="26" />
-        <Setter Property="Height" Value="26" />
+        <Setter Property="Width" Value="28" />
+        <Setter Property="Height" Value="28" />
         <Setter Property="Padding" Value="0" />
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="BorderBrush" Value="Transparent" />
-        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="4" />
         <Setter Property="HorizontalContentAlignment" Value="Center" />
     </Style>
 
     <Style x:Key="ShellGhostToolbarButtonStyle" TargetType="Button" BasedOn="{StaticResource ShellFlatButtonBaseStyle}">
-        <Setter Property="Width" Value="24" />
-        <Setter Property="Height" Value="24" />
+        <Setter Property="Width" Value="26" />
+        <Setter Property="Height" Value="26" />
         <Setter Property="Padding" Value="0" />
-        <Setter Property="Background" Value="Transparent" />
-        <Setter Property="BorderBrush" Value="Transparent" />
+        <Setter Property="Background" Value="{ThemeResource ShellPageBackgroundBrush}" />
+        <Setter Property="BorderBrush" Value="{ThemeResource ShellBorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="4" />
         <Setter Property="HorizontalContentAlignment" Value="Center" />
     </Style>
 
@@ -350,12 +387,14 @@
     </Style>
 
     <Style x:Key="ShellNoteFilterButtonStyle" TargetType="Button" BasedOn="{StaticResource ShellFlatButtonBaseStyle}">
-        <Setter Property="Height" Value="26" />
-        <Setter Property="Padding" Value="8,2" />
+        <Setter Property="Height" Value="24" />
+        <Setter Property="Padding" Value="6,0" />
         <Setter Property="MinWidth" Value="0" />
-        <Setter Property="CornerRadius" Value="4" />
+        <Setter Property="CornerRadius" Value="3" />
+        <Setter Property="BorderBrush" Value="Transparent" />
         <Setter Property="BorderThickness" Value="0" />
         <Setter Property="Foreground" Value="{ThemeResource ShellTextSecondaryBrush}" />
+        <Setter Property="FontSize" Value="10.25" />
         <Setter Property="HorizontalContentAlignment" Value="Center" />
     </Style>
 
@@ -366,11 +405,12 @@
     </Style>
 
     <Style x:Key="ShellInspectorTabButtonStyle" TargetType="Button" BasedOn="{StaticResource ShellFlatButtonBaseStyle}">
-        <Setter Property="Height" Value="28" />
-        <Setter Property="Padding" Value="9,3" />
+        <Setter Property="Height" Value="26" />
+        <Setter Property="Padding" Value="8,2" />
         <Setter Property="MinWidth" Value="0" />
         <Setter Property="CornerRadius" Value="4" />
-        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="1" />
         <Setter Property="HorizontalContentAlignment" Value="Center" />
     </Style>
 
@@ -400,6 +440,12 @@
 
     <Style x:Key="ShellSectionTextStyle" TargetType="TextBlock" BasedOn="{StaticResource BaseTextBlockStyle}">
         <Setter Property="FontSize" Value="11.25" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Foreground" Value="{ThemeResource ShellTextPrimaryBrush}" />
+    </Style>
+
+    <Style x:Key="ShellInspectorGroupTitleTextStyle" TargetType="TextBlock" BasedOn="{StaticResource BaseTextBlockStyle}">
+        <Setter Property="FontSize" Value="10.4" />
         <Setter Property="FontWeight" Value="SemiBold" />
         <Setter Property="Foreground" Value="{ThemeResource ShellTextPrimaryBrush}" />
     </Style>
@@ -683,21 +729,33 @@
 
     <Style x:Key="ShellInspectorNoteCardTextBoxStyle" TargetType="TextBox" BasedOn="{StaticResource ShellInspectorNotesTextBoxStyle}">
         <Setter Property="MinHeight" Value="34" />
-        <Setter Property="Padding" Value="0" />
+        <Setter Property="Padding" Value="2,1" />
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="BorderBrush" Value="Transparent" />
-        <Setter Property="BorderThickness" Value="0" />
-        <Setter Property="CornerRadius" Value="0" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="3" />
         <Setter Property="UseSystemFocusVisuals" Value="False" />
+    </Style>
+
+    <Style x:Key="ShellNoteTitleTextBoxStyle" TargetType="TextBox" BasedOn="{StaticResource ShellInspectorNoteCardTextBoxStyle}">
+        <Setter Property="MinHeight" Value="0" />
+        <Setter Property="Height" Value="Auto" />
+        <Setter Property="FontSize" Value="11.1" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Foreground" Value="{ThemeResource ShellTextPrimaryBrush}" />
+        <Setter Property="Padding" Value="2,0" />
+        <Setter Property="TextWrapping" Value="NoWrap" />
+        <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Disabled" />
+        <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
     </Style>
 
     <Style x:Key="ShellNoteTypeButtonStyle" TargetType="Button" BasedOn="{StaticResource ShellInlineActionButtonStyle}">
         <Setter Property="Height" Value="20" />
         <Setter Property="MinWidth" Value="0" />
         <Setter Property="Padding" Value="0" />
-        <Setter Property="FontSize" Value="9.4" />
+        <Setter Property="FontSize" Value="9.6" />
         <Setter Property="FontWeight" Value="SemiBold" />
-        <Setter Property="CharacterSpacing" Value="70" />
+        <Setter Property="CharacterSpacing" Value="60" />
         <Setter Property="HorizontalContentAlignment" Value="Left" />
     </Style>
 
@@ -707,8 +765,8 @@
         <Setter Property="MaxWidth" Value="164" />
         <Setter Property="Padding" Value="8,2" />
         <Setter Property="FontSize" Value="11.25" />
-        <Setter Property="Background" Value="{ThemeResource ShellMutedSurfaceBrush}" />
-        <Setter Property="BorderBrush" Value="{ThemeResource ShellBorderBrush}" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="Transparent" />
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="CornerRadius" Value="4" />
         <Setter Property="Foreground" Value="{ThemeResource ShellTextPrimaryBrush}" />
@@ -716,15 +774,15 @@
     </Style>
 
     <Style x:Key="ShellNoteCardActionButtonStyle" TargetType="Button" BasedOn="{StaticResource ShellFlatButtonBaseStyle}">
-        <Setter Property="Height" Value="26" />
+        <Setter Property="Height" Value="22" />
         <Setter Property="MinWidth" Value="0" />
-        <Setter Property="Padding" Value="8,2" />
-        <Setter Property="FontSize" Value="11.25" />
-        <Setter Property="Background" Value="{ThemeResource ShellMutedSurfaceBrush}" />
-        <Setter Property="BorderBrush" Value="{ThemeResource ShellBorderBrush}" />
-        <Setter Property="BorderThickness" Value="1" />
-        <Setter Property="CornerRadius" Value="4" />
-        <Setter Property="Foreground" Value="{ThemeResource ShellTextSecondaryBrush}" />
+        <Setter Property="Padding" Value="6,0" />
+        <Setter Property="FontSize" Value="10" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="CornerRadius" Value="3" />
+        <Setter Property="Foreground" Value="{ThemeResource ShellTextTertiaryBrush}" />
         <Setter Property="HorizontalContentAlignment" Value="Center" />
     </Style>
 

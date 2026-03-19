@@ -406,15 +406,29 @@ function resolveSemanticAction(descriptor, state) {
 async function buildConditionSnapshot(condition) {
   const snapshot = { state: await getState() };
   const activeTab = getActiveTab(snapshot.state);
-  if ("rendererReady" in condition || "terminalStarted" in condition || "terminalExited" in condition) {
+  if (
+    "rendererReady" in condition ||
+    "terminalStarted" in condition ||
+    "terminalExited" in condition ||
+    "terminalTitle" in condition ||
+    "terminalVisibleTextContains" in condition
+  ) {
     snapshot.terminal = await getTerminalState(
       condition.tabId || (activeTab?.kind === "terminal" ? snapshot.state.activeTabId : ""),
     );
   }
-  if ("browserInitialized" in condition || "browserUri" in condition) {
+  if (
+    "browserInitialized" in condition ||
+    "browserUri" in condition ||
+    "browserTabCount" in condition ||
+    "selectedBrowserTabId" in condition ||
+    "browserProfileSeedStatus" in condition ||
+    "browserCredentialStatus" in condition ||
+    "browserCredentialOutcome" in condition
+  ) {
     snapshot.browser = await getBrowserState(condition.paneId || "");
   }
-  if ("diffPath" in condition || "hasDiff" in condition) {
+  if ("diffPath" in condition || "hasDiff" in condition || "diffLineCount" in condition) {
     snapshot.diff = await getDiffState(condition.paneId || "", condition.maxLines || 0);
   }
   if ("editorSelectedPath" in condition || "editorDirty" in condition) {
@@ -454,20 +468,42 @@ function matchesCondition(snapshot, condition) {
     projectId: () => state.projectId === condition.projectId,
     projectName: () => state.projectName === condition.projectName,
     activeView: () => state.activeView === condition.activeView,
+    theme: () => state.theme === condition.theme,
     paneOpen: () => state.paneOpen === condition.paneOpen,
     inspectorOpen: () => state.inspectorOpen === condition.inspectorOpen,
+    inspectorSection: () => state.inspectorSection === condition.inspectorSection,
+    notesScope: () => state.notesScope === condition.notesScope,
+    shellProfileId: () => state.shellProfileId === condition.shellProfileId,
+    browserCredentialCount: () => state.browserCredentialCount === condition.browserCredentialCount,
+    worktreePath: () => state.worktreePath === condition.worktreePath,
     selectedDiffPath: () => state.selectedDiffPath === condition.selectedDiffPath,
+    diffReviewSource: () => state.diffReviewSource === condition.diffReviewSource,
+    selectedCheckpointId: () => state.selectedCheckpointId === condition.selectedCheckpointId,
+    checkpointCount: () => state.checkpointCount === condition.checkpointCount,
     threadName: () => thread?.name === condition.threadName,
+    activeLayout: () => thread?.layout === condition.activeLayout,
     paneCount: () => thread?.paneCount === condition.paneCount,
     tabCount: () => thread?.tabCount === condition.tabCount,
+    noteCount: () => thread?.noteCount === condition.noteCount,
+    selectedNoteId: () => thread?.selectedNoteId === condition.selectedNoteId,
+    zoomedPaneId: () => thread?.zoomedPaneId === condition.zoomedPaneId,
     activeTabKind: () => tab?.kind === condition.activeTabKind,
+    activeTabTitle: () => tab?.title === condition.activeTabTitle,
     rendererReady: () => terminal?.rendererReady === condition.rendererReady,
     terminalStarted: () => terminal?.started === condition.terminalStarted,
     terminalExited: () => terminal?.exited === condition.terminalExited,
+    terminalTitle: () => terminal?.title === condition.terminalTitle,
+    terminalVisibleTextContains: () => String(terminal?.visibleText || "").includes(condition.terminalVisibleTextContains),
     browserInitialized: () => browser?.initialized === condition.browserInitialized,
     browserUri: () => browser?.uri === condition.browserUri,
+    browserTabCount: () => browser?.tabCount === condition.browserTabCount,
+    selectedBrowserTabId: () => browser?.selectedTabId === condition.selectedBrowserTabId,
+    browserProfileSeedStatus: () => browser?.profileSeedStatus === condition.browserProfileSeedStatus,
+    browserCredentialStatus: () => browser?.credentialAutofillStatus === condition.browserCredentialStatus,
+    browserCredentialOutcome: () => browser?.credentialAutofillOutcome === condition.browserCredentialOutcome,
     diffPath: () => diff?.path === condition.diffPath,
     hasDiff: () => diff?.hasDiff === condition.hasDiff,
+    diffLineCount: () => diff?.lineCount === condition.diffLineCount,
     editorSelectedPath: () => editor?.selectedPath === condition.editorSelectedPath,
     editorDirty: () => editor?.dirty === condition.editorDirty,
   };
@@ -489,20 +525,42 @@ function validateCondition(condition) {
     "projectId",
     "projectName",
     "activeView",
+    "theme",
     "paneOpen",
     "inspectorOpen",
+    "inspectorSection",
+    "notesScope",
+    "shellProfileId",
+    "browserCredentialCount",
+    "worktreePath",
     "selectedDiffPath",
+    "diffReviewSource",
+    "selectedCheckpointId",
+    "checkpointCount",
     "threadName",
+    "activeLayout",
     "paneCount",
     "tabCount",
+    "noteCount",
+    "selectedNoteId",
+    "zoomedPaneId",
     "activeTabKind",
+    "activeTabTitle",
     "rendererReady",
     "terminalStarted",
     "terminalExited",
+    "terminalTitle",
+    "terminalVisibleTextContains",
     "browserInitialized",
     "browserUri",
+    "browserTabCount",
+    "selectedBrowserTabId",
+    "browserProfileSeedStatus",
+    "browserCredentialStatus",
+    "browserCredentialOutcome",
     "diffPath",
     "hasDiff",
+    "diffLineCount",
     "editorSelectedPath",
     "editorDirty",
     "tabId",
@@ -646,13 +704,14 @@ async function captureInspect(options = {}) {
 async function profileAction(args) {
   const wantsCapture = isEnabled(args.capture) || isEnabled(args.annotated);
   const outputDir = args["output-dir"] || args.outputDir || (wantsCapture ? await defaultArtifactDir("profile-action") : null);
+  const collectEvents = !isEnabled(args["no-events"]) && Number(args.events ?? 60) > 0;
   if (outputDir) {
     await ensureDir(outputDir);
   }
 
   const beforeState = await getState();
   const beforePerf = await getPerfSnapshot().catch(() => null);
-  const beforeEvents = await getEvents();
+  const beforeEvents = collectEvents ? await getEvents() : { nextSequence: 0, events: [] };
   const waitCondition = parseJsonArg(args.wait, null);
 
   let requestKind = args.ui ? "ui" : "action";
@@ -694,7 +753,7 @@ async function profileAction(args) {
   const [afterState, afterPerf, afterEvents] = await Promise.all([
     getState(),
     getPerfSnapshot().catch(() => null),
-    getEvents(),
+    collectEvents ? getEvents() : Promise.resolve({ nextSequence: 0, events: [] }),
   ]);
 
   const screenshot = wantsCapture ? await captureScreenshot(outputDir, false, "after.png") : null;
@@ -714,7 +773,9 @@ async function profileAction(args) {
     beforeState,
     afterState,
     stateDiff: diffObjects(beforeState, afterState),
-    eventDiff: tailEvents(afterEvents, beforeEvents.nextSequence || 0, Number(args.events || 60)),
+    eventDiff: collectEvents
+      ? tailEvents(afterEvents, beforeEvents.nextSequence || 0, Number(args.events || 60))
+      : [],
     beforePerf,
     afterPerf,
     beforeScreenshot,

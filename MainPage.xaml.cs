@@ -6612,7 +6612,7 @@ namespace SelfContainedDeployment
                         _lastPaneWorkspaceRenderKey = null;
                         RefreshTabView();
                         RenderPaneWorkspace();
-                        FocusSelectedPane();
+                        QueueSelectedPaneFocus();
                         RequestLayoutForVisiblePanes();
                     }
 
@@ -10498,16 +10498,6 @@ namespace SelfContainedDeployment
                 if (string.IsNullOrWhiteSpace(changedFile.DiffText))
                 {
                     changedFile.DiffText = cachedFile.DiffText;
-                }
-
-                if (string.IsNullOrWhiteSpace(changedFile.OriginalText))
-                {
-                    changedFile.OriginalText = cachedFile.OriginalText;
-                }
-
-                if (string.IsNullOrWhiteSpace(changedFile.ModifiedText))
-                {
-                    changedFile.ModifiedText = cachedFile.ModifiedText;
                 }
 
                 if (string.IsNullOrWhiteSpace(changedFile.OriginalPath))

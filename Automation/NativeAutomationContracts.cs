@@ -24,7 +24,13 @@ namespace SelfContainedDeployment.Automation
 
         public bool InspectorOpen { get; set; }
 
+        public string InspectorSection { get; set; }
+
+        public string NotesScope { get; set; }
+
         public string ShellProfileId { get; set; }
+
+        public int BrowserCredentialCount { get; set; }
 
         public string GitBranch { get; set; }
 
@@ -435,6 +441,8 @@ namespace SelfContainedDeployment.Automation
         public string ExtensionImportStatus { get; set; }
 
         public string CredentialAutofillStatus { get; set; }
+
+        public string CredentialAutofillOutcome { get; set; }
 
         public List<string> InstalledExtensions { get; set; } = new();
 

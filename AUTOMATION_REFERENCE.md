@@ -705,6 +705,12 @@ This is enough for:
 - checking cursor movement
 - confirming shell profile and working directory
 
+Notes:
+
+- terminal panes are now HWND-hosted native surfaces, not WebView2 renderers
+- `visibleText` and `bufferTail` come from the terminal bridge/logging path, not from browser-style DOM inspection
+- native screenshots still capture the terminal host window, but text capture can differ from the old WebView2-based terminal workflow because the terminal is no longer a DOM surface
+
 ### Event log
 
 `GET /events` returns a bounded in-memory event stream with:
@@ -724,7 +730,7 @@ This is the primary way to inspect transient shell behavior such as:
 - tab creation and selection
 - tab view refreshes
 - terminal fit requests
-- terminal renderer ready / resize
+- terminal control ready / resize
 - terminal title changes
 - screenshot captures
 - automation action execution

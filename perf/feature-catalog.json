@@ -142,46 +142,51 @@
       "id": "pane.zoom",
       "name": "Toggle pane zoom",
       "category": "pane",
-      "measurementMode": "fixture_required",
+      "measurementMode": "automated",
       "mutation": "safe",
       "budget": { "responseMs": 50, "firstRenderMs": 33 },
-      "automationActions": ["togglepanezoom"]
+      "automationActions": ["togglepanezoom"],
+      "runner": "paneZoom"
     },
     {
       "id": "pane.focus",
       "name": "Focus pane",
       "category": "pane",
-      "measurementMode": "fixture_required",
+      "measurementMode": "automated",
       "mutation": "safe",
       "budget": { "responseMs": 25, "firstRenderMs": 20 },
-      "automationActions": ["focuspane"]
+      "automationActions": ["focuspane"],
+      "runner": "paneFocus"
     },
     {
       "id": "shell.thread-worktree",
       "name": "Set thread worktree",
       "category": "shell",
-      "measurementMode": "fixture_required",
-      "mutation": "destructive",
+      "measurementMode": "automated",
+      "mutation": "mutating",
       "budget": { "responseMs": 100, "firstRenderMs": 75 },
-      "automationActions": ["setthreadworktree"]
+      "automationActions": ["setthreadworktree"],
+      "runner": "threadWorktreeSwitch"
     },
     {
       "id": "shell.theme",
       "name": "Theme switch",
       "category": "shell",
-      "measurementMode": "fixture_required",
+      "measurementMode": "automated",
       "mutation": "safe",
       "budget": { "responseMs": 100, "firstRenderMs": 75 },
-      "automationActions": ["settheme"]
+      "automationActions": ["settheme"],
+      "runner": "themeSwitch"
     },
     {
       "id": "shell.profile",
       "name": "Shell profile switch",
       "category": "shell",
-      "measurementMode": "fixture_required",
+      "measurementMode": "automated",
       "mutation": "safe",
       "budget": { "responseMs": 100, "firstRenderMs": 75 },
-      "automationActions": ["setprofile"]
+      "automationActions": ["setprofile"],
+      "runner": "profileSwitch"
     },
     {
       "id": "workspace.new-project",
@@ -247,40 +252,74 @@
       "automationActions": ["deleteproject"]
     },
     {
-      "id": "notes.upsert-thread-note",
-      "name": "Create or update thread note",
+      "id": "notes.add-thread-note",
+      "name": "Create thread note",
       "category": "notes",
-      "measurementMode": "fixture_required",
-      "mutation": "destructive",
+      "measurementMode": "automated",
+      "mutation": "mutating",
       "budget": { "responseMs": 75, "firstRenderMs": 50 },
-      "automationActions": ["setthreadnote", "addthreadnote", "createthreadnote", "updatethreadnote"]
+      "automationActions": ["addthreadnote", "createthreadnote"],
+      "runner": "addThreadNote"
     },
     {
-      "id": "notes.delete-or-archive-thread-note",
-      "name": "Delete or archive thread note",
+      "id": "notes.update-thread-note",
+      "name": "Update thread note",
       "category": "notes",
-      "measurementMode": "fixture_required",
-      "mutation": "destructive",
+      "measurementMode": "automated",
+      "mutation": "mutating",
       "budget": { "responseMs": 75, "firstRenderMs": 50 },
-      "automationActions": ["deletethreadnote", "archivethreadnote", "restorethreadnote", "unarchivethreadnote"]
+      "automationActions": ["setthreadnote", "updatethreadnote"],
+      "runner": "updateThreadNote"
+    },
+    {
+      "id": "notes.archive-thread-note",
+      "name": "Archive thread note",
+      "category": "notes",
+      "measurementMode": "automated",
+      "mutation": "mutating",
+      "budget": { "responseMs": 75, "firstRenderMs": 50 },
+      "automationActions": ["archivethreadnote", "deletethreadnote"],
+      "runner": "archiveThreadNote"
+    },
+    {
+      "id": "notes.restore-thread-note",
+      "name": "Restore thread note",
+      "category": "notes",
+      "measurementMode": "automated",
+      "mutation": "mutating",
+      "budget": { "responseMs": 75, "firstRenderMs": 50 },
+      "automationActions": ["restorethreadnote", "unarchivethreadnote"],
+      "runner": "restoreThreadNote"
     },
     {
       "id": "notes.select-thread-note",
       "name": "Select thread note",
       "category": "notes",
-      "measurementMode": "fixture_required",
+      "measurementMode": "automated",
       "mutation": "safe",
       "budget": { "responseMs": 50, "firstRenderMs": 33 },
-      "automationActions": ["selectthreadnote"]
+      "automationActions": ["selectthreadnote"],
+      "runner": "selectThreadNote"
     },
     {
-      "id": "notes.open",
-      "name": "Open thread or project notes",
+      "id": "notes.open-thread",
+      "name": "Open thread notes",
       "category": "notes",
-      "measurementMode": "fixture_required",
+      "measurementMode": "automated",
       "mutation": "safe",
       "budget": { "responseMs": 50, "firstRenderMs": 33 },
-      "automationActions": ["editthreadnote", "showthreadnotes", "showprojectnotes", "shownotes"]
+      "automationActions": ["editthreadnote", "showthreadnotes"],
+      "runner": "openThreadNotes"
+    },
+    {
+      "id": "notes.open-project",
+      "name": "Open project notes",
+      "category": "notes",
+      "measurementMode": "automated",
+      "mutation": "safe",
+      "budget": { "responseMs": 50, "firstRenderMs": 33 },
+      "automationActions": ["showprojectnotes", "shownotes"],
+      "runner": "openProjectNotes"
     },
     {
       "id": "pane.new-terminal-tab",
@@ -316,10 +355,11 @@
       "id": "pane.select-tab",
       "name": "Select tab",
       "category": "pane",
-      "measurementMode": "fixture_required",
+      "measurementMode": "automated",
       "mutation": "safe",
       "budget": { "responseMs": 25, "firstRenderMs": 20 },
-      "automationActions": ["selecttab"]
+      "automationActions": ["selecttab"],
+      "runner": "selectTab"
     },
     {
       "id": "pane.move-tab-after",
@@ -334,19 +374,21 @@
       "id": "pane.close-tab",
       "name": "Close tab",
       "category": "pane",
-      "measurementMode": "fixture_required",
-      "mutation": "destructive",
+      "measurementMode": "automated",
+      "mutation": "mutating",
       "budget": { "responseMs": 50, "firstRenderMs": 33 },
-      "automationActions": ["closetab"]
+      "automationActions": ["closetab"],
+      "runner": "closeTab"
     },
     {
       "id": "pane.rename",
       "name": "Rename pane",
       "category": "pane",
-      "measurementMode": "fixture_required",
-      "mutation": "destructive",
+      "measurementMode": "automated",
+      "mutation": "mutating",
       "budget": { "responseMs": 50, "firstRenderMs": 33 },
-      "automationActions": ["renamepane"]
+      "automationActions": ["renamepane"],
+      "runner": "renamePane"
     },
     {
       "id": "diff.refresh",
@@ -380,100 +422,140 @@
       "id": "diff.capture-checkpoint",
       "name": "Capture checkpoint",
       "category": "diff",
-      "measurementMode": "fixture_required",
+      "measurementMode": "automated",
       "mutation": "mutating",
       "budget": { "responseMs": 100, "firstRenderMs": 75, "asyncMs": 1500 },
-      "automationActions": ["capturecheckpoint"]
+      "automationActions": ["capturecheckpoint"],
+      "runner": "captureCheckpoint"
     },
     {
       "id": "diff.select-review-source",
       "name": "Select review source",
       "category": "diff",
-      "measurementMode": "fixture_required",
+      "measurementMode": "automated",
       "mutation": "safe",
       "budget": { "responseMs": 50, "firstRenderMs": 33 },
-      "automationActions": ["selectreviewsource"]
+      "automationActions": ["selectreviewsource"],
+      "runner": "selectReviewSource"
     },
     {
       "id": "browser.navigate",
       "name": "Navigate browser pane",
       "category": "browser",
-      "measurementMode": "fixture_required",
+      "measurementMode": "automated",
       "mutation": "mutating",
       "budget": { "responseMs": 50, "firstRenderMs": 33 },
-      "automationActions": ["navigatebrowser"]
+      "automationActions": ["navigatebrowser"],
+      "runner": "browserNavigate"
     },
     {
       "id": "browser.new-tab",
       "name": "Create browser in-pane tab",
       "category": "browser",
-      "measurementMode": "fixture_required",
+      "measurementMode": "automated",
       "mutation": "mutating",
       "budget": { "responseMs": 50, "firstRenderMs": 33 },
-      "automationActions": ["newbrowsertab"]
+      "automationActions": ["newbrowsertab"],
+      "runner": "browserNewTab"
     },
     {
       "id": "browser.select-tab",
       "name": "Select browser in-pane tab",
       "category": "browser",
-      "measurementMode": "fixture_required",
+      "measurementMode": "automated",
       "mutation": "safe",
       "budget": { "responseMs": 25, "firstRenderMs": 20 },
-      "automationActions": ["selectbrowsertab"]
+      "automationActions": ["selectbrowsertab"],
+      "runner": "browserSelectTab"
     },
     {
       "id": "browser.close-tab",
       "name": "Close browser in-pane tab",
       "category": "browser",
-      "measurementMode": "fixture_required",
-      "mutation": "destructive",
+      "measurementMode": "automated",
+      "mutation": "mutating",
       "budget": { "responseMs": 50, "firstRenderMs": 33 },
-      "automationActions": ["closebrowsertab"]
+      "automationActions": ["closebrowsertab"],
+      "runner": "browserCloseTab"
     },
     {
       "id": "browser.credentials.import",
       "name": "Import browser passwords CSV",
       "category": "browser-credentials",
-      "measurementMode": "manual",
-      "mutation": "destructive",
+      "measurementMode": "fixture_required",
+      "mutation": "mutating",
       "budget": { "responseMs": 250, "firstRenderMs": 150 },
-      "automationActions": ["importbrowserpasswordscsv"]
+      "automationActions": ["importbrowserpasswordscsv"],
+      "runner": "browserCredentialImport"
     },
     {
       "id": "browser.credentials.delete",
       "name": "Delete browser credential",
       "category": "browser-credentials",
-      "measurementMode": "manual",
-      "mutation": "destructive",
+      "measurementMode": "fixture_required",
+      "mutation": "mutating",
       "budget": { "responseMs": 100, "firstRenderMs": 75 },
-      "automationActions": ["deletebrowsercredential"]
+      "automationActions": ["deletebrowsercredential"],
+      "runner": "browserCredentialDelete"
     },
     {
       "id": "browser.credentials.clear",
       "name": "Clear browser credentials",
       "category": "browser-credentials",
-      "measurementMode": "manual",
+      "measurementMode": "fixture_required",
       "mutation": "destructive",
       "budget": { "responseMs": 150, "firstRenderMs": 100 },
-      "automationActions": ["clearbrowsercredentials"]
+      "automationActions": ["clearbrowsercredentials"],
+      "runner": "browserCredentialClear"
     },
     {
-      "id": "browser.credentials.autofill",
-      "name": "Manual browser autofill",
+      "id": "browser.credentials.autofill-success",
+      "name": "Browser autofill success",
       "category": "browser-credentials",
-      "measurementMode": "manual",
+      "measurementMode": "fixture_required",
       "mutation": "mutating",
       "budget": { "responseMs": 100, "firstRenderMs": 75 },
-      "automationActions": ["autofillbrowser"]
+      "automationActions": ["autofillbrowser"],
+      "runner": "browserAutofillSuccess"
+    },
+    {
+      "id": "browser.credentials.autofill-blocked",
+      "name": "Browser autofill blocked",
+      "category": "browser-credentials",
+      "measurementMode": "fixture_required",
+      "mutation": "mutating",
+      "budget": { "responseMs": 100, "firstRenderMs": 75 },
+      "automationActions": ["autofillbrowser"],
+      "runner": "browserAutofillBlocked"
+    },
+    {
+      "id": "browser.credentials.autofill-failed",
+      "name": "Browser autofill failed",
+      "category": "browser-credentials",
+      "measurementMode": "fixture_required",
+      "mutation": "mutating",
+      "budget": { "responseMs": 100, "firstRenderMs": 75 },
+      "automationActions": ["autofillbrowser"],
+      "runner": "browserAutofillFailed"
     },
     {
       "id": "terminal.input",
       "name": "Terminal/editor input",
       "category": "terminal",
-      "measurementMode": "manual",
+      "measurementMode": "automated",
       "mutation": "mutating",
       "budget": { "responseMs": 25, "firstRenderMs": 20 },
-      "automationActions": ["input"]
+      "automationActions": ["input"],
+      "runner": "terminalInputLatency"
+    },
+    {
+      "id": "browser.start-page-theme-refresh",
+      "name": "Browser start-page theme refresh",
+      "category": "browser",
+      "measurementMode": "automated",
+      "mutation": "safe",
+      "budget": { "responseMs": 100, "firstRenderMs": 75 },
+      "runner": "browserStartPageThemeRefresh"
     },
     {
       "id": "session.autosave-write",
@@ -509,6 +591,69 @@
       "measurementMode": "fixture_required",
       "mutation": "destructive",
       "budget": { "responseMs": 2000, "firstRenderMs": 1500 }
+    },
+    {
+      "id": "automation.route-ui-tree",
+      "name": "UI tree route latency",
+      "category": "automation",
+      "measurementMode": "automated",
+      "mutation": "safe",
+      "budget": { "responseMs": 60 },
+      "runner": "uiTreeRoute"
+    },
+    {
+      "id": "automation.route-browser-state",
+      "name": "Browser state route latency",
+      "category": "automation",
+      "measurementMode": "automated",
+      "mutation": "safe",
+      "budget": { "responseMs": 75 },
+      "runner": "browserStateRoute"
+    },
+    {
+      "id": "automation.route-diff-state",
+      "name": "Diff state route latency",
+      "category": "automation",
+      "measurementMode": "automated",
+      "mutation": "safe",
+      "budget": { "responseMs": 75 },
+      "runner": "diffStateRoute"
+    },
+    {
+      "id": "automation.route-editor-state",
+      "name": "Editor state route latency",
+      "category": "automation",
+      "measurementMode": "automated",
+      "mutation": "safe",
+      "budget": { "responseMs": 75 },
+      "runner": "editorStateRoute"
+    },
+    {
+      "id": "automation.route-doctor",
+      "name": "Doctor route latency",
+      "category": "automation",
+      "measurementMode": "automated",
+      "mutation": "safe",
+      "budget": { "responseMs": 150 },
+      "runner": "doctorRoute"
+    },
+    {
+      "id": "automation.route-render-trace",
+      "name": "Render trace route latency",
+      "category": "automation",
+      "measurementMode": "automated",
+      "mutation": "safe",
+      "budget": { "responseMs": 400 },
+      "runner": "renderTraceRoute"
+    },
+    {
+      "id": "automation.route-screenshot",
+      "name": "Screenshot route latency",
+      "category": "automation",
+      "measurementMode": "automated",
+      "mutation": "safe",
+      "budget": { "responseMs": 150 },
+      "runner": "screenshotRoute"
     }
   ]
 }

@@ -11,12 +11,12 @@ This pass is about making the app operable and debuggable before more UI work la
 - [x] Add richer control-level automation with UI-tree snapshots, generic UI actions, terminal inspection, and annotated screenshots.
 - [x] Add a few higher-level scripted flows on top of the generic automation layer.
 - [x] Expose structured diff-pane inspection and a deterministic patch-review recording flow.
-- [x] Fix the fresh WSL terminal startup regression where a second terminal renderer could miss its initial `ready` handshake and never start the ConPTY session.
+- [x] Fix the fresh WSL terminal startup regression where a second terminal surface could miss its initial startup path and never start the ConPTY session.
 
 ## 2. Light mode
 
 - [x] Move shell colors into theme dictionaries.
-- [x] Propagate theme changes into the embedded terminal renderer.
+- [x] Propagate theme changes into the native terminal surface.
 - [x] Route settings theme changes through the shell instead of only the settings page.
 - [ ] Keep tightening contrast and stock control overrides after visual review.
 

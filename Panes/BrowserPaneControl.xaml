@@ -7,7 +7,7 @@
 
     <Grid x:Name="BrowserRoot"
           AutomationProperties.AutomationId="browser-pane-root"
-          Background="{ThemeResource ShellPageBackgroundBrush}">
+          Background="{ThemeResource ShellSurfaceBackgroundBrush}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
@@ -19,10 +19,10 @@
                 Background="{ThemeResource ShellSurfaceBackgroundBrush}"
                 BorderBrush="{ThemeResource ShellBorderBrush}"
                 BorderThickness="0,0,0,1"
-                Padding="6,5,6,4">
+                Padding="7,2,40,4">
             <Grid x:Name="BrowserChromeGrid"
                   RowDefinitions="Auto,Auto"
-                  RowSpacing="5">
+                  RowSpacing="4">
                 <Grid ColumnDefinitions="*,Auto"
                       ColumnSpacing="5">
                     <ScrollViewer x:Name="BrowserTabStripScroller"
@@ -95,7 +95,7 @@
                              Grid.Column="4"
                              AutomationProperties.AutomationId="browser-pane-address"
                              Style="{StaticResource ShellInlineTextBoxStyle}"
-                             Height="30"
+                             Height="28"
                              VerticalAlignment="Center"
                              KeyDown="OnAddressBoxKeyDown"
                              PlaceholderText="Enter a URL or localhost preview" />
@@ -103,7 +103,7 @@
                     <Button x:Name="BrowserPagesButton"
                             Grid.Column="5"
                             AutomationProperties.AutomationId="browser-pane-pages"
-                            Style="{StaticResource ShellGhostToolbarButtonStyle}"
+                            Style="{StaticResource ShellToolbarButtonStyle}"
                             Click="OnPagesClicked"
                             VerticalAlignment="Center"
                             ToolTipService.ToolTip="Show page and tab details">
@@ -113,7 +113,7 @@
                     <Button x:Name="BrowserExtensionsButton"
                             Grid.Column="6"
                             AutomationProperties.AutomationId="browser-pane-extensions"
-                            Style="{StaticResource ShellGhostToolbarButtonStyle}"
+                            Style="{StaticResource ShellToolbarButtonStyle}"
                             Click="OnExtensionsClicked"
                             VerticalAlignment="Center"
                             ToolTipService.ToolTip="Show imported extensions">
@@ -123,7 +123,7 @@
                     <Button x:Name="BrowserNewPaneButton"
                             Grid.Column="7"
                             AutomationProperties.AutomationId="browser-pane-new-pane"
-                            Style="{StaticResource ShellGhostToolbarButtonStyle}"
+                            Style="{StaticResource ShellToolbarButtonStyle}"
                             Click="OnOpenCurrentPageInPaneClicked"
                             VerticalAlignment="Center"
                             ToolTipService.ToolTip="Open this page in another pane">
@@ -135,14 +135,14 @@
 
         <WebView2 x:Name="BrowserView"
                   Grid.Row="1"
-                  Margin="0,1,0,0"
+                  Margin="0"
                   Canvas.ZIndex="0"
                   AutomationProperties.AutomationId="browser-pane-webview" />
 
         <Border x:Name="BrowserResizeMask"
                 Grid.Row="1"
-                Margin="0,1,0,0"
-                Background="{ThemeResource ShellPageBackgroundBrush}"
+                Margin="0"
+                Background="{ThemeResource ShellSurfaceBackgroundBrush}"
                 Canvas.ZIndex="1"
                 IsHitTestVisible="False"
                 Opacity="0"
