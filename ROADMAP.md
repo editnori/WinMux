@@ -8,6 +8,7 @@ This repo is the native Windows foundation for a terminal-first workspace app.
 2. Add first-class WSL launch and session support.
 3. Continue replacing stock WinUI chrome with tighter custom shell surfaces where it materially improves density and clarity.
 4. Add a multiplexed layout system inspired by Neri, especially sliding panels instead of constant shrink-to-fit splits.
+5. Continue the structural cleanup and performance work tracked in [ENGINEERING_TODO.md](/mnt/c/Users/lqassem/native-terminal-starter/ENGINEERING_TODO.md) so new features land on measured, decomposed shell boundaries.
 
 ## Terminal experience
 
