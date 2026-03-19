@@ -2,7 +2,7 @@
 
 WinMux is a native Windows workspace shell built with WinUI 3, ConPTY, a Windows Terminal-backed native terminal surface, and WebView2 browser/editor panes.
 
-It combines terminals, browser panes, editor panes, patch review, worktree-aware threads, session restore, and a full native automation surface that can be driven from Bun. The repo is set up so a human can use the shell directly while an LLM can inspect, drive, screenshot, and record the exact same native app.
+It combines terminals, browser panes, editor panes, patch review, worktree-aware threads, theme-pack-aware session restore, and a full native automation surface that can be driven from Bun. The repo is set up so a human can use the shell directly while an LLM can inspect, drive, screenshot, and record the exact same native app.
 
 ![WinMux workspace showcase](docs/media/winmux-workspace-showcase.png)
 
@@ -19,10 +19,11 @@ The release asset is a real installer `.exe` that installs WinMux under `%LocalA
 WinMux is no longer the original sample shell. The current app now centers on a denser native workspace model:
 
 - project-scoped threads with per-thread pane workspaces and a top pane strip
-- terminal, browser, editor, and patch review surfaces that can all stay visible together
-- worktree-aware thread metadata, diff review, and inspector-driven file context
-- autosaved session replay plus native automation for screenshots, recordings, render traces, and UI control
-- smoother shell polish across sidebar toggles, pane drag preview, theme changes, and heavy pane redraw paths
+- native terminal, browser, editor, and patch review surfaces that can all stay visible together
+- worktree-aware thread metadata, diff review, inline notes, and inspector-driven file context
+- autosaved session replay that preserves theme mode and palette pack choices
+- native automation for screenshots, recordings, render traces, UI control, and terminal/browser/editor state capture
+- smoother shell polish across sidebar toggles, pane drag preview, live-resize suppression, grouped browser chrome, and heavy pane redraw paths
 
 ## Demo
 
@@ -41,12 +42,12 @@ The current walkthrough shows:
 
 ## What WinMux does
 
-- Native WinUI 3 shell with a dense multi-pane workspace.
+- Native WinUI 3 shell with a dense multi-pane workspace, compact chrome, and switchable theme packs.
 - Project and thread model with worktree-aware terminals and overflow-thread behavior when a pane set is already full.
-- Terminal, browser, editor, and diff panes in the same workspace.
+- Terminal, browser, editor, and diff panes in the same workspace, with review-first inspector tooling.
 - Inline thread and project notes with pane attachments, archive state, and native automation support.
-- Patch review with live/baseline/checkpoint sources and structured diff automation.
-- Session persistence across app relaunches, including restored pane layouts and replay metadata.
+- Patch review with live/baseline/checkpoint sources, structured diff automation, change navigation, and zoom control.
+- Session persistence across app relaunches, including restored pane layouts, replay metadata, and persisted theme mode/theme pack state.
 - Native automation routes for shell state, UI tree, UI actions, browser state, terminal state, diff state, editor state, screenshots, recordings, render traces, events, desktop window control, and desktop UIA fallback.
 
 For the fuller feature inventory, see [FEATURES.md](FEATURES.md).
@@ -147,6 +148,8 @@ bun run native:session-restore-recording
 
 The public-facing recordings default to light mode and explicitly showcase both light and dark themes during the flows.
 
+The current alpha line also supports multiple shell palette packs inside the same light/dark/system theme modes, so release media and saved sessions can keep the same chrome language without forcing a single global color treatment.
+
 ## Build an installable publish output
 
 The project already has Windows publish profiles in `Properties/PublishProfiles/`.
@@ -168,12 +171,12 @@ Install Inno Setup 6 so `ISCC.exe` is available on your machine, then build the 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-winmux-installer.ps1 `
   -PublishDirectory .\bin\Release\net8.0-windows10.0.19041.0\win-x64\publish `
-  -AppVersion 0.1.4
+  -AppVersion 0.1.6
 ```
 
 The installer now bundles a WebView2 bootstrapper for machines that do not already have the runtime, excludes release `.pdb` files, uses a branded wizard header, and defaults to a faster non-solid compression profile so installation feels smoother.
 
-Tagged pushes like `alpha-v0.1.4` run `.github/workflows/windows-release.yml`, publish the x64 build, compile the installer, and attach `WinMux-win-x64-installer.exe` directly to the GitHub Release.
+Tagged pushes like `alpha-v0.1.6` run `.github/workflows/windows-release.yml`, publish the x64 build, compile the installer, and attach `WinMux-win-x64-installer.exe` directly to the GitHub Release.
 
 ## Repo structure
 
