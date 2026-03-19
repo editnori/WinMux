@@ -102,10 +102,10 @@ for ($i = 0; $i -lt 40; $i++) {
         $pageTargets = @($targets | Where-Object { $_.type -eq "page" })
         $rendererTargets = @($targets | Where-Object {
             $_.type -eq "page" -and (
-                $_.url -like "*terminal-host.html*" -or
-                $_.title -like "*terminal*" -or
+                $_.url -like "winmux://*" -or
                 $_.url -like "http://*" -or
-                $_.url -like "https://*"
+                $_.url -like "https://*" -or
+                $_.url -like "file://*"
             )
         })
 

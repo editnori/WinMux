@@ -178,6 +178,9 @@ namespace SelfContainedDeployment
         private readonly Dictionary<string, NoteDraftState> _noteDraftsById = new(StringComparer.Ordinal);
         private readonly Dictionary<string, TreeViewNode> _inspectorDirectoryNodesByPath = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<TreeViewNode, InspectorDirectoryTreeItem> _inspectorDirectoryItemsByNode = new();
+        private readonly Dictionary<TreeViewNode, InspectorDirectoryNodeModel> _inspectorDirectoryModelsByNode = new();
+        private readonly Dictionary<TreeViewNode, int> _inspectorDirectoryDepthByNode = new();
+        private readonly Dictionary<string, InspectorDirectoryNodeModel> _inspectorDirectoryModelsByPath = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, InspectorDirectoryUiCache> _inspectorDirectoryUiCacheByKey = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, InspectorDirectoryUiCache> _inspectorDirectoryUiCacheByRootPath = new(StringComparer.OrdinalIgnoreCase);
         private int _paneFocusRequestId;
@@ -232,11 +235,9 @@ namespace SelfContainedDeployment
 
             public int FileCount { get; init; }
 
-            public List<TreeViewNode> RootNodes { get; init; } = new();
+            public List<InspectorDirectoryNodeModel> RootNodes { get; init; } = new();
 
-            public Dictionary<string, TreeViewNode> NodesByPath { get; init; } = new(StringComparer.OrdinalIgnoreCase);
-
-            public Dictionary<TreeViewNode, InspectorDirectoryTreeItem> ItemsByNode { get; init; } = new();
+            public Dictionary<string, InspectorDirectoryNodeModel> ModelsByPath { get; init; } = new(StringComparer.OrdinalIgnoreCase);
         }
 
         private sealed class ThreadActivitySummary
@@ -371,6 +372,7 @@ namespace SelfContainedDeployment
             Current = this;
             Loaded += OnLoaded;
             ActualThemeChanged += OnActualThemeChanged;
+            InspectorDirectoryTree.Expanding += OnInspectorDirectoryTreeExpanding;
             _uiSettings = new UISettings();
             _sessionSaveTimer = DispatcherQueue.CreateTimer();
             _sessionSaveTimer.IsRepeating = false;
@@ -400,6 +402,7 @@ namespace SelfContainedDeployment
             _lifetimeResourcesReleased = true;
             Loaded -= OnLoaded;
             ActualThemeChanged -= OnActualThemeChanged;
+            InspectorDirectoryTree.Expanding -= OnInspectorDirectoryTreeExpanding;
             _sessionSaveTimer.Stop();
             _sessionSaveTimer.Tick -= OnSessionSaveTimerTick;
             _projectTreeRefreshTimer.Stop();
@@ -429,6 +432,9 @@ namespace SelfContainedDeployment
             _hoveredThreadIds.Clear();
             _inspectorDirectoryNodesByPath.Clear();
             _inspectorDirectoryItemsByNode.Clear();
+            _inspectorDirectoryModelsByNode.Clear();
+            _inspectorDirectoryDepthByNode.Clear();
+            _inspectorDirectoryModelsByPath.Clear();
             _inspectorDirectoryUiCacheByKey.Clear();
             _inspectorDirectoryUiCacheByRootPath.Clear();
             _baselineCaptureInFlightThreadIds.Clear();
@@ -2803,6 +2809,11 @@ namespace SelfContainedDeployment
             UpdateInspectorFileActionState();
         }
 
+        private void OnInspectorDirectoryTreeExpanding(TreeView sender, TreeViewExpandingEventArgs args)
+        {
+            MaterializeInspectorDirectoryChildren(args?.Node);
+        }
+
         private async void OnInspectorSaveFileClicked(object sender, RoutedEventArgs e)
         {
             EditorPaneRecord editorPane = ResolveInspectorEditorPane(createIfNeeded: false);
@@ -3562,6 +3573,9 @@ namespace SelfContainedDeployment
                 _lastInspectorDirectoryRootPath = null;
                 _inspectorDirectoryNodesByPath.Clear();
                 _inspectorDirectoryItemsByNode.Clear();
+                _inspectorDirectoryModelsByNode.Clear();
+                _inspectorDirectoryDepthByNode.Clear();
+                _inspectorDirectoryModelsByPath.Clear();
                 InspectorDirectoryTree.RootNodes.Clear();
                 InspectorDirectoryRootText.Text = "No active project";
                 InspectorDirectoryMetaText.Text = "Open an editor pane to browse files.";
@@ -3676,6 +3690,9 @@ namespace SelfContainedDeployment
             {
                 _inspectorDirectoryNodesByPath.Clear();
                 _inspectorDirectoryItemsByNode.Clear();
+                _inspectorDirectoryModelsByNode.Clear();
+                _inspectorDirectoryDepthByNode.Clear();
+                _inspectorDirectoryModelsByPath.Clear();
                 InspectorDirectoryTree.SelectedNode = null;
                 InspectorDirectoryTree.RootNodes.Clear();
                 InspectorDirectoryEmptyText.Visibility = Visibility.Collapsed;
@@ -3829,11 +3846,12 @@ namespace SelfContainedDeployment
                 RootPath = result.RootPath,
                 RenderKey = result.RenderKey,
                 FileCount = result.FileCount,
+                RootNodes = result.RootNodes,
             };
 
             foreach (InspectorDirectoryNodeModel node in result.RootNodes)
             {
-                uiCache.RootNodes.Add(BuildInspectorDirectoryTreeNode(node, 0, uiCache.NodesByPath, uiCache.ItemsByNode));
+                IndexInspectorDirectoryNodeModel(node, uiCache.ModelsByPath);
             }
 
             return uiCache;
@@ -3873,6 +3891,9 @@ namespace SelfContainedDeployment
             _pendingInspectorDirectoryRenderKey = null;
             _inspectorDirectoryNodesByPath.Clear();
             _inspectorDirectoryItemsByNode.Clear();
+            _inspectorDirectoryModelsByNode.Clear();
+            _inspectorDirectoryDepthByNode.Clear();
+            _inspectorDirectoryModelsByPath.Clear();
             InspectorDirectoryTree.SelectedNode = null;
             InspectorDirectoryTree.RootNodes.Clear();
             InspectorDirectoryTree.Tag = uiCache?.RenderKey;
@@ -3885,19 +3906,14 @@ namespace SelfContainedDeployment
                 return;
             }
 
-            foreach ((string relativePath, TreeViewNode node) in uiCache.NodesByPath)
+            foreach ((string relativePath, InspectorDirectoryNodeModel model) in uiCache.ModelsByPath)
             {
-                _inspectorDirectoryNodesByPath[relativePath] = node;
+                _inspectorDirectoryModelsByPath[relativePath] = model;
             }
 
-            foreach ((TreeViewNode node, InspectorDirectoryTreeItem item) in uiCache.ItemsByNode)
+            foreach (InspectorDirectoryNodeModel rootNode in uiCache.RootNodes)
             {
-                _inspectorDirectoryItemsByNode[node] = item;
-            }
-
-            foreach (TreeViewNode rootNode in uiCache.RootNodes)
-            {
-                InspectorDirectoryTree.RootNodes.Add(rootNode);
+                InspectorDirectoryTree.RootNodes.Add(BuildInspectorDirectoryTreeNode(rootNode, depth: 0));
             }
 
             EditorPaneRecord editorPane = ResolveInspectorEditorPane(createIfNeeded: false);
@@ -3905,11 +3921,28 @@ namespace SelfContainedDeployment
             UpdateInspectorFileActionState();
         }
 
-        private TreeViewNode BuildInspectorDirectoryTreeNode(
+        private static void IndexInspectorDirectoryNodeModel(
             InspectorDirectoryNodeModel node,
-            int depth,
-            Dictionary<string, TreeViewNode> nodesByPath,
-            Dictionary<TreeViewNode, InspectorDirectoryTreeItem> itemsByNode)
+            Dictionary<string, InspectorDirectoryNodeModel> modelsByPath)
+        {
+            if (node is null || string.IsNullOrWhiteSpace(node.RelativePath))
+            {
+                return;
+            }
+
+            modelsByPath[node.RelativePath] = node;
+            if (!node.IsDirectory)
+            {
+                return;
+            }
+
+            foreach (InspectorDirectoryNodeModel child in node.Children.Values)
+            {
+                IndexInspectorDirectoryNodeModel(child, modelsByPath);
+            }
+        }
+
+        private TreeViewNode BuildInspectorDirectoryTreeNode(InspectorDirectoryNodeModel node, int depth)
         {
             InspectorDirectoryDecoration decoration = node.Decoration;
             FileIconInfo themeIcon = FileIconTheme.Resolve(node.RelativePath, node.IsDirectory);
@@ -3938,21 +3971,40 @@ namespace SelfContainedDeployment
                 Content = BuildInspectorDirectoryNodeContent(item),
                 IsExpanded = node.IsDirectory && ShouldExpandInspectorDirectoryNode(node, depth),
             };
-            itemsByNode[treeNode] = item;
 
-            if (node.IsDirectory)
+            _inspectorDirectoryItemsByNode[treeNode] = item;
+            _inspectorDirectoryModelsByNode[treeNode] = node;
+            _inspectorDirectoryDepthByNode[treeNode] = depth;
+            _inspectorDirectoryNodesByPath[item.RelativePath] = treeNode;
+            if (node.IsDirectory && node.Children.Count > 0)
             {
-                foreach (InspectorDirectoryNodeModel child in OrderInspectorDirectoryNodes(node.Children.Values))
+                treeNode.HasUnrealizedChildren = true;
+                if (treeNode.IsExpanded)
                 {
-                    treeNode.Children.Add(BuildInspectorDirectoryTreeNode(child, depth + 1, nodesByPath, itemsByNode));
+                    MaterializeInspectorDirectoryChildren(treeNode);
                 }
-            }
-            else
-            {
-                nodesByPath[item.RelativePath] = treeNode;
             }
 
             return treeNode;
+        }
+
+        private void MaterializeInspectorDirectoryChildren(TreeViewNode node)
+        {
+            if (node is null ||
+                !node.HasUnrealizedChildren ||
+                !_inspectorDirectoryModelsByNode.TryGetValue(node, out InspectorDirectoryNodeModel model) ||
+                !model.IsDirectory)
+            {
+                return;
+            }
+
+            int childDepth = (_inspectorDirectoryDepthByNode.TryGetValue(node, out int depth) ? depth : 0) + 1;
+            foreach (InspectorDirectoryNodeModel child in OrderInspectorDirectoryNodes(model.Children.Values))
+            {
+                node.Children.Add(BuildInspectorDirectoryTreeNode(child, childDepth));
+            }
+
+            node.HasUnrealizedChildren = false;
         }
 
         private static IEnumerable<InspectorDirectoryNodeModel> OrderInspectorDirectoryNodes(IEnumerable<InspectorDirectoryNodeModel> nodes)
@@ -3985,11 +4037,7 @@ namespace SelfContainedDeployment
                 builder
                     .Append(file.Path ?? string.Empty)
                     .Append(':')
-                    .Append(file.Status)
-                    .Append(':')
-                    .Append(file.AddedLines)
-                    .Append(':')
-                    .Append(file.RemovedLines);
+                    .Append(file.Status);
             }
 
             return builder.ToString();
@@ -4357,7 +4405,7 @@ namespace SelfContainedDeployment
             }
 
             if (string.IsNullOrWhiteSpace(selectedPath) ||
-                !_inspectorDirectoryNodesByPath.TryGetValue(selectedPath, out TreeViewNode node))
+                !TryEnsureInspectorDirectoryNode(selectedPath, out TreeViewNode node))
             {
                 if (InspectorDirectoryTree.SelectedNode is not null)
                 {
@@ -4375,11 +4423,52 @@ namespace SelfContainedDeployment
             TreeViewNode current = node.Parent as TreeViewNode;
             while (current is not null)
             {
+                MaterializeInspectorDirectoryChildren(current);
                 current.IsExpanded = true;
                 current = current.Parent as TreeViewNode;
             }
 
             InspectorDirectoryTree.SelectedNode = node;
+        }
+
+        private bool TryEnsureInspectorDirectoryNode(string relativePath, out TreeViewNode node)
+        {
+            if (_inspectorDirectoryNodesByPath.TryGetValue(relativePath, out node))
+            {
+                return true;
+            }
+
+            if (!_inspectorDirectoryModelsByPath.TryGetValue(relativePath, out InspectorDirectoryNodeModel model))
+            {
+                node = null;
+                return false;
+            }
+
+            string parentPath = GetInspectorDirectoryParentPath(model.RelativePath);
+            if (!string.IsNullOrWhiteSpace(parentPath))
+            {
+                if (!TryEnsureInspectorDirectoryNode(parentPath, out TreeViewNode parentNode))
+                {
+                    node = null;
+                    return false;
+                }
+
+                MaterializeInspectorDirectoryChildren(parentNode);
+                parentNode.IsExpanded = true;
+            }
+
+            return _inspectorDirectoryNodesByPath.TryGetValue(relativePath, out node);
+        }
+
+        private static string GetInspectorDirectoryParentPath(string relativePath)
+        {
+            if (string.IsNullOrWhiteSpace(relativePath))
+            {
+                return null;
+            }
+
+            int separatorIndex = relativePath.LastIndexOf('/');
+            return separatorIndex > 0 ? relativePath[..separatorIndex] : null;
         }
 
         private void UpdateInspectorFileActionState()
@@ -7180,17 +7269,16 @@ namespace SelfContainedDeployment
             WorkspaceThread activeThread,
             int requestId)
         {
-            await System.Threading.Tasks.Task.Delay(180).ConfigureAwait(true);
-            int warmedThreadIndex = 0;
-            foreach (WorkspaceThread thread in EnumerateWarmupThreads(project, activeThread))
+            await System.Threading.Tasks.Task.Delay(420).ConfigureAwait(true);
+            WorkspaceThread threadToWarm = EnumerateWarmupThreads(project, activeThread).FirstOrDefault();
+            if (threadToWarm is not null)
             {
                 if (requestId != _latestPaneWarmupRequestId || !ReferenceEquals(project, _activeProject))
                 {
                     return;
                 }
 
-                bool warmAllVisiblePanes = warmedThreadIndex == 0;
-                foreach (WorkspacePaneRecord pane in EnumerateWarmupPanes(thread, warmAllVisiblePanes))
+                foreach (WorkspacePaneRecord pane in EnumerateWarmupPanes(threadToWarm, warmAllVisiblePanes: false))
                 {
                     try
                     {
@@ -7212,39 +7300,7 @@ namespace SelfContainedDeployment
                     }
                 }
 
-                await WarmThreadGitSnapshotAsync(project, thread, requestId).ConfigureAwait(true);
-                warmedThreadIndex++;
-                await System.Threading.Tasks.Task.Delay(60).ConfigureAwait(true);
-            }
-
-            WorkspaceProject adjacentProject = _projects.FirstOrDefault(candidate => !ReferenceEquals(candidate, project));
-            WorkspaceThread adjacentThread = adjacentProject?.Threads.FirstOrDefault(candidate => string.Equals(candidate.Id, adjacentProject.SelectedThreadId, StringComparison.Ordinal))
-                ?? adjacentProject?.Threads.FirstOrDefault();
-            if (adjacentProject is not null && adjacentThread is not null)
-            {
-                foreach (WorkspacePaneRecord pane in EnumerateWarmupPanes(adjacentThread, warmAllVisiblePanes: true))
-                {
-                    try
-                    {
-                        switch (pane)
-                        {
-                            case TerminalPaneRecord terminalPane:
-                                await terminalPane.Terminal.WarmupAsync().ConfigureAwait(true);
-                                break;
-                            case BrowserPaneRecord browserPane:
-                                await browserPane.Browser.EnsureInitializedAsync().ConfigureAwait(true);
-                                break;
-                            case EditorPaneRecord editorPane:
-                                await editorPane.Editor.WarmupAsync().ConfigureAwait(true);
-                                break;
-                        }
-                    }
-                    catch
-                    {
-                    }
-                }
-
-                await WarmThreadGitSnapshotAsync(adjacentProject, adjacentThread, requestId).ConfigureAwait(true);
+                await WarmThreadGitSnapshotAsync(project, threadToWarm, requestId).ConfigureAwait(true);
             }
         }
 
@@ -11412,45 +11468,70 @@ namespace SelfContainedDeployment
                 return null;
             }
 
-            List<TerminalPaneRecord> terminalPanes = thread.Panes.OfType<TerminalPaneRecord>().ToList();
-            List<TerminalPaneRecord> activeToolPanes = terminalPanes
-                .Where(pane => pane.Terminal?.HasLiveToolSession == true && !pane.IsExited && !pane.ReplayRestoreFailed)
-                .ToList();
-            List<WorkspacePaneRecord> attentionPanes = thread.Panes
-                .Where(pane => pane.RequiresAttention)
-                .ToList();
+            int attentionCount = 0;
+            int activeToolCount = 0;
+            TerminalPaneRecord representativeAttentionToolPane = null;
+            TerminalPaneRecord representativeActiveToolPane = null;
 
-            if (attentionPanes.Count > 0)
+            foreach (WorkspacePaneRecord pane in thread.Panes)
             {
-                TerminalPaneRecord attentionToolPane = attentionPanes
-                    .OfType<TerminalPaneRecord>()
-                    .FirstOrDefault(pane => !string.IsNullOrWhiteSpace(pane.Terminal?.ActiveToolSession) || !string.IsNullOrWhiteSpace(pane.ReplayTool))
-                    ?? activeToolPanes.FirstOrDefault();
+                bool isAttentionPane = pane.RequiresAttention;
+                if (isAttentionPane)
+                {
+                    attentionCount++;
+                }
+
+                if (pane is not TerminalPaneRecord terminalPane)
+                {
+                    continue;
+                }
+
+                bool hasLiveTool = terminalPane.Terminal?.HasLiveToolSession == true &&
+                    !terminalPane.IsExited &&
+                    !terminalPane.ReplayRestoreFailed;
+                if (hasLiveTool)
+                {
+                    activeToolCount++;
+                    representativeActiveToolPane ??= terminalPane;
+                }
+
+                if (isAttentionPane &&
+                    representativeAttentionToolPane is null &&
+                    (!string.IsNullOrWhiteSpace(terminalPane.Terminal?.ActiveToolSession) ||
+                     !string.IsNullOrWhiteSpace(terminalPane.ReplayTool)))
+                {
+                    representativeAttentionToolPane = terminalPane;
+                }
+            }
+
+            if (attentionCount > 0)
+            {
+                TerminalPaneRecord attentionToolPane = representativeAttentionToolPane ?? representativeActiveToolPane;
                 string toolName = ResolveToolName(attentionToolPane?.Terminal?.ActiveToolSession)
                     ?? ResolveToolName(attentionToolPane?.ReplayTool);
                 return new ThreadActivitySummary
                 {
                     Label = string.IsNullOrWhiteSpace(toolName)
-                        ? (attentionPanes.Count == 1 ? "Ready" : $"{attentionPanes.Count} ready")
+                        ? (attentionCount == 1 ? "Ready" : $"{attentionCount} ready")
                         : toolName,
                     ToolTip = string.IsNullOrWhiteSpace(toolName)
-                        ? $"{attentionPanes.Count} pane{(attentionPanes.Count == 1 ? string.Empty : "s")} have unread activity."
+                        ? $"{attentionCount} pane{(attentionCount == 1 ? string.Empty : "s")} have unread activity."
                         : $"{toolName} has unread activity.",
                     RequiresAttention = true,
                 };
             }
 
-            if (activeToolPanes.Count > 0)
+            if (activeToolCount > 0)
             {
-                string toolName = activeToolPanes.Count == 1
-                    ? ResolveToolName(activeToolPanes[0].Terminal?.ActiveToolSession) ?? ResolveToolName(activeToolPanes[0].ReplayTool) ?? "Agent"
-                    : $"{activeToolPanes.Count} live";
+                string toolName = activeToolCount == 1
+                    ? ResolveToolName(representativeActiveToolPane?.Terminal?.ActiveToolSession) ?? ResolveToolName(representativeActiveToolPane?.ReplayTool) ?? "Agent"
+                    : $"{activeToolCount} live";
                 return new ThreadActivitySummary
                 {
                     Label = toolName,
-                    ToolTip = activeToolPanes.Count == 1
+                    ToolTip = activeToolCount == 1
                         ? $"{toolName} session is active."
-                        : $"{activeToolPanes.Count} agent sessions are active.",
+                        : $"{activeToolCount} agent sessions are active.",
                     IsRunning = true,
                 };
             }
@@ -13856,8 +13937,6 @@ namespace SelfContainedDeployment
                     .Append(':')
                     .Append(project.Threads.Count)
                     .Append(':')
-                    .Append(project.RootPath)
-                    .Append(':')
                     .Append(liveCount)
                     .Append(':')
                     .Append(readyCount)
@@ -13870,61 +13949,44 @@ namespace SelfContainedDeployment
 
                 foreach (WorkspaceThread thread in project.Threads)
                 {
+                    List<WorkspacePaneRecord> visiblePanes = GetVisiblePanes(thread).ToList();
                     builder.Append(thread.Id)
                         .Append(':')
                         .Append(thread.Name)
-                        .Append(':')
-                        .Append(thread.TabSummary)
                         .Append(':')
                         .Append(thread.BranchName)
                         .Append(':')
                         .Append(thread.WorktreePath)
                         .Append(':')
-                        .Append(thread.SelectedNoteId)
-                        .Append(':')
                         .Append(thread.ChangedFileCount)
                         .Append(':')
                         .Append(thread.SelectedPaneId)
+                        .Append(':')
+                        .Append(thread.ZoomedPaneId)
+                        .Append(':')
+                        .Append(thread.VisiblePaneCapacity)
+                        .Append(':')
+                        .Append(thread.NoteEntries.Count)
                         .Append('|');
 
-                    foreach (WorkspaceThreadNote note in thread.NoteEntries)
-                    {
-                        builder.Append(note.Id)
-                            .Append(',')
-                            .Append(note.Title)
-                            .Append(',')
-                            .Append(note.PaneId)
-                            .Append(',')
-                            .Append(note.UpdatedAt.ToString("O"))
-                            .Append(',')
-                            .Append(note.Text)
-                            .Append('|');
-                    }
+                    ThreadActivitySummary summary = ResolveThreadActivitySummary(thread);
+                    AppendThreadActivitySummaryKey(builder, summary);
+                    builder.Append('|');
 
-                    foreach (WorkspacePaneRecord pane in thread.Panes)
+                    foreach (WorkspacePaneRecord pane in visiblePanes)
                     {
-                        string activeToolSession = pane is TerminalPaneRecord terminalPane
-                            ? terminalPane.Terminal.ActiveToolSession
-                            : null;
                         builder.Append(pane.Id)
                             .Append(',')
                             .Append(pane.Kind)
                             .Append(',')
-                            .Append(pane.Title)
-                            .Append(',')
-                            .Append(pane.IsExited ? '1' : '0')
-                            .Append(',')
-                            .Append(pane.RequiresAttention ? '1' : '0')
-                            .Append(',')
-                            .Append(pane.ReplayTool)
-                            .Append(',')
-                            .Append(activeToolSession)
-                            .Append(',')
-                            .Append(pane.ReplayRestorePending ? '1' : '0')
-                            .Append(',')
-                            .Append(pane.ReplayRestoreFailed ? '1' : '0')
+                            .Append(string.Equals(thread.SelectedPaneId, pane.Id, StringComparison.Ordinal) ? '1' : '0')
                             .Append('|');
                     }
+
+                    int hiddenPaneCount = Math.Max(0, thread.Panes.Count - visiblePanes.Count);
+                    builder.Append("hidden:")
+                        .Append(hiddenPaneCount)
+                        .Append('|');
                 }
             }
 
@@ -13936,8 +13998,6 @@ namespace SelfContainedDeployment
             StringBuilder builder = new();
             builder.Append(_showingSettings ? '1' : '0')
                 .Append('|')
-                .Append(_inspectorOpen ? '1' : '0')
-                .Append('|')
                 .Append(_activeThread?.Id)
                 .Append('|');
 
@@ -13946,9 +14006,7 @@ namespace SelfContainedDeployment
                 return builder.ToString();
             }
 
-            builder.Append(_activeThread.SelectedPaneId)
-                .Append('|')
-                .Append(_activeThread.ZoomedPaneId)
+            builder.Append(_activeThread.ZoomedPaneId)
                 .Append('|')
                 .Append(_activeThread.LayoutPreset)
                 .Append('|')
@@ -13961,17 +14019,26 @@ namespace SelfContainedDeployment
             {
                 builder.Append(pane.Id)
                     .Append(':')
-                    .Append(pane.Title)
-                    .Append(':')
-                    .Append(pane.Kind)
-                    .Append(':')
                     .Append(pane.IsDeferred ? '1' : '0')
-                    .Append(':')
-                    .Append(pane.IsExited ? '1' : '0')
                     .Append('|');
             }
 
             return builder.ToString();
+        }
+
+        private static void AppendThreadActivitySummaryKey(StringBuilder builder, ThreadActivitySummary summary)
+        {
+            if (summary is null)
+            {
+                builder.Append("none");
+                return;
+            }
+
+            builder.Append(summary.Label)
+                .Append(':')
+                .Append(summary.RequiresAttention ? '1' : '0')
+                .Append(':')
+                .Append(summary.IsRunning ? '1' : '0');
         }
 
         private static bool ShouldPersistProject(WorkspaceProject project)

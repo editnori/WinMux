@@ -888,27 +888,48 @@ namespace SelfContainedDeployment.Git
 
         private static void PruneSnapshotCache(DateTimeOffset now)
         {
-            string[] expiredKeys = SnapshotCache
-                .Where(entry => now - entry.Value.CapturedAt > SnapshotCacheMaxAge)
-                .Select(entry => entry.Key)
-                .ToArray();
-            foreach (string expiredKey in expiredKeys)
-            {
-                SnapshotCache.Remove(expiredKey);
-            }
+            List<string> expiredKeys = null;
+            string oldestKey = null;
+            DateTimeOffset oldestCapturedAt = DateTimeOffset.MaxValue;
 
-            while (SnapshotCache.Count > MaxSnapshotCacheEntries)
+            foreach ((string key, CachedGitSnapshotEntry entry) in SnapshotCache)
             {
-                string oldestKey = SnapshotCache
-                    .OrderBy(entry => entry.Value.CapturedAt)
-                    .Select(entry => entry.Key)
-                    .FirstOrDefault();
-                if (string.IsNullOrWhiteSpace(oldestKey))
+                if (now - entry.CapturedAt > SnapshotCacheMaxAge)
                 {
-                    break;
+                    expiredKeys ??= new List<string>();
+                    expiredKeys.Add(key);
+                    continue;
                 }
 
+                if (entry.CapturedAt < oldestCapturedAt)
+                {
+                    oldestCapturedAt = entry.CapturedAt;
+                    oldestKey = key;
+                }
+            }
+
+            if (expiredKeys is not null)
+            {
+                foreach (string expiredKey in expiredKeys)
+                {
+                    SnapshotCache.Remove(expiredKey);
+                }
+            }
+
+            while (SnapshotCache.Count > MaxSnapshotCacheEntries &&
+                !string.IsNullOrWhiteSpace(oldestKey))
+            {
                 SnapshotCache.Remove(oldestKey);
+                oldestKey = null;
+                oldestCapturedAt = DateTimeOffset.MaxValue;
+                foreach ((string key, CachedGitSnapshotEntry entry) in SnapshotCache)
+                {
+                    if (entry.CapturedAt < oldestCapturedAt)
+                    {
+                        oldestCapturedAt = entry.CapturedAt;
+                        oldestKey = key;
+                    }
+                }
             }
         }
 

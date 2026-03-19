@@ -180,7 +180,7 @@ Tagged pushes like `alpha-v0.1.4` run `.github/workflows/windows-release.yml`, p
 - `MainPage.*`: native shell layout and workspace model
 - `Terminal/`: ConPTY shell coordination plus the native Windows Terminal-backed pane host
 - `Panes/`: browser, editor, and diff panes
-- `Web/`: WebView2 assets used by browser/editor surfaces and legacy terminal-host references
+- `Web/`: WebView2 assets used by browser/editor surfaces
 - `Automation/`: native automation server and recording support
 - `scripts/`: Bun/PowerShell helpers for automation, demos, and recordings
 

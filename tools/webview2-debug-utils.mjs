@@ -52,3 +52,42 @@ export async function connectToWebView2({ port = 9222, attempts = 20, delayMs = 
     `Could not connect to WebView2 CDP. Tried ${urls.join(", ")}. Last error: ${lastError}`,
   );
 }
+
+export function listInspectablePages(browser) {
+  return browser
+    .contexts()
+    .flatMap((context) => context.pages())
+    .filter((page) => !page.url().startsWith("devtools://"));
+}
+
+export function resolvePreferredPage(browser) {
+  const pages = listInspectablePages(browser);
+  if (pages.length === 0) {
+    return null;
+  }
+
+  const scoredPages = pages.map((page) => {
+    const url = page.url();
+    let score = 0;
+    if (url.startsWith("winmux://")) {
+      score = 4;
+    }
+    else if (url.startsWith("http://") || url.startsWith("https://")) {
+      score = 3;
+    }
+    else if (url.startsWith("file://")) {
+      score = 2;
+    }
+    else if (url === "about:blank") {
+      score = 0;
+    }
+    else {
+      score = 1;
+    }
+
+    return { page, score };
+  });
+
+  scoredPages.sort((left, right) => right.score - left.score);
+  return scoredPages[0].page;
+}

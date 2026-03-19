@@ -1,5 +1,5 @@
 import path from "node:path";
-import { connectToWebView2 } from "./webview2-debug-utils.mjs";
+import { connectToWebView2, resolvePreferredPage } from "./webview2-debug-utils.mjs";
 
 const port = Number(process.env.WEBVIEW2_DEBUG_PORT ?? "9222");
 const outputPath = process.argv[2]
@@ -7,11 +7,7 @@ const outputPath = process.argv[2]
   : path.resolve("webview2-debug-shot.png");
 
 const { browser, debugUrl } = await connectToWebView2({ port });
-const page = browser
-  .contexts()
-  .flatMap((context) => context.pages())
-  .find((candidate) => candidate.url().includes("terminal-host.html"))
-  ?? browser.contexts().flatMap((context) => context.pages())[0];
+const page = resolvePreferredPage(browser);
 
 if (!page) {
   throw new Error(`No WebView2 pages found at ${debugUrl}`);
