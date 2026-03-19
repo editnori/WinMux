@@ -322,6 +322,100 @@ async function getPerfSnapshot() {
   return runNativeTool("perf-snapshot");
 }
 
+function splitListArg(value) {
+  if (!value) {
+    return [];
+  }
+
+  return String(value)
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+function filterPerfOperations(operations, options = {}) {
+  const names = new Set(splitListArg(options.name));
+  const match = options.match ? String(options.match).toLowerCase() : "";
+  let filtered = Array.isArray(operations) ? operations : [];
+  if (names.size > 0) {
+    filtered = filtered.filter((operation) => names.has(operation?.name));
+  }
+  if (match) {
+    filtered = filtered.filter((operation) => {
+      const haystack = `${operation?.name || ""} ${JSON.stringify(operation?.data || {})}`.toLowerCase();
+      return haystack.includes(match);
+    });
+  }
+  const limit = Number(options.limit || 40);
+  if (Number.isFinite(limit) && limit > 0 && filtered.length > limit) {
+    filtered = filtered.slice(-limit);
+  }
+  return filtered;
+}
+
+function buildPerfSummaries(operations) {
+  const buckets = new Map();
+  for (const operation of Array.isArray(operations) ? operations : []) {
+    if (!operation?.name || typeof operation.durationMs !== "number") {
+      continue;
+    }
+    const bucket = buckets.get(operation.name) || [];
+    bucket.push(operation);
+    buckets.set(operation.name, bucket);
+  }
+
+  return [...buckets.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([name, bucket]) => {
+      const durations = bucket.map((entry) => entry.durationMs).sort((a, b) => a - b);
+      const p95Index = Math.min(durations.length - 1, Math.ceil(durations.length * 0.95) - 1);
+      return {
+        name,
+        count: durations.length,
+        avgMs: durations.reduce((sum, value) => sum + value, 0) / durations.length,
+        p95Ms: durations[p95Index],
+        maxMs: durations[durations.length - 1],
+        backgroundCount: bucket.filter((entry) => entry.background).length,
+      };
+    });
+}
+
+async function getPerfEvents(options = {}) {
+  const perf = await getPerfSnapshot();
+  return {
+    ok: true,
+    timestamp: perf?.timestamp || new Date().toISOString(),
+    activeAction: perf?.activeAction || "",
+    events: filterPerfOperations(perf?.recentOperations || [], options),
+  };
+}
+
+async function getPerfSummary(options = {}) {
+  const perf = await getPerfSnapshot();
+  const names = new Set(splitListArg(options.name));
+  const match = options.match ? String(options.match).toLowerCase() : "";
+  let summaries = Array.isArray(perf?.operationSummaries) && perf.operationSummaries.length > 0
+    ? perf.operationSummaries
+    : buildPerfSummaries(perf?.recentOperations || []);
+  if (names.size > 0) {
+    summaries = summaries.filter((summary) => names.has(summary?.name));
+  }
+  if (match) {
+    summaries = summaries.filter((summary) => (summary?.name || "").toLowerCase().includes(match));
+  }
+  summaries = [...summaries].sort((a, b) => (b?.p95Ms || 0) - (a?.p95Ms || 0));
+  const top = Number(options.top || 0);
+  if (Number.isFinite(top) && top > 0) {
+    summaries = summaries.slice(0, top);
+  }
+  return {
+    ok: true,
+    timestamp: perf?.timestamp || new Date().toISOString(),
+    windowCount: (perf?.recentOperations || []).length,
+    summaries,
+  };
+}
+
 async function getDoctor() {
   return runNativeTool("doctor");
 }
@@ -1144,6 +1238,10 @@ async function run() {
   switch (command) {
     case "perf-snapshot":
       return getPerfSnapshot();
+    case "perf-events":
+      return getPerfEvents(args);
+    case "perf-summary":
+      return getPerfSummary(args);
     case "doctor":
       return getDoctor();
     case "inspect":
@@ -1201,7 +1299,7 @@ async function run() {
     case "crash-report":
       return crashReport(args);
     default:
-      fail(`Unknown command '${command}'. Expected one of: perf-snapshot, doctor, inspect, wait, profile-action, click-and-capture, state-diff, scenario, benchmark, ui-watch, crash-report`);
+      fail(`Unknown command '${command}'. Expected one of: perf-snapshot, perf-events, perf-summary, doctor, inspect, wait, profile-action, click-and-capture, state-diff, scenario, benchmark, ui-watch, crash-report`);
   }
 }
 

@@ -32,6 +32,8 @@
     "native:render-trace": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(wslpath -w \"$PWD/scripts/run-native-automation.ps1\")\" render-trace",
     "native:notes": "bun tools/winmux-notes.mjs",
     "native:perf-snapshot": "bun tools/native-debugger.mjs perf-snapshot",
+    "native:perf-events": "bun tools/native-debugger.mjs perf-events",
+    "native:perf-summary": "bun tools/native-debugger.mjs perf-summary",
     "native:doctor": "bun tools/native-debugger.mjs doctor",
     "native:inspect": "bun tools/native-debugger.mjs inspect",
     "native:wait": "bun tools/native-debugger.mjs wait",

@@ -14,7 +14,7 @@ The goal is not abstract "refactor more." The goal is to make WinMux faster to c
 
 ## Success criteria
 
-- [ ] Get [MainPage.xaml.cs](/mnt/c/Users/lqassem/native-terminal-starter/MainPage.xaml.cs) below `8k` LOC.
+- [x] Get [MainPage.xaml.cs](/mnt/c/Users/lqassem/native-terminal-starter/MainPage.xaml.cs) below `8k` LOC.
 - [ ] Keep subsystem code in files that roughly map to one surface or workflow.
 - [ ] Expose measurable timings for thread switch, pane layout, diff refresh, inspector refresh, and pane materialization.
 - [ ] Make it possible to answer "what got slower?" from automation output and logs.
@@ -35,18 +35,18 @@ The goal is not abstract "refactor more." The goal is to make WinMux faster to c
 - [x] Extract [MainPage.ProjectRail.cs](/mnt/c/Users/lqassem/native-terminal-starter/MainPage.ProjectRail.cs).
 - [x] Extract [MainPage.InspectorFiles.cs](/mnt/c/Users/lqassem/native-terminal-starter/MainPage.InspectorFiles.cs).
 - [x] Extract [MainPage.GitReview.cs](/mnt/c/Users/lqassem/native-terminal-starter/MainPage.GitReview.cs).
-- [ ] Extract `MainPage.PaneWorkspace.cs`.
-- [ ] Extract `MainPage.Notes.cs`.
-- [ ] Extract `MainPage.SessionRestore.cs`.
+- [x] Extract `MainPage.PaneWorkspace.cs`.
+- [x] Extract `MainPage.Notes.cs`.
+- [x] Extract `MainPage.SessionRestore.cs`.
 - [ ] Extract `MainPage.Automation.cs`.
 - [ ] Extract `MainPage.SettingsHost.cs` if settings hosting logic keeps growing.
 - [ ] Move subsystem-specific helper types out of `MainPage` when they do not need shell-private state.
 
 ### Priorities inside `MainPage`
 
-- [ ] Pull pane layout, splitter drag, preview, and zoom logic out of [MainPage.xaml.cs](/mnt/c/Users/lqassem/native-terminal-starter/MainPage.xaml.cs).
-- [ ] Pull note drafting, note card interactions, and note scope routing out of [MainPage.xaml.cs](/mnt/c/Users/lqassem/native-terminal-starter/MainPage.xaml.cs).
-- [ ] Pull session restore and pane restoration flow out of [MainPage.xaml.cs](/mnt/c/Users/lqassem/native-terminal-starter/MainPage.xaml.cs).
+- [x] Pull pane layout, splitter drag, preview, and zoom logic out of [MainPage.xaml.cs](/mnt/c/Users/lqassem/native-terminal-starter/MainPage.xaml.cs).
+- [x] Pull note drafting, note card interactions, and note scope routing out of [MainPage.xaml.cs](/mnt/c/Users/lqassem/native-terminal-starter/MainPage.xaml.cs).
+- [x] Pull session restore and pane restoration flow out of [MainPage.xaml.cs](/mnt/c/Users/lqassem/native-terminal-starter/MainPage.xaml.cs).
 - [ ] Reduce cross-subsystem field access by grouping shell state more intentionally.
 
 ## 2. Component and control extraction
@@ -100,13 +100,13 @@ Small changes still travel too far through the shell and cause avoidable rebuild
 - [ ] Add a small shell performance collector with a ring buffer of recent events.
 - [ ] Stamp each measurement with operation name, thread/project IDs, cache-hit status, and visible pane counts.
 - [ ] Record invalidation reason alongside the timing.
-- [ ] Expose recent perf events through the native automation server.
-- [ ] Add Bun commands to dump recent perf samples and aggregate counts.
+- [x] Expose recent perf events through the native automation server.
+- [x] Add Bun commands to dump recent perf samples and aggregate counts.
 
 ### Output shape
 
-- [ ] Support "latest events" output for debugging.
-- [ ] Support simple aggregate summaries such as avg, p95, and count by operation name.
+- [x] Support "latest events" output for debugging.
+- [x] Support simple aggregate summaries such as avg, p95, and count by operation name.
 - [ ] Keep the payload small enough to use frequently during development.
 
 ## 5. Hot-path optimization backlog
@@ -181,15 +181,15 @@ Small changes still travel too far through the shell and cause avoidable rebuild
 
 ### Phase A: shrink the shell monolith
 
-- [ ] Extract pane workspace.
-- [ ] Extract notes.
-- [ ] Extract restore flow.
+- [x] Extract pane workspace.
+- [x] Extract notes.
+- [x] Extract restore flow.
 
 ### Phase B: add performance visibility
 
 - [ ] Add perf collector.
-- [ ] Add automation exposure.
-- [ ] Add Bun perf commands.
+- [x] Add automation exposure.
+- [x] Add Bun perf commands.
 
 ### Phase C: optimize with evidence
 

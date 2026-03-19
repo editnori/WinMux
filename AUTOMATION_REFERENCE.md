@@ -46,6 +46,8 @@ bun run native:desktop-uia-tree
 bun run native:events
 bun run native:events:clear
 bun run native:perf-snapshot
+bun run native:perf-events
+bun run native:perf-summary
 bun run native:doctor
 bun run native:recording-status
 bun run native:action -- '{"action":"newThread"}'
@@ -319,12 +321,16 @@ Returned fields:
 - `lastDurationsMs`
 - `lastAction`
 - `recentOperations`
+- `operationSummaries`
 
 Notes:
 
 - `bun run native:perf-snapshot` is the direct wrapper for this route
+- `bun run native:perf-events` returns the most recent operation samples, with optional `--limit`, `--name`, or `--match` filters
+- `bun run native:perf-summary` returns grouped `avg`, `p95`, `max`, and `count` summaries from the same rolling window
 - `lastAction` includes high-level action timings such as `totalMs`, `asyncBackgroundMs`, `firstRenderCompleteMs`, `paneLayoutMs`, `projectRailRefreshMs`, `inspectorRebuildMs`, and `gitRefreshMs`
 - `recentOperations` is the event-style timing ledger for deeper debugging and correlation-id tracing
+- `operationSummaries` groups the rolling perf window by operation name so regressions are easier to compare without hand-aggregating samples
 
 ### Doctor snapshot
 

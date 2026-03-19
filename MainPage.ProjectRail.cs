@@ -29,10 +29,21 @@ namespace SelfContainedDeployment
 
         private void RefreshProjectTree()
         {
-            using var perfScope = NativeAutomationDiagnostics.TrackOperation("render.project-tree");
-            NativeAutomationDiagnostics.IncrementCounter("projectTree.refreshCount");
             string renderKey = BuildProjectTreeRenderKey();
-            if (string.Equals(renderKey, _lastProjectTreeRenderKey, StringComparison.Ordinal))
+            bool cacheHit = string.Equals(renderKey, _lastProjectTreeRenderKey, StringComparison.Ordinal);
+            var perfData = new Dictionary<string, string>
+            {
+                ["projectId"] = _activeProject?.Id ?? string.Empty,
+                ["threadId"] = _activeThread?.Id ?? string.Empty,
+                ["projectCount"] = _projects.Count.ToString(),
+                ["paneOpen"] = (ShellSplitView?.IsPaneOpen == true).ToString(),
+                ["showingSettings"] = _showingSettings.ToString(),
+                ["cacheHit"] = cacheHit.ToString(),
+                ["renderKey"] = renderKey,
+            };
+            using var perfScope = NativeAutomationDiagnostics.TrackOperation("render.project-tree", data: perfData);
+            NativeAutomationDiagnostics.IncrementCounter("projectTree.refreshCount");
+            if (cacheHit)
             {
                 return;
             }

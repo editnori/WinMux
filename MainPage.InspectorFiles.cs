@@ -119,6 +119,20 @@ namespace SelfContainedDeployment
             await OpenEditorFileFromInspectorAsync(item.RelativePath).ConfigureAwait(true);
         }
 
+        private void RefreshInspectorFileBrowserStatus()
+        {
+            if (InspectorDirectoryMetaText is null)
+            {
+                return;
+            }
+
+            EditorPaneRecord editorPane = ResolveInspectorEditorPane(createIfNeeded: false);
+            InspectorDirectoryMetaText.Text = editorPane is null
+                ? "Select a file to open it in a new editor pane."
+                : editorPane.Editor.StatusText;
+            UpdateInspectorFileActionState();
+        }
+
         private void RefreshInspectorFileBrowser(bool forceRebuild = false)
         {
             if (InspectorDirectoryTree is null || InspectorDirectoryRootText is null || InspectorDirectoryMetaText is null || InspectorDirectoryEmptyText is null)

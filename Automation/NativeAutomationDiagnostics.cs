@@ -253,6 +253,7 @@ namespace SelfContainedDeployment.Automation
                     LastDurationsMs = new Dictionary<string, double>(LastDurationsMs, StringComparer.Ordinal),
                     LastAction = _lastAction is null ? null : CloneActionProfile(_lastAction),
                     RecentOperations = RecentOperations.Select(CloneOperation).ToList(),
+                    OperationSummaries = BuildOperationSummaries(RecentOperations).ToList(),
                 };
             }
         }
@@ -451,6 +452,40 @@ namespace SelfContainedDeployment.Automation
                 Background = operation.Background,
                 Data = new Dictionary<string, string>(operation.Data),
             };
+        }
+
+        private static IEnumerable<NativeAutomationPerfSummary> BuildOperationSummaries(IEnumerable<NativeAutomationPerfOperation> operations)
+        {
+            if (operations is null)
+            {
+                yield break;
+            }
+
+            foreach (IGrouping<string, NativeAutomationPerfOperation> group in operations
+                         .Where(operation => operation is not null && !string.IsNullOrWhiteSpace(operation.Name))
+                         .GroupBy(operation => operation.Name, StringComparer.Ordinal)
+                         .OrderBy(group => group.Key, StringComparer.Ordinal))
+            {
+                List<double> durations = group
+                    .Select(operation => operation.DurationMs)
+                    .OrderBy(value => value)
+                    .ToList();
+                if (durations.Count == 0)
+                {
+                    continue;
+                }
+
+                int percentileIndex = Math.Min(durations.Count - 1, (int)Math.Ceiling(durations.Count * 0.95) - 1);
+                yield return new NativeAutomationPerfSummary
+                {
+                    Name = group.Key,
+                    Count = durations.Count,
+                    AvgMs = durations.Average(),
+                    P95Ms = durations[percentileIndex],
+                    MaxMs = durations[^1],
+                    BackgroundCount = group.Count(operation => operation.Background),
+                };
+            }
         }
 
         private static NativeAutomationHangDump CloneHangDump(NativeAutomationHangDump dump)

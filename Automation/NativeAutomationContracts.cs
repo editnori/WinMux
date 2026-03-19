@@ -879,6 +879,8 @@ namespace SelfContainedDeployment.Automation
         public NativeAutomationActionProfile LastAction { get; set; }
 
         public List<NativeAutomationPerfOperation> RecentOperations { get; set; } = new();
+
+        public List<NativeAutomationPerfSummary> OperationSummaries { get; set; } = new();
     }
 
     public sealed class NativeAutomationActionProfile
@@ -933,6 +935,21 @@ namespace SelfContainedDeployment.Automation
         public bool Background { get; set; }
 
         public Dictionary<string, string> Data { get; set; } = new();
+    }
+
+    public sealed class NativeAutomationPerfSummary
+    {
+        public string Name { get; set; }
+
+        public int Count { get; set; }
+
+        public double AvgMs { get; set; }
+
+        public double P95Ms { get; set; }
+
+        public double MaxMs { get; set; }
+
+        public int BackgroundCount { get; set; }
     }
 
     public sealed class NativeAutomationDoctorResponse
