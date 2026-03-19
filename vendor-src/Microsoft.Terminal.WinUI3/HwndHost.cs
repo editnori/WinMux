@@ -351,7 +351,7 @@ namespace System.Windows.Interop {
 		bool IKeyboardInputSink.HasFocusWithin() {
 			return HasFocusWithinCore();
 		}
-		public bool IsVisible => Visibility == Visibility.Visible;
+		public bool IsVisible => IsActuallyVisible();
 		#endregion IKeyboardInputSink
 
 		/// <summary>
@@ -372,7 +372,7 @@ namespace System.Windows.Interop {
 			// Position the child HWND where layout put it.  To do this we
 			// have to get coordinates relative to the parent window.
 
-			if (!XAMLParentWindow.IsNull && this.Parent != null && IsVisible) {
+			if (!XAMLParentWindow.IsNull && this.Parent != null && IsActuallyVisible()) {
 				// Translate the layout information assigned to us from the co-ordinate
 				// space of this element, through the root visual, to the Win32 client
 				// co-ordinate space
@@ -763,7 +763,7 @@ namespace System.Windows.Interop {
 				return;
 			}
 
-			bool vis = (bool)IsVisible;
+			bool vis = IsActuallyVisible();
 
 			// BUG 148548 HwndHost does not always repaint on restore from minimize.
 			// We used to call ShowWindow here and ShowWindowAsync in other places (UpdateWindowPos). 
@@ -776,6 +776,19 @@ namespace System.Windows.Interop {
 			else
 				PInvoke.ShowWindowAsync(_hwnd, SHOW_WINDOW_CMD.SW_HIDE);
 			UpdateWindowPos();
+		}
+
+		private bool IsActuallyVisible() {
+			DependencyObject current = this;
+			while (current is UIElement element) {
+				if (element.Visibility != Visibility.Visible) {
+					return false;
+				}
+
+				current = VisualTreeHelper.GetParent(current);
+			}
+
+			return Visibility == Visibility.Visible;
 		}
 
 		// This routine handles the following cases:
