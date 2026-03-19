@@ -38,6 +38,8 @@ namespace SelfContainedDeployment
         private const double MaxPaneSplitRatio = 0.76;
         private const int AutomationUiTreeMaxDepth = 28;
         private static readonly bool EnableBackgroundPaneWarmup = IsFeatureEnabled("WINMUX_ENABLE_BACKGROUND_PANE_WARMUP");
+        private static readonly bool DisableBrowserPaneWarmup = IsFeatureEnabled("WINMUX_DISABLE_BROWSER_PANE_WARMUP");
+        private static readonly bool EnableBrowserPaneWarmup = IsFeatureEnabled("WINMUX_ENABLE_BROWSER_PANE_WARMUP") || !DisableBrowserPaneWarmup;
         private static readonly bool DisableSettingsPagePreload = IsFeatureEnabled("WINMUX_DISABLE_SETTINGS_PRELOAD");
         private static readonly bool EnableSettingsPagePreload = IsFeatureEnabled("WINMUX_ENABLE_SETTINGS_PRELOAD") || !DisableSettingsPagePreload;
         private static readonly bool EnableAutomaticBaselineCapture = IsFeatureEnabled("WINMUX_ENABLE_AUTOMATIC_BASELINE_CAPTURE");
@@ -51,6 +53,17 @@ namespace SelfContainedDeployment
         private readonly Dictionary<string, TabViewItem> _tabItemsById = new(StringComparer.Ordinal);
         private readonly Dictionary<string, Border> _paneContainersById = new(StringComparer.Ordinal);
         private readonly List<Border> _paneSplitPreviewItems = new();
+        private sealed class BrowserPaneBinding
+        {
+            public EventHandler InteractionRequested { get; init; }
+
+            public EventHandler<string> OpenPaneRequested { get; init; }
+
+            public EventHandler<string> TitleChanged { get; init; }
+
+            public EventHandler StateChanged { get; init; }
+        }
+
         private WorkspaceProject _activeProject;
         private WorkspaceThread _activeThread;
         private Border _activeSplitter;
@@ -72,6 +85,7 @@ namespace SelfContainedDeployment
         private DateTimeOffset _suppressSettingsUntil;
         private bool _settingsPageNeedsRefresh = true;
         private bool _settingsPagePreloadStarted;
+        private bool _browserPaneWarmupStarted;
         private string _inlineRenamingPaneId;
         private bool _restoringSession;
         private bool _inspectorOpen = true;
@@ -97,6 +111,8 @@ namespace SelfContainedDeployment
         private string _lastProjectTreeRenderKey;
         private string _lastPaneWorkspaceRenderKey;
         private string _lastDiffFileListRenderKey;
+        private string _lastHeaderRenderKey;
+        private string _lastInspectorNotesRenderKey;
         private bool _projectTreeRefreshEnqueued;
         private bool _suppressDiffReviewSourceSelectionChanged;
         private bool _capturingDiffCheckpoint;
@@ -105,12 +121,16 @@ namespace SelfContainedDeployment
         private string _lastInspectorDirectoryRootPath;
         private string _pendingInspectorDirectoryRootPath;
         private string _pendingInspectorDirectoryRenderKey;
+        private string _pendingInspectorDirectoryWarmupRootPath;
+        private string _pendingInspectorDirectoryWarmupRenderKey;
         private int _latestInspectorDirectoryBuildRequestId;
+        private int _latestInspectorDirectoryWarmupRequestId;
         private System.Threading.CancellationTokenSource _inspectorDirectoryBuildCancellation;
         private int _latestPaneWarmupRequestId;
         private readonly Dictionary<string, Button> _projectButtonsById = new(StringComparer.Ordinal);
         private readonly Dictionary<string, Border> _projectHeaderBordersById = new(StringComparer.Ordinal);
         private readonly Dictionary<string, Button> _threadButtonsById = new(StringComparer.Ordinal);
+        private readonly Dictionary<BrowserPaneControl, BrowserPaneBinding> _browserPaneBindings = new();
         private readonly Dictionary<string, Button> _diffFileButtonsByPath = new(StringComparer.Ordinal);
         private readonly HashSet<string> _hoveredDiffFilePaths = new(StringComparer.Ordinal);
         private readonly List<DiffFileListItem> _diffFileListItems = new();
@@ -130,109 +150,7 @@ namespace SelfContainedDeployment
         private int _paneFocusRequestId;
         private int _visibleDeferredPaneMaterializationRequestId;
         private bool _lifetimeResourcesReleased;
-
-        private sealed class DiffReviewSourceOption
-        {
-            public DiffReviewSourceKind Kind { get; init; }
-
-            public string CheckpointId { get; init; }
-
-            public string Label { get; init; }
-        }
-
-        private sealed class NoteDraftState
-        {
-            public string EditableTitle { get; set; } = string.Empty;
-
-            public string Text { get; set; }
-
-            public bool Dirty { get; set; }
-        }
-
-        private sealed class InspectorNoteCardItem
-        {
-            public string NoteId { get; init; }
-
-            public string ThreadId { get; init; }
-
-            public string Title { get; init; }
-
-            public string EditableTitle { get; init; }
-
-            public string TitlePlaceholderText { get; init; }
-
-            public string TitleEditorAutomationId { get; init; }
-
-            public string Meta { get; init; }
-
-            public string ScopeButtonLabel { get; init; }
-
-            public string ScopeToolTip { get; init; }
-
-            public string ArchiveButtonLabel { get; init; }
-
-            public string ArchiveToolTip { get; init; }
-
-            public string DeleteToolTip { get; init; }
-
-            public string PlaceholderText { get; init; }
-
-            public string EditorAutomationId { get; init; }
-
-            public string Text { get; init; }
-
-            public string StatusText { get; init; }
-
-            public Visibility StatusVisibility => string.IsNullOrWhiteSpace(StatusText) ? Visibility.Collapsed : Visibility.Visible;
-
-            public string TimestampText { get; init; }
-
-            public Brush AccentBrush { get; init; }
-
-            public Brush CardBackground { get; init; }
-
-            public Brush CardBorderBrush { get; init; }
-
-            public Visibility ArchiveButtonVisibility { get; init; }
-
-            public bool IsArchived { get; init; }
-
-            public bool IsSelected { get; init; }
-        }
-
-        private sealed class InspectorNoteGroupItem
-        {
-            public string ThreadId { get; init; }
-
-            public string Title { get; init; }
-
-            public string Meta { get; init; }
-
-            public Brush HeaderAccentBrush { get; init; }
-
-            public Visibility HeaderVisibility { get; init; }
-
-            public string ArchivedToggleText { get; init; }
-
-            public Visibility ArchivedSectionVisibility { get; init; }
-
-            public Visibility ArchivedItemsVisibility { get; init; }
-
-            public List<InspectorNoteCardItem> ActiveNotes { get; init; } = new();
-
-            public List<InspectorNoteCardItem> ArchivedNotes { get; init; } = new();
-        }
-
-        private sealed class NoteScopeOption
-        {
-            public string ThreadId { get; init; }
-
-            public string NoteId { get; init; }
-
-            public string PaneId { get; init; }
-
-            public string Label { get; init; }
-        }
+        private BrowserPaneControl _browserWarmupPane;
 
         private enum InspectorSection
         {
@@ -262,6 +180,32 @@ namespace SelfContainedDeployment
             Loaded += OnLoaded;
             ActualThemeChanged += OnActualThemeChanged;
             InspectorDirectoryTree.Expanding += OnInspectorDirectoryTreeExpanding;
+            InspectorFilesView.DirectoryItemInvoked += OnInspectorDirectoryItemInvoked;
+            InspectorReviewView.ReviewSourceSelectionChanged += OnDiffReviewSourceSelectionChanged;
+            InspectorReviewView.DiffFileButtonClicked += OnDiffFileButtonClicked;
+            InspectorReviewView.DiffFileItemButtonPointerEntered += OnDiffFileItemButtonPointerEntered;
+            InspectorReviewView.DiffFileItemButtonPointerExited += OnDiffFileItemButtonPointerExited;
+            InspectorReviewView.DiffFileItemButtonLoaded += OnDiffFileItemButtonLoaded;
+            InspectorReviewView.DiffFileItemButtonUnloaded += OnDiffFileItemButtonUnloaded;
+            InspectorNotesView.ThreadScopeClicked += OnInspectorNotesThreadScopeClicked;
+            InspectorNotesView.ProjectScopeClicked += OnInspectorNotesProjectScopeClicked;
+            InspectorNotesView.AddNoteClicked += OnInspectorAddNoteClicked;
+            InspectorNotesView.SaveNoteClicked += OnInspectorSaveNoteClicked;
+            InspectorNotesView.DeleteNoteClicked += OnInspectorDeleteNoteClicked;
+            InspectorNotesView.ArchivedNotesToggleClicked += OnInspectorArchivedNotesToggleClicked;
+            InspectorNotesView.NoteCardTapped += OnInspectorNoteCardTapped;
+            InspectorNotesView.NoteCardDoubleTapped += OnInspectorNoteCardDoubleTapped;
+            InspectorNotesView.NoteCardPointerEntered += OnInspectorNoteCardPointerEntered;
+            InspectorNotesView.NoteCardPointerExited += OnInspectorNoteCardPointerExited;
+            InspectorNotesView.NoteCardTitleChanged += OnInspectorNoteCardTitleChanged;
+            InspectorNotesView.NoteCardTextChanged += OnInspectorNoteCardTextChanged;
+            InspectorNotesView.NoteCardTextBoxGotFocus += OnInspectorNoteCardTextBoxGotFocus;
+            InspectorNotesView.NoteCardTextBoxLostFocus += OnInspectorNoteCardTextBoxLostFocus;
+            InspectorNotesView.NoteCardTextBoxKeyDown += OnInspectorNoteCardTextBoxKeyDown;
+            InspectorNotesView.NoteScopeButtonClicked += OnInspectorNoteScopeButtonClicked;
+            InspectorNotesView.SaveNoteCardClicked += OnInspectorSaveNoteCardClicked;
+            InspectorNotesView.ArchiveNoteButtonClicked += OnInspectorArchiveNoteButtonClicked;
+            InspectorNotesView.DeleteNoteCardClicked += OnInspectorDeleteNoteCardClicked;
             _uiSettings = new UISettings();
             _sessionSaveTimer = DispatcherQueue.CreateTimer();
             _sessionSaveTimer.IsRepeating = false;
@@ -292,6 +236,32 @@ namespace SelfContainedDeployment
             Loaded -= OnLoaded;
             ActualThemeChanged -= OnActualThemeChanged;
             InspectorDirectoryTree.Expanding -= OnInspectorDirectoryTreeExpanding;
+            InspectorFilesView.DirectoryItemInvoked -= OnInspectorDirectoryItemInvoked;
+            InspectorReviewView.ReviewSourceSelectionChanged -= OnDiffReviewSourceSelectionChanged;
+            InspectorReviewView.DiffFileButtonClicked -= OnDiffFileButtonClicked;
+            InspectorReviewView.DiffFileItemButtonPointerEntered -= OnDiffFileItemButtonPointerEntered;
+            InspectorReviewView.DiffFileItemButtonPointerExited -= OnDiffFileItemButtonPointerExited;
+            InspectorReviewView.DiffFileItemButtonLoaded -= OnDiffFileItemButtonLoaded;
+            InspectorReviewView.DiffFileItemButtonUnloaded -= OnDiffFileItemButtonUnloaded;
+            InspectorNotesView.ThreadScopeClicked -= OnInspectorNotesThreadScopeClicked;
+            InspectorNotesView.ProjectScopeClicked -= OnInspectorNotesProjectScopeClicked;
+            InspectorNotesView.AddNoteClicked -= OnInspectorAddNoteClicked;
+            InspectorNotesView.SaveNoteClicked -= OnInspectorSaveNoteClicked;
+            InspectorNotesView.DeleteNoteClicked -= OnInspectorDeleteNoteClicked;
+            InspectorNotesView.ArchivedNotesToggleClicked -= OnInspectorArchivedNotesToggleClicked;
+            InspectorNotesView.NoteCardTapped -= OnInspectorNoteCardTapped;
+            InspectorNotesView.NoteCardDoubleTapped -= OnInspectorNoteCardDoubleTapped;
+            InspectorNotesView.NoteCardPointerEntered -= OnInspectorNoteCardPointerEntered;
+            InspectorNotesView.NoteCardPointerExited -= OnInspectorNoteCardPointerExited;
+            InspectorNotesView.NoteCardTitleChanged -= OnInspectorNoteCardTitleChanged;
+            InspectorNotesView.NoteCardTextChanged -= OnInspectorNoteCardTextChanged;
+            InspectorNotesView.NoteCardTextBoxGotFocus -= OnInspectorNoteCardTextBoxGotFocus;
+            InspectorNotesView.NoteCardTextBoxLostFocus -= OnInspectorNoteCardTextBoxLostFocus;
+            InspectorNotesView.NoteCardTextBoxKeyDown -= OnInspectorNoteCardTextBoxKeyDown;
+            InspectorNotesView.NoteScopeButtonClicked -= OnInspectorNoteScopeButtonClicked;
+            InspectorNotesView.SaveNoteCardClicked -= OnInspectorSaveNoteCardClicked;
+            InspectorNotesView.ArchiveNoteButtonClicked -= OnInspectorArchiveNoteButtonClicked;
+            InspectorNotesView.DeleteNoteCardClicked -= OnInspectorDeleteNoteCardClicked;
             _sessionSaveTimer.Stop();
             _sessionSaveTimer.Tick -= OnSessionSaveTimerTick;
             _projectTreeRefreshTimer.Stop();
@@ -302,13 +272,22 @@ namespace SelfContainedDeployment
             _paneLayoutTimer.Tick -= OnPaneLayoutTimerTick;
             _latestPaneWarmupRequestId++;
             _latestInspectorDirectoryBuildRequestId++;
+            _latestInspectorDirectoryWarmupRequestId++;
             _paneFocusRequestId++;
             _gitRefreshPending = false;
             _gitRefreshInFlight = false;
             _pendingGitCorrelationId = null;
+            _pendingInspectorDirectoryWarmupRootPath = null;
+            _pendingInspectorDirectoryWarmupRenderKey = null;
             _inspectorDirectoryBuildCancellation?.Cancel();
             _inspectorDirectoryBuildCancellation?.Dispose();
             _inspectorDirectoryBuildCancellation = null;
+            if (_browserWarmupPane is not null)
+            {
+                BrowserWarmupHost?.Children.Clear();
+                _browserWarmupPane.DisposePane();
+                _browserWarmupPane = null;
+            }
             DisposeAllWorkspacePanes();
             _tabItemsById.Clear();
             _paneContainersById.Clear();
@@ -347,6 +326,11 @@ namespace SelfContainedDeployment
             {
                 try
                 {
+                    if (pane is BrowserPaneRecord browserPane)
+                    {
+                        DetachBrowserPane(browserPane.Browser);
+                    }
+
                     pane.DisposePane();
                 }
                 catch
@@ -358,6 +342,8 @@ namespace SelfContainedDeployment
             {
                 container.Child = null;
             }
+
+            _browserPaneBindings.Clear();
         }
 
         private static void LogAutomationEvent(string category, string name, string message = null, IReadOnlyDictionary<string, string> data = null)
@@ -1051,7 +1037,7 @@ namespace SelfContainedDeployment
                 BrowserCredentialCount = BrowserCredentialStore.GetCredentialCount(),
                 GitBranch = displayedSnapshot?.BranchName ?? _activeThread?.BranchName,
                 WorktreePath = displayedSnapshot?.WorktreePath ?? _activeThread?.WorktreePath,
-                ChangedFileCount = displayedSnapshot?.ChangedFiles.Count ?? _activeThread?.ChangedFileCount ?? 0,
+                ChangedFileCount = displayedSnapshot?.EffectiveChangedFileCount ?? _activeThread?.ChangedFileCount ?? 0,
                 SelectedDiffPath = displayedSnapshot?.SelectedPath ?? _activeThread?.SelectedDiffPath,
                 DiffReviewSource = _activeThread is null ? "live" : FormatDiffReviewSource(_activeThread.DiffReviewSource),
                 SelectedCheckpointId = _activeThread?.SelectedCheckpointId,
@@ -1931,9 +1917,13 @@ namespace SelfContainedDeployment
 
             if (!RequiresActiveThreadGitRefresh(_activeThread, _pendingGitSelectedPath, _pendingGitIncludeSelectedDiff, _pendingGitPreferFastRefresh))
             {
+                IReadOnlyList<GitChangedFile> warmupFiles = (_activeGitSnapshot ?? _activeThread.LiveSnapshot)?.ChangedFiles;
                 _pendingGitCorrelationId = null;
                 _pendingGitIncludeSelectedDiff = true;
                 _pendingGitPreferFastRefresh = false;
+                QueueInspectorDirectoryWarmup(
+                    ResolveThreadRootPath(_activeProject, _activeThread),
+                    warmupFiles ?? Array.Empty<GitChangedFile>());
                 QueueVisibleDiffHydrationIfNeeded(_activeThread, _activeProject, _activeGitSnapshot ?? _activeThread.LiveSnapshot);
                 return false;
             }
@@ -1941,9 +1931,13 @@ namespace SelfContainedDeployment
             if (ShouldAttemptPeerThreadGitSnapshot(_activeThread, _pendingGitSelectedPath, _pendingGitIncludeSelectedDiff, _pendingGitPreferFastRefresh) &&
                 TryUsePeerThreadGitSnapshot(_activeThread, _pendingGitSelectedPath, _pendingGitIncludeSelectedDiff, _pendingGitPreferFastRefresh))
             {
+                IReadOnlyList<GitChangedFile> warmupFiles = (_activeGitSnapshot ?? _activeThread.LiveSnapshot)?.ChangedFiles;
                 _pendingGitCorrelationId = null;
                 _pendingGitIncludeSelectedDiff = true;
                 _pendingGitPreferFastRefresh = false;
+                QueueInspectorDirectoryWarmup(
+                    ResolveThreadRootPath(_activeProject, _activeThread),
+                    warmupFiles ?? Array.Empty<GitChangedFile>());
                 QueueVisibleDiffHydrationIfNeeded(_activeThread, _activeProject, _activeGitSnapshot ?? _activeThread.LiveSnapshot);
                 return false;
             }
@@ -1975,22 +1969,7 @@ namespace SelfContainedDeployment
             bool includeSelectedDiff,
             bool preferFastRefresh)
         {
-            if (thread is null)
-            {
-                return false;
-            }
-
-            if (!preferFastRefresh)
-            {
-                return true;
-            }
-
-            if (VisibleDiffPaneRequiresCompleteSnapshot(thread) || VisibleDiffPaneNeedsSelectedDiff(thread, selectedPath))
-            {
-                return true;
-            }
-
-            return _inspectorOpen && _activeInspectorSection == InspectorSection.Review;
+            return thread is not null;
         }
 
         private EditorPaneRecord ResolveInspectorEditorPane(bool createIfNeeded)
@@ -2421,7 +2400,58 @@ namespace SelfContainedDeployment
             return pane;
         }
 
-        private BrowserPaneRecord CreateBrowserPane(WorkspaceProject project, WorkspaceThread thread, string initialUri, string initialTitle, string paneId = null)
+        private void QueueBrowserPaneWarmup()
+        {
+            if (!EnableBrowserPaneWarmup ||
+                _browserPaneWarmupStarted ||
+                BrowserWarmupHost is null)
+            {
+                return;
+            }
+
+            _browserPaneWarmupStarted = true;
+            DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, async () =>
+            {
+                try
+                {
+                    if (_lifetimeResourcesReleased ||
+                        _browserWarmupPane is not null ||
+                        _projects.SelectMany(project => project.Threads).SelectMany(thread => thread.Panes).Any(pane => pane.Kind == WorkspacePaneKind.Browser))
+                    {
+                        return;
+                    }
+
+                    WorkspaceProject project = _activeProject ?? _projects.FirstOrDefault();
+                    WorkspaceThread thread = _activeThread ?? project?.Threads.FirstOrDefault();
+                    if (project is null || thread is null)
+                    {
+                        return;
+                    }
+
+                    BrowserPaneControl browser = BuildBrowserPaneControl(project, thread, initialUri: null);
+                    _browserWarmupPane = browser;
+                    BrowserWarmupHost.Children.Clear();
+                    BrowserWarmupHost.Children.Add(browser);
+                    await browser.EnsureInitializedAsync().ConfigureAwait(true);
+                }
+                catch
+                {
+                    if (_browserWarmupPane is not null)
+                    {
+                        BrowserPaneControl browser = _browserWarmupPane;
+                        BrowserWarmupHost.Children.Clear();
+                        _browserWarmupPane = null;
+                        browser.DisposePane();
+                    }
+                }
+                finally
+                {
+                    _browserPaneWarmupStarted = false;
+                }
+            });
+        }
+
+        private BrowserPaneControl BuildBrowserPaneControl(WorkspaceProject project, WorkspaceThread thread, string initialUri)
         {
             string threadRootPath = ResolveThreadRootPath(project, thread);
             BrowserPaneControl browser = new()
@@ -2434,11 +2464,64 @@ namespace SelfContainedDeployment
             };
             browser.ApplyTheme(ResolveTheme(SampleConfig.CurrentTheme));
             browser.PreloadEnvironment();
+            return browser;
+        }
 
-            BrowserPaneRecord pane = new(initialTitle, browser, paneId);
+        private BrowserPaneControl TakePrewarmedBrowserPane(WorkspaceProject project, WorkspaceThread thread, string initialUri)
+        {
+            BrowserPaneControl browser = _browserWarmupPane;
+            if (browser is null)
+            {
+                return null;
+            }
+
+            _browserWarmupPane = null;
+            BrowserWarmupHost?.Children.Clear();
+            browser.UpdateWorkspaceContext(
+                project.Id,
+                project.Name,
+                FormatThreadPath(project, thread),
+                ResolveThreadRootPath(project, thread),
+                initialUri);
+            browser.ApplyTheme(ResolveTheme(SampleConfig.CurrentTheme));
+            return browser;
+        }
+
+        private void AttachBrowserPane(WorkspaceProject project, WorkspaceThread thread, BrowserPaneRecord pane, string initialTitle)
+        {
+            BrowserPaneControl browser = pane?.Browser;
+            if (browser is null)
+            {
+                return;
+            }
+
+            DetachBrowserPane(browser);
             string lastPersistedBrowserState = BuildBrowserPersistenceKey(browser);
-            AttachPaneInteraction(project, thread, pane);
-            browser.OpenPaneRequested += (_, uri) =>
+
+            EventHandler interactionRequested = (_, _) =>
+            {
+                if (_suppressPaneInteractionRequests || _refreshingTabView)
+                {
+                    return;
+                }
+
+                if (!ReferenceEquals(_activeThread, thread))
+                {
+                    ActivateThread(thread);
+                }
+
+                ClearPaneAttention(pane);
+                if (!string.Equals(thread.SelectedPaneId, pane.Id, StringComparison.Ordinal))
+                {
+                    SelectPane(pane, focusPane: false);
+                }
+                else
+                {
+                    UpdatePaneSelectionChrome();
+                }
+            };
+
+            EventHandler<string> openPaneRequested = (_, uri) =>
             {
                 BrowserPaneRecord siblingPane = AddBrowserPane(project, thread, uri);
                 SelectPane(siblingPane);
@@ -2453,7 +2536,8 @@ namespace SelfContainedDeployment
                 });
                 QueueSessionSave();
             };
-            browser.TitleChanged += (_, title) =>
+
+            EventHandler<string> titleChanged = (_, title) =>
             {
                 if (!pane.HasCustomTitle)
                 {
@@ -2472,7 +2556,8 @@ namespace SelfContainedDeployment
                     UpdateTabViewItem(pane);
                 }
             };
-            browser.StateChanged += (_, _) =>
+
+            EventHandler stateChanged = (_, _) =>
             {
                 string currentState = BuildBrowserPersistenceKey(browser);
                 if (string.Equals(lastPersistedBrowserState, currentState, StringComparison.Ordinal))
@@ -2483,6 +2568,74 @@ namespace SelfContainedDeployment
                 lastPersistedBrowserState = currentState;
                 QueueSessionSave();
             };
+
+            browser.InteractionRequested += interactionRequested;
+            browser.OpenPaneRequested += openPaneRequested;
+            browser.TitleChanged += titleChanged;
+            browser.StateChanged += stateChanged;
+            _browserPaneBindings[browser] = new BrowserPaneBinding
+            {
+                InteractionRequested = interactionRequested,
+                OpenPaneRequested = openPaneRequested,
+                TitleChanged = titleChanged,
+                StateChanged = stateChanged,
+            };
+        }
+
+        private void DetachBrowserPane(BrowserPaneControl browser)
+        {
+            if (browser is null || !_browserPaneBindings.TryGetValue(browser, out BrowserPaneBinding binding))
+            {
+                return;
+            }
+
+            browser.InteractionRequested -= binding.InteractionRequested;
+            browser.OpenPaneRequested -= binding.OpenPaneRequested;
+            browser.TitleChanged -= binding.TitleChanged;
+            browser.StateChanged -= binding.StateChanged;
+            _browserPaneBindings.Remove(browser);
+        }
+
+        private bool TryParkBrowserPaneForReuse(WorkspaceProject project, WorkspaceThread thread, BrowserPaneRecord pane)
+        {
+            if (BrowserWarmupHost is null ||
+                _lifetimeResourcesReleased ||
+                pane?.Browser is null ||
+                _browserWarmupPane is not null)
+            {
+                return false;
+            }
+
+            BrowserPaneControl browser = pane.Browser;
+            browser.UpdateWorkspaceContext(
+                project?.Id ?? string.Empty,
+                project?.Name ?? string.Empty,
+                FormatThreadPath(project, thread),
+                ResolveThreadRootPath(project, thread),
+                initialUri: null);
+            BrowserWarmupHost.Children.Clear();
+            BrowserWarmupHost.Children.Add(browser);
+            _browserWarmupPane = browser;
+            return true;
+        }
+
+        private void ReleasePane(WorkspaceProject project, WorkspaceThread thread, WorkspacePaneRecord pane)
+        {
+            if (pane is BrowserPaneRecord browserPane)
+            {
+                DetachBrowserPane(browserPane.Browser);
+            }
+
+            pane.DisposePane();
+        }
+
+        private BrowserPaneRecord CreateBrowserPane(WorkspaceProject project, WorkspaceThread thread, string initialUri, string initialTitle, string paneId = null)
+        {
+            BrowserPaneControl browser = TakePrewarmedBrowserPane(project, thread, initialUri)
+                ?? BuildBrowserPaneControl(project, thread, initialUri);
+
+            BrowserPaneRecord pane = new(initialTitle, browser, paneId);
+            AttachBrowserPane(project, thread, pane, initialTitle);
             return pane;
         }
 
@@ -2899,7 +3052,7 @@ namespace SelfContainedDeployment
                     }
 
                     RemoveTabViewItem(pane.Id);
-                    pane.DisposePane();
+                    ReleasePane(project, thread, pane);
                     thread.Panes.Remove(pane);
                     ClearPaneNoteAttachments(thread, pane.Id);
 
@@ -3352,8 +3505,11 @@ namespace SelfContainedDeployment
                 if (_inspectorOpen)
                 {
                     RefreshDiffReviewSourceControls();
-                    RefreshInspectorNotes();
                     SyncInspectorSectionWithSelectedPane();
+                    if (ShouldRefreshInspectorNotesUi())
+                    {
+                        RefreshInspectorNotes();
+                    }
                     bool inspectorChangedToFiles = _activeInspectorSection == InspectorSection.Files &&
                         previousInspectorSection != _activeInspectorSection;
                     if (!inspectorChangedToFiles)
@@ -3451,7 +3607,7 @@ namespace SelfContainedDeployment
                 string worktreePath = thread.WorktreePath ?? project.RootPath;
                 string selectedPath = thread.SelectedDiffPath;
                 snapshot = await System.Threading.Tasks.Task
-                    .Run(() => GitStatusService.Capture(worktreePath, selectedPath))
+                    .Run(() => GitStatusService.CaptureStatusOnly(worktreePath, selectedPath, thread.BranchName))
                     .ConfigureAwait(true);
             }
             catch
@@ -3469,8 +3625,15 @@ namespace SelfContainedDeployment
 
         private bool RequiresThreadLiveSnapshotWarmup(WorkspaceThread thread)
         {
-            return thread?.LiveSnapshot is null ||
-                DateTimeOffset.UtcNow - thread.LiveSnapshotCapturedAt > CachedThreadGitSnapshotMaxAge;
+            if (thread?.LiveSnapshot is null)
+            {
+                return true;
+            }
+
+            TimeSpan maxAge = thread.LiveSnapshot.HasEnumeratedFiles
+                ? CachedThreadGitSnapshotMaxAge
+                : CachedShellOnlyGitSnapshotMaxAge;
+            return DateTimeOffset.UtcNow - thread.LiveSnapshotCapturedAt > maxAge;
         }
 
         private IEnumerable<WorkspacePaneRecord> EnumerateWarmupPanes(WorkspaceThread thread, bool warmAllVisiblePanes)
@@ -3920,7 +4083,7 @@ namespace SelfContainedDeployment
             foreach (WorkspacePaneRecord pane in thread.Panes.ToList())
             {
                 RemoveTabViewItem(pane.Id);
-                pane.DisposePane();
+                ReleasePane(project, thread, pane);
             }
 
             thread.Panes.Clear();
@@ -4558,7 +4721,8 @@ namespace SelfContainedDeployment
             string correlationId = _pendingGitCorrelationId;
             _pendingGitCorrelationId = null;
             string worktreePath = thread.WorktreePath ?? project?.RootPath;
-            bool captureComplete = !preferFastRefresh && VisibleDiffPaneRequiresCompleteSnapshot(thread);
+            ActiveGitRefreshMode refreshMode = ResolveActiveGitRefreshMode(thread, targetPath, includeSelectedDiff, preferFastRefresh);
+            string refreshModeName = FormatActiveGitRefreshMode(refreshMode);
             Stopwatch stopwatch = Stopwatch.StartNew();
             NativeAutomationDiagnostics.IncrementCounter("gitRefresh.count");
             var perfData = new Dictionary<string, string>
@@ -4566,13 +4730,7 @@ namespace SelfContainedDeployment
                 ["projectId"] = project?.Id ?? string.Empty,
                 ["threadId"] = thread.Id,
                 ["selectedPath"] = targetPath ?? string.Empty,
-                ["mode"] = captureComplete
-                    ? "complete"
-                    : includeSelectedDiff
-                        ? "selected-diff"
-                        : preferFastRefresh
-                            ? "status-only"
-                            : "metadata",
+                ["mode"] = refreshModeName,
                 ["preferFastRefresh"] = preferFastRefresh.ToString(),
             };
 
@@ -4580,13 +4738,14 @@ namespace SelfContainedDeployment
                 .Run(() =>
                 {
                     using var perfScope = NativeAutomationDiagnostics.TrackOperation("git.refresh.active", correlationId, background: true, data: perfData);
-                    return captureComplete
-                        ? GitStatusService.CaptureComplete(worktreePath, targetPath)
-                        : includeSelectedDiff
-                            ? GitStatusService.Capture(worktreePath, targetPath)
-                            : preferFastRefresh
-                                ? GitStatusService.CaptureStatusOnly(worktreePath, targetPath)
-                                : GitStatusService.CaptureMetadata(worktreePath, targetPath);
+                    return refreshMode switch
+                    {
+                        ActiveGitRefreshMode.Complete => GitStatusService.CaptureComplete(worktreePath, targetPath),
+                        ActiveGitRefreshMode.MetadataFast => GitStatusService.CaptureMetadataFast(worktreePath, targetPath, thread.BranchName),
+                        ActiveGitRefreshMode.SelectedDiff => GitStatusService.Capture(worktreePath, targetPath),
+                        ActiveGitRefreshMode.StatusOnly => GitStatusService.CaptureStatusOnly(worktreePath, targetPath, thread.BranchName),
+                        _ => GitStatusService.CaptureMetadata(worktreePath, targetPath),
+                    };
                 })
                 .ConfigureAwait(true);
 
@@ -4598,18 +4757,48 @@ namespace SelfContainedDeployment
             }
 
             ApplyActiveGitSnapshot(snapshot);
+            QueueGitMetadataHydrationIfNeeded(thread, project, snapshot, targetPath, refreshMode);
+            QueueInspectorDirectoryWarmup(worktreePath, snapshot.ChangedFiles, correlationId);
             QueueVisibleDiffHydrationIfNeeded(thread, project, snapshot);
+            if (!_projects.SelectMany(candidateProject => candidateProject.Threads).SelectMany(candidateThread => candidateThread.Panes).Any(pane => pane.Kind == WorkspacePaneKind.Browser))
+            {
+                QueueBrowserPaneWarmup();
+            }
             LogAutomationEvent("performance", "git.snapshot_ready", "Refreshed active thread git state", new Dictionary<string, string>
             {
                 ["selectedPath"] = targetPath ?? string.Empty,
                 ["durationMs"] = stopwatch.ElapsedMilliseconds.ToString(),
-                ["mode"] = captureComplete
-                    ? "complete"
-                    : includeSelectedDiff
-                        ? "selected-diff"
-                        : preferFastRefresh
-                            ? "status-only"
-                            : "metadata",
+                ["mode"] = refreshModeName,
+            });
+        }
+
+        private void QueueGitMetadataHydrationIfNeeded(
+            WorkspaceThread thread,
+            WorkspaceProject project,
+            GitThreadSnapshot snapshot,
+            string selectedPath,
+            ActiveGitRefreshMode refreshMode)
+        {
+            if (refreshMode != ActiveGitRefreshMode.MetadataFast ||
+                snapshot is null ||
+                snapshot.HasLineStats ||
+                !snapshot.HasEnumeratedFiles ||
+                !ShouldRefreshReviewInspectorUi() ||
+                thread is null ||
+                project is null ||
+                !ReferenceEquals(thread, _activeThread) ||
+                !ReferenceEquals(project, _activeProject))
+            {
+                return;
+            }
+
+            DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
+            {
+                QueueActiveThreadGitRefresh(
+                    selectedPath,
+                    preserveSelection: true,
+                    includeSelectedDiff: false,
+                    preferFastRefresh: false);
             });
         }
 
@@ -4684,7 +4873,7 @@ namespace SelfContainedDeployment
                     diffPane,
                     panePath,
                     null,
-                    displayedSnapshot.ChangedFiles.Count > 0 ? displayedSnapshot : null,
+                    displayedSnapshot.HasEnumeratedFiles && displayedSnapshot.ChangedFiles.Count > 0 ? displayedSnapshot : null,
                     displayMode);
             }
 
@@ -4848,7 +5037,9 @@ namespace SelfContainedDeployment
 
         private static bool HasCompleteDiffSet(GitThreadSnapshot snapshot)
         {
-            if (snapshot is null || snapshot.ChangedFiles.Count <= 1)
+            if (snapshot is null ||
+                !snapshot.HasEnumeratedFiles ||
+                snapshot.ChangedFiles.Count <= 1)
             {
                 return false;
             }
@@ -5016,6 +5207,7 @@ namespace SelfContainedDeployment
             if (cachedSnapshot is null ||
                 nextSnapshot is null ||
                 ReferenceEquals(cachedSnapshot, nextSnapshot) ||
+                !nextSnapshot.HasEnumeratedFiles ||
                 nextSnapshot.ChangedFiles.Count == 0)
             {
                 return;
@@ -5515,7 +5707,7 @@ namespace SelfContainedDeployment
 
             InspectorSplitView.IsPaneOpen = showInspector;
             InspectorSidebar.IsHitTestVisible = showInspector;
-            if (showInspector)
+            if (showInspector && ShouldRefreshInspectorNotesUi())
             {
                 RefreshInspectorNotes();
             }
@@ -5559,30 +5751,47 @@ namespace SelfContainedDeployment
 
             try
             {
+                string threadNameText;
+                bool threadNameReadOnly;
+                string contextText;
+                Visibility contextVisibility;
                 if (_showingSettings)
                 {
-                    ThreadNameBox.Text = "Preferences";
-                    ThreadNameBox.IsReadOnly = true;
-                    string settingsContext = "Theme, shell, pane limit, and vault";
-                    ActiveDirectoryText.Text = settingsContext;
-                    ActiveDirectoryText.Visibility = Visibility.Visible;
-                    if (ActiveDirectorySeparator is not null)
-                    {
-                        ActiveDirectorySeparator.Visibility = Visibility.Visible;
-                    }
+                    threadNameText = "Preferences";
+                    threadNameReadOnly = true;
+                    contextText = "Theme, shell, pane limit, and vault";
+                    contextVisibility = Visibility.Visible;
+                }
+                else
+                {
+                    threadNameReadOnly = _activeThread is null;
+                    threadNameText = _activeThread?.Name ?? "No thread selected";
+                    contextText = _activeProject is null ? string.Empty : BuildHeaderContext(_activeProject, _activeThread);
+                    contextVisibility = string.IsNullOrWhiteSpace(contextText) ? Visibility.Collapsed : Visibility.Visible;
+                }
+
+                string renderKey = string.Join(
+                    "\u001F",
+                    _showingSettings.ToString(),
+                    threadNameReadOnly.ToString(),
+                    threadNameText ?? string.Empty,
+                    contextText ?? string.Empty,
+                    contextVisibility.ToString());
+                if (string.Equals(renderKey, _lastHeaderRenderKey, StringComparison.Ordinal))
+                {
                     return;
                 }
 
-                ThreadNameBox.IsReadOnly = _activeThread is null;
-                ThreadNameBox.Text = _activeThread?.Name ?? "No thread selected";
-                string context = _activeProject is null ? string.Empty : BuildHeaderContext(_activeProject, _activeThread);
-                bool hasContext = !string.IsNullOrWhiteSpace(context);
-                ActiveDirectoryText.Text = context;
-                ActiveDirectoryText.Visibility = hasContext ? Visibility.Visible : Visibility.Collapsed;
+                ThreadNameBox.IsReadOnly = threadNameReadOnly;
+                ThreadNameBox.Text = threadNameText;
+                ActiveDirectoryText.Text = contextText;
+                ActiveDirectoryText.Visibility = contextVisibility;
                 if (ActiveDirectorySeparator is not null)
                 {
-                    ActiveDirectorySeparator.Visibility = hasContext ? Visibility.Visible : Visibility.Collapsed;
+                    ActiveDirectorySeparator.Visibility = contextVisibility;
                 }
+
+                _lastHeaderRenderKey = renderKey;
             }
             finally
             {

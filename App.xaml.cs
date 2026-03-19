@@ -42,9 +42,24 @@ namespace SelfContainedDeployment
                 return;
             }
 
-            automationSession = NativeAutomationAccess.CreateSession(port);
-            automationServer = new NativeAutomationServer(MainWindowInstance, port, automationSession.Token);
-            automationServer.Start();
+            try
+            {
+                automationSession = NativeAutomationAccess.CreateSession(port);
+                automationServer = new NativeAutomationServer(MainWindowInstance, port, automationSession.Token);
+                automationServer.Start();
+            }
+            catch (Exception ex)
+            {
+                automationServer?.Dispose();
+                automationServer = null;
+                NativeAutomationAccess.DeleteSession(automationSession);
+                automationSession = null;
+                string logPath = TryAppendStartupErrorLog(ex);
+                NativeAutomationDiagnostics.RecordUnhandledException(
+                    $"Could not start automation server on port {port}: {ex.Message}",
+                    ex.ToString(),
+                    logPath);
+            }
         }
 
         private void OnMainWindowClosed(object sender, WindowEventArgs args)
@@ -64,6 +79,13 @@ namespace SelfContainedDeployment
 
         private void OnUnhandledException(object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs e)
         {
+            string path = TryAppendStartupErrorLog(e.Exception, e.Message);
+
+            NativeAutomationDiagnostics.RecordUnhandledException(e.Message, e.Exception?.ToString(), path);
+        }
+
+        private static string TryAppendStartupErrorLog(Exception exception, string fallbackMessage = null)
+        {
             string path = null;
             try
             {
@@ -73,15 +95,15 @@ namespace SelfContainedDeployment
                 Directory.CreateDirectory(directory);
                 path = Path.Combine(directory, "startup-error.log");
                 string detail = ShouldWriteVerboseStartupErrorLog()
-                    ? e.Exception?.ToString() ?? e.Message
-                    : $"{e.Exception?.GetType().FullName ?? "Exception"}: {e.Message}";
+                    ? exception?.ToString() ?? fallbackMessage ?? "Unknown startup error"
+                    : $"{exception?.GetType().FullName ?? "Exception"}: {fallbackMessage ?? exception?.Message ?? "Unknown startup error"}";
                 File.AppendAllText(path, $"{DateTimeOffset.UtcNow:O}{Environment.NewLine}{detail}{Environment.NewLine}{new string('-', 80)}{Environment.NewLine}");
             }
             catch
             {
             }
 
-            NativeAutomationDiagnostics.RecordUnhandledException(e.Message, e.Exception?.ToString(), path);
+            return path;
         }
 
         private static bool ShouldWriteVerboseStartupErrorLog()

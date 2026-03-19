@@ -27,9 +27,41 @@ namespace SelfContainedDeployment
             public bool RequiresAttention { get; init; }
         }
 
+        private sealed class ProjectRailProjectMetrics
+        {
+            public string MetaText { get; init; }
+
+            public bool HasRunning { get; init; }
+
+            public bool HasAttention { get; init; }
+
+            public bool HasChanges { get; init; }
+        }
+
+        private sealed class ProjectRailThreadMetrics
+        {
+            public ThreadActivitySummary Activity { get; init; }
+
+            public IReadOnlyList<WorkspacePaneRecord> VisiblePanes { get; init; } = Array.Empty<WorkspacePaneRecord>();
+
+            public int HiddenPaneCount { get; init; }
+
+            public string PaneSummary { get; init; } = "No visible panes";
+        }
+
+        private sealed class ProjectRailRenderSnapshot
+        {
+            public string RenderKey { get; set; } = string.Empty;
+
+            public Dictionary<string, ProjectRailProjectMetrics> ProjectMetricsById { get; } = new(StringComparer.Ordinal);
+
+            public Dictionary<string, ProjectRailThreadMetrics> ThreadMetricsById { get; } = new(StringComparer.Ordinal);
+        }
+
         private void RefreshProjectTree()
         {
-            string renderKey = BuildProjectTreeRenderKey();
+            ProjectRailRenderSnapshot snapshot = BuildProjectRailRenderSnapshot();
+            string renderKey = snapshot.RenderKey;
             bool cacheHit = string.Equals(renderKey, _lastProjectTreeRenderKey, StringComparison.Ordinal);
             var perfData = new Dictionary<string, string>
             {
@@ -93,7 +125,7 @@ namespace SelfContainedDeployment
                     FontSize = 11.5,
                     Glyph = "\uE8B7",
                     VerticalAlignment = VerticalAlignment.Center,
-                    Foreground = AppBrush(projectLayout, ResolveProjectRailIconBrushKey(project)),
+                    Foreground = AppBrush(projectLayout, ResolveProjectRailIconBrushKey(project, snapshot)),
                 };
                 AutomationProperties.SetAutomationId(projectIcon, $"shell-project-icon-{project.Id}");
                 projectLayout.Children.Add(projectIcon);
@@ -123,7 +155,7 @@ namespace SelfContainedDeployment
                     textStack.Children.Add(projectTitle);
                     TextBlock projectMeta = new()
                     {
-                        Text = BuildProjectRailMeta(project),
+                        Text = ResolveProjectRailMeta(project, snapshot),
                         Style = (Style)Application.Current.Resources["ShellSidebarMetaTextStyle"],
                         TextWrapping = TextWrapping.NoWrap,
                         TextTrimming = TextTrimming.CharacterEllipsis,
@@ -159,7 +191,7 @@ namespace SelfContainedDeployment
                             Glyph = "\uE8B7",
                             HorizontalAlignment = HorizontalAlignment.Center,
                             VerticalAlignment = VerticalAlignment.Center,
-                            Foreground = AppBrush(projectButton, ResolveProjectRailIconBrushKey(project)),
+                            Foreground = AppBrush(projectButton, ResolveProjectRailIconBrushKey(project, snapshot)),
                         },
                     };
                 }
@@ -259,7 +291,8 @@ namespace SelfContainedDeployment
 
                     foreach (WorkspaceThread thread in project.Threads)
                     {
-                        ThreadActivitySummary activitySummary = ResolveThreadActivitySummary(thread);
+                        ProjectRailThreadMetrics threadMetrics = ResolveProjectRailThreadMetrics(snapshot, thread);
+                        ThreadActivitySummary activitySummary = threadMetrics?.Activity;
                         Button threadButton = new()
                         {
                             Style = (Style)Application.Current.Resources["ShellSidebarThreadButtonStyle"],
@@ -276,7 +309,7 @@ namespace SelfContainedDeployment
                         threadButton.DoubleTapped += OnThreadButtonDoubleTapped;
                         threadButton.PointerEntered += OnThreadButtonPointerEntered;
                         threadButton.PointerExited += OnThreadButtonPointerExited;
-                        ToolTipService.SetToolTip(threadButton, BuildThreadButtonToolTip(project, thread, BuildOverviewPaneSummary(thread)));
+                        ToolTipService.SetToolTip(threadButton, BuildThreadButtonToolTip(project, thread, threadMetrics?.PaneSummary ?? "No visible panes"));
                         _threadButtonsById[thread.Id] = threadButton;
                         _threadActivitySummariesById[thread.Id] = activitySummary;
 
@@ -389,7 +422,10 @@ namespace SelfContainedDeployment
                             };
                             AutomationProperties.SetAutomationId(threadAdornments, $"shell-thread-adornments-{thread.Id}");
 
-                            FrameworkElement paneStrip = BuildThreadPaneStrip(thread);
+                            FrameworkElement paneStrip = BuildThreadPaneStrip(
+                                thread,
+                                threadMetrics?.VisiblePanes ?? Array.Empty<WorkspacePaneRecord>(),
+                                threadMetrics?.HiddenPaneCount ?? Math.Max(0, thread.Panes.Count));
                             AutomationProperties.SetAutomationId(paneStrip, $"shell-thread-panes-{thread.Id}");
                             threadAdornments.Children.Add(paneStrip);
 
@@ -577,34 +613,13 @@ namespace SelfContainedDeployment
             ApplyProjectButtonState(projectButton, active, hovered);
         }
 
-        private static string BuildProjectRailMeta(WorkspaceProject project)
+        private static string FormatProjectRailMeta(int threadCount, int liveCount, int readyCount)
         {
-            if (project is null)
-            {
-                return "No project";
-            }
-
-            int liveCount = 0;
-            int readyCount = 0;
-            foreach (WorkspaceThread thread in project.Threads)
-            {
-                ThreadActivitySummary summary = ResolveThreadActivitySummary(thread);
-                if (summary?.IsRunning == true)
-                {
-                    liveCount++;
-                }
-
-                if (summary?.RequiresAttention == true)
-                {
-                    readyCount++;
-                }
-            }
-
             List<string> parts = new()
             {
-                project.Threads.Count == 0
+                threadCount == 0
                     ? "No threads yet"
-                    : $"{project.Threads.Count} thread{(project.Threads.Count == 1 ? string.Empty : "s")}",
+                    : $"{threadCount} thread{(threadCount == 1 ? string.Empty : "s")}",
             };
             if (liveCount > 0)
             {
@@ -617,6 +632,18 @@ namespace SelfContainedDeployment
             }
 
             return string.Join(" · ", parts);
+        }
+
+        private static string ResolveProjectRailMeta(WorkspaceProject project, ProjectRailRenderSnapshot snapshot)
+        {
+            if (project is null)
+            {
+                return "No project";
+            }
+
+            return snapshot?.ProjectMetricsById.TryGetValue(project.Id, out ProjectRailProjectMetrics metrics) == true
+                ? metrics.MetaText
+                : FormatProjectRailMeta(project.Threads.Count, liveCount: 0, readyCount: 0);
         }
 
         private static ThreadActivitySummary ResolveThreadActivitySummary(WorkspaceThread thread)
@@ -791,35 +818,45 @@ namespace SelfContainedDeployment
             return builder.ToString();
         }
 
-        private string ResolveProjectRailIconBrushKey(WorkspaceProject project)
+        private static ProjectRailThreadMetrics ResolveProjectRailThreadMetrics(ProjectRailRenderSnapshot snapshot, WorkspaceThread thread)
+        {
+            if (snapshot is null || thread is null)
+            {
+                return null;
+            }
+
+            snapshot.ThreadMetricsById.TryGetValue(thread.Id, out ProjectRailThreadMetrics metrics);
+            return metrics;
+        }
+
+        private string ResolveProjectRailIconBrushKey(WorkspaceProject project, ProjectRailRenderSnapshot snapshot)
         {
             if (ReferenceEquals(project, _activeProject))
             {
                 return "ShellTextPrimaryBrush";
             }
 
-            bool requiresAttention = false;
-            bool isRunning = false;
-            bool hasChanges = false;
-            foreach (WorkspaceThread thread in project?.Threads ?? Enumerable.Empty<WorkspaceThread>())
+            if (project is null)
             {
-                ThreadActivitySummary summary = ResolveThreadActivitySummary(thread);
-                requiresAttention |= summary?.RequiresAttention == true;
-                isRunning |= summary?.IsRunning == true;
-                hasChanges |= thread.ChangedFileCount > 0;
+                return "ShellTextTertiaryBrush";
             }
 
-            if (requiresAttention)
+            if (snapshot?.ProjectMetricsById.TryGetValue(project.Id, out ProjectRailProjectMetrics metrics) != true)
+            {
+                return "ShellTextTertiaryBrush";
+            }
+
+            if (metrics.HasAttention)
             {
                 return "ShellSuccessBrush";
             }
 
-            if (isRunning)
+            if (metrics.HasRunning)
             {
                 return "ShellInfoBrush";
             }
 
-            if (hasChanges)
+            if (metrics.HasChanges)
             {
                 return "ShellWarningBrush";
             }
@@ -852,7 +889,7 @@ namespace SelfContainedDeployment
             return "ShellTextTertiaryBrush";
         }
 
-        private FrameworkElement BuildThreadPaneStrip(WorkspaceThread thread)
+        private FrameworkElement BuildThreadPaneStrip(WorkspaceThread thread, IReadOnlyList<WorkspacePaneRecord> visiblePanes, int hiddenPaneCount)
         {
             StackPanel strip = new()
             {
@@ -861,13 +898,11 @@ namespace SelfContainedDeployment
                 VerticalAlignment = VerticalAlignment.Center,
             };
 
-            List<WorkspacePaneRecord> visiblePanes = GetVisiblePanes(thread).ToList();
-            foreach (WorkspacePaneRecord pane in visiblePanes)
+            foreach (WorkspacePaneRecord pane in visiblePanes ?? Array.Empty<WorkspacePaneRecord>())
             {
                 strip.Children.Add(BuildThreadPaneBadge(pane, string.Equals(thread.SelectedPaneId, pane.Id, StringComparison.Ordinal)));
             }
 
-            int hiddenPaneCount = Math.Max(0, thread.Panes.Count - visiblePanes.Count);
             if (hiddenPaneCount > 0)
             {
                 TextBlock overflowBadge = new()
@@ -981,16 +1016,14 @@ namespace SelfContainedDeployment
             return new SolidColorBrush(Windows.UI.Color.FromArgb(alpha, baseColor.R, baseColor.G, baseColor.B));
         }
 
-        private string BuildOverviewPaneSummary(WorkspaceThread thread)
+        private static string BuildOverviewPaneSummary(IReadOnlyList<WorkspacePaneRecord> visiblePanes, int hiddenPaneCount)
         {
-            List<WorkspacePaneRecord> visiblePanes = GetVisiblePanes(thread).ToList();
-            if (visiblePanes.Count == 0)
+            if (visiblePanes is null || visiblePanes.Count == 0)
             {
                 return "No visible panes";
             }
 
             string summary = string.Join(" · ", visiblePanes.Select(BuildOverviewPaneLabel));
-            int hiddenPaneCount = Math.Max(0, thread.Panes.Count - visiblePanes.Count);
             if (hiddenPaneCount > 0)
             {
                 summary += $" · +{hiddenPaneCount} more";
@@ -999,8 +1032,9 @@ namespace SelfContainedDeployment
             return summary;
         }
 
-        private string BuildProjectTreeRenderKey()
+        private ProjectRailRenderSnapshot BuildProjectRailRenderSnapshot()
         {
+            ProjectRailRenderSnapshot snapshot = new();
             StringBuilder builder = new();
             builder.Append(ResolveTheme(SampleConfig.CurrentTheme))
                 .Append('|')
@@ -1015,6 +1049,7 @@ namespace SelfContainedDeployment
             {
                 int liveCount = 0;
                 int readyCount = 0;
+                bool hasChanges = false;
                 foreach (WorkspaceThread projectThread in project.Threads)
                 {
                     ThreadActivitySummary summary = ResolveThreadActivitySummary(projectThread);
@@ -1027,7 +1062,30 @@ namespace SelfContainedDeployment
                     {
                         readyCount++;
                     }
+
+                    hasChanges |= projectThread.ChangedFileCount > 0;
+
+                    if (ReferenceEquals(project, _activeProject))
+                    {
+                        List<WorkspacePaneRecord> visiblePanes = GetVisiblePanes(projectThread).ToList();
+                        int hiddenPaneCount = Math.Max(0, projectThread.Panes.Count - visiblePanes.Count);
+                        snapshot.ThreadMetricsById[projectThread.Id] = new ProjectRailThreadMetrics
+                        {
+                            Activity = summary,
+                            VisiblePanes = visiblePanes,
+                            HiddenPaneCount = hiddenPaneCount,
+                            PaneSummary = BuildOverviewPaneSummary(visiblePanes, hiddenPaneCount),
+                        };
+                    }
                 }
+
+                snapshot.ProjectMetricsById[project.Id] = new ProjectRailProjectMetrics
+                {
+                    MetaText = FormatProjectRailMeta(project.Threads.Count, liveCount, readyCount),
+                    HasRunning = liveCount > 0,
+                    HasAttention = readyCount > 0,
+                    HasChanges = hasChanges,
+                };
 
                 builder.Append(project.Id)
                     .Append(':')
@@ -1047,7 +1105,8 @@ namespace SelfContainedDeployment
 
                 foreach (WorkspaceThread thread in project.Threads)
                 {
-                    List<WorkspacePaneRecord> visiblePanes = GetVisiblePanes(thread).ToList();
+                    ProjectRailThreadMetrics threadMetrics = ResolveProjectRailThreadMetrics(snapshot, thread);
+                    IReadOnlyList<WorkspacePaneRecord> visiblePanes = threadMetrics?.VisiblePanes ?? Array.Empty<WorkspacePaneRecord>();
                     builder.Append(thread.Id)
                         .Append(':')
                         .Append(thread.Name)
@@ -1067,7 +1126,7 @@ namespace SelfContainedDeployment
                         .Append(thread.NoteEntries.Count)
                         .Append('|');
 
-                    ThreadActivitySummary summary = ResolveThreadActivitySummary(thread);
+                    ThreadActivitySummary summary = threadMetrics?.Activity;
                     AppendThreadActivitySummaryKey(builder, summary);
                     builder.Append('|');
 
@@ -1081,14 +1140,15 @@ namespace SelfContainedDeployment
                             .Append('|');
                     }
 
-                    int hiddenPaneCount = Math.Max(0, thread.Panes.Count - visiblePanes.Count);
+                    int hiddenPaneCount = threadMetrics?.HiddenPaneCount ?? Math.Max(0, thread.Panes.Count - visiblePanes.Count);
                     builder.Append("hidden:")
                         .Append(hiddenPaneCount)
                         .Append('|');
                 }
             }
 
-            return builder.ToString();
+            snapshot.RenderKey = builder.ToString();
+            return snapshot;
         }
 
         private static void AppendThreadActivitySummaryKey(StringBuilder builder, ThreadActivitySummary summary)

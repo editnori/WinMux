@@ -210,7 +210,9 @@ namespace SelfContainedDeployment
                             DiffReviewSource = FormatDiffReviewSource(thread.DiffReviewSource),
                             SelectedCheckpointId = thread.SelectedCheckpointId,
                             BaselineSnapshot = includeGitSnapshots ? CreateGitSnapshotSessionSnapshot(thread.BaselineSnapshot) : null,
-                            LiveSnapshot = CreateGitSnapshotSessionSnapshot(thread.LiveSnapshot),
+                            LiveSnapshot = CreateGitSnapshotSessionSnapshot(includeGitSnapshots
+                                ? thread.LiveSnapshot
+                                : GitStatusService.CreateSummarySnapshot(thread.LiveSnapshot)),
                             LiveSnapshotCapturedAt = thread.LiveSnapshotCapturedAt == default ? null : thread.LiveSnapshotCapturedAt.ToString("O"),
                             SelectedPaneId = thread.SelectedPaneId,
                             Layout = WorkspaceSessionStore.FormatLayout(thread.LayoutPreset),
@@ -346,6 +348,9 @@ namespace SelfContainedDeployment
                 SelectedPath = snapshot.SelectedPath,
                 SelectedDiff = snapshot.SelectedDiff,
                 Error = snapshot.Error,
+                ChangedFileCount = snapshot.EffectiveChangedFileCount,
+                HasEnumeratedFiles = snapshot.HasEnumeratedFiles,
+                HasLineStats = snapshot.HasLineStats,
                 ChangedFiles = snapshot.ChangedFiles.Select(file => new GitChangedFileSessionSnapshot
                 {
                     Status = file.Status,
@@ -403,6 +408,21 @@ namespace SelfContainedDeployment
                 return null;
             }
 
+            List<GitChangedFile> changedFiles = (snapshot.ChangedFiles ?? new List<GitChangedFileSessionSnapshot>()).Select(file => new GitChangedFile
+            {
+                Status = file.Status,
+                Path = file.Path,
+                OriginalPath = file.OriginalPath,
+                AddedLines = file.AddedLines,
+                RemovedLines = file.RemovedLines,
+                DiffText = file.DiffText,
+            }).ToList();
+            bool hasEnumeratedFiles = snapshot.HasEnumeratedFiles ?? true;
+            bool hasLineStats = snapshot.HasLineStats ?? hasEnumeratedFiles;
+            int changedFileCount = hasEnumeratedFiles
+                ? changedFiles.Count
+                : snapshot.ChangedFileCount ?? changedFiles.Count;
+
             GitThreadSnapshot restored = new()
             {
                 BranchName = snapshot.BranchName,
@@ -413,15 +433,10 @@ namespace SelfContainedDeployment
                 SelectedPath = snapshot.SelectedPath,
                 SelectedDiff = snapshot.SelectedDiff,
                 Error = snapshot.Error,
-                ChangedFiles = (snapshot.ChangedFiles ?? new List<GitChangedFileSessionSnapshot>()).Select(file => new GitChangedFile
-                {
-                    Status = file.Status,
-                    Path = file.Path,
-                    OriginalPath = file.OriginalPath,
-                    AddedLines = file.AddedLines,
-                    RemovedLines = file.RemovedLines,
-                    DiffText = file.DiffText,
-                }).ToList(),
+                ChangedFileCount = changedFileCount,
+                HasEnumeratedFiles = hasEnumeratedFiles,
+                HasLineStats = hasLineStats,
+                ChangedFiles = changedFiles,
             };
             GitStatusService.SelectDiffPath(restored, restored.SelectedPath);
             return restored;
@@ -532,7 +547,7 @@ namespace SelfContainedDeployment
                             thread.BranchName = string.IsNullOrWhiteSpace(thread.LiveSnapshot.BranchName)
                                 ? thread.BranchName
                                 : thread.LiveSnapshot.BranchName;
-                            thread.ChangedFileCount = thread.LiveSnapshot.ChangedFiles.Count;
+                            thread.ChangedFileCount = thread.LiveSnapshot.EffectiveChangedFileCount;
                             thread.SelectedDiffPath = string.IsNullOrWhiteSpace(thread.LiveSnapshot.SelectedPath)
                                 ? thread.SelectedDiffPath
                                 : thread.LiveSnapshot.SelectedPath;

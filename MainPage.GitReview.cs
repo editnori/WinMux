@@ -1,4 +1,5 @@
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
 using SelfContainedDeployment.Git;
 using SelfContainedDeployment.Panes;
 using SelfContainedDeployment.Shell;
@@ -10,6 +11,33 @@ namespace SelfContainedDeployment
 {
     public partial class MainPage
     {
+        private enum ActiveGitRefreshMode
+        {
+            StatusOnly,
+            MetadataFast,
+            Metadata,
+            SelectedDiff,
+            Complete,
+        }
+
+        private FrameworkElement InspectorReviewContent => InspectorReviewView;
+
+        private FrameworkElement DiffReviewSourceSection => InspectorReviewView?.ReviewSourceSection;
+
+        private ComboBox DiffReviewSourceComboBox => InspectorReviewView?.ReviewSourceComboBox;
+
+        private TextBlock DiffReviewSourceMetaText => InspectorReviewView?.ReviewSourceMetaText;
+
+        private TextBlock DiffBranchText => InspectorReviewView?.BranchText;
+
+        private TextBlock DiffWorktreeText => InspectorReviewView?.WorktreeText;
+
+        private TextBlock DiffSummaryText => InspectorReviewView?.SummaryText;
+
+        private ListView DiffFileListView => InspectorReviewView?.DiffFileListView;
+
+        private TextBlock DiffEmptyText => InspectorReviewView?.DiffEmptyText;
+
         private bool RequiresActiveThreadGitRefresh(WorkspaceThread thread, string selectedPath, bool includeSelectedDiff, bool preferFastRefresh)
         {
             if (thread is null)
@@ -18,16 +46,75 @@ namespace SelfContainedDeployment
             }
 
             string threadRootPath = ResolveThreadRootPath(thread.Project, thread);
-            bool requiresCompleteSnapshot = !preferFastRefresh && VisibleDiffPaneRequiresCompleteSnapshot(thread);
-            TimeSpan maxAge = ResolveGitSnapshotMaxAge(includeSelectedDiff, preferFastRefresh, requiresCompleteSnapshot);
+            ActiveGitRefreshMode refreshMode = ResolveActiveGitRefreshMode(thread, selectedPath, includeSelectedDiff, preferFastRefresh);
+            TimeSpan maxAge = ResolveGitSnapshotMaxAge(refreshMode);
             return !SnapshotSatisfiesGitRefreshNeeds(
                 thread.LiveSnapshot,
                 thread.LiveSnapshotCapturedAt,
                 threadRootPath,
                 selectedPath,
-                includeSelectedDiff,
-                requiresCompleteSnapshot,
+                refreshMode,
                 maxAge);
+        }
+
+        private ActiveGitRefreshMode ResolveActiveGitRefreshMode(
+            WorkspaceThread thread,
+            string selectedPath,
+            bool includeSelectedDiff,
+            bool preferFastRefresh)
+        {
+            if (thread is null)
+            {
+                return ActiveGitRefreshMode.Metadata;
+            }
+
+            if (preferFastRefresh && CanUseStatusOnlyGitRefresh(thread))
+            {
+                return ActiveGitRefreshMode.StatusOnly;
+            }
+
+            if (VisibleDiffPaneRequiresCompleteSnapshot(thread))
+            {
+                return ActiveGitRefreshMode.Complete;
+            }
+
+            if (includeSelectedDiff || VisibleDiffPaneNeedsSelectedDiff(thread, selectedPath))
+            {
+                return ActiveGitRefreshMode.SelectedDiff;
+            }
+
+            if (preferFastRefresh)
+            {
+                return ActiveGitRefreshMode.MetadataFast;
+            }
+
+            return ActiveGitRefreshMode.Metadata;
+        }
+
+        private bool CanUseStatusOnlyGitRefresh(WorkspaceThread thread)
+        {
+            if (thread is null ||
+                _showingSettings ||
+                !ReferenceEquals(thread, _activeThread))
+            {
+                return false;
+            }
+
+            if (_inspectorOpen &&
+                (_activeInspectorSection == InspectorSection.Files || _activeInspectorSection == InspectorSection.Review))
+            {
+                return false;
+            }
+
+            foreach (WorkspacePaneRecord pane in GetVisiblePanes(thread))
+            {
+                if (pane is DiffPaneRecord)
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         private bool VisibleDiffPaneRequiresCompleteSnapshot(WorkspaceThread thread)
@@ -113,8 +200,7 @@ namespace SelfContainedDeployment
             DateTimeOffset capturedAt,
             string threadRootPath,
             string selectedPath,
-            bool includeSelectedDiff,
-            bool requiresCompleteSnapshot,
+            ActiveGitRefreshMode refreshMode,
             TimeSpan maxAge)
         {
             if (snapshot is null)
@@ -132,12 +218,24 @@ namespace SelfContainedDeployment
                 return false;
             }
 
-            if (requiresCompleteSnapshot && !HasCompleteDiffSet(snapshot))
+            if (refreshMode != ActiveGitRefreshMode.StatusOnly && !snapshot.HasEnumeratedFiles)
             {
                 return false;
             }
 
-            if (!string.IsNullOrWhiteSpace(selectedPath) && snapshot.ChangedFiles.Count > 0)
+            if (refreshMode == ActiveGitRefreshMode.Metadata && !snapshot.HasLineStats)
+            {
+                return false;
+            }
+
+            if (refreshMode == ActiveGitRefreshMode.Complete && !HasCompleteDiffSet(snapshot))
+            {
+                return false;
+            }
+
+            if (refreshMode != ActiveGitRefreshMode.StatusOnly &&
+                !string.IsNullOrWhiteSpace(selectedPath) &&
+                snapshot.ChangedFiles.Count > 0)
             {
                 bool hasSelectedPath = false;
                 foreach (GitChangedFile file in snapshot.ChangedFiles)
@@ -155,7 +253,8 @@ namespace SelfContainedDeployment
                 }
             }
 
-            if (includeSelectedDiff && !HasSelectedDiffAvailable(snapshot, selectedPath))
+            if (refreshMode == ActiveGitRefreshMode.SelectedDiff &&
+                !HasSelectedDiffAvailable(snapshot, selectedPath))
             {
                 return false;
             }
@@ -163,14 +262,26 @@ namespace SelfContainedDeployment
             return true;
         }
 
-        private static TimeSpan ResolveGitSnapshotMaxAge(bool includeSelectedDiff, bool preferFastRefresh, bool requiresCompleteSnapshot)
+        private static TimeSpan ResolveGitSnapshotMaxAge(ActiveGitRefreshMode refreshMode)
         {
-            if (preferFastRefresh && !includeSelectedDiff && !requiresCompleteSnapshot)
+            if (refreshMode == ActiveGitRefreshMode.StatusOnly)
             {
                 return CachedShellOnlyGitSnapshotMaxAge;
             }
 
             return CachedThreadGitSnapshotMaxAge;
+        }
+
+        private static string FormatActiveGitRefreshMode(ActiveGitRefreshMode refreshMode)
+        {
+            return refreshMode switch
+            {
+                ActiveGitRefreshMode.Complete => "complete",
+                ActiveGitRefreshMode.MetadataFast => "metadata-fast",
+                ActiveGitRefreshMode.SelectedDiff => "selected-diff",
+                ActiveGitRefreshMode.StatusOnly => "status-only",
+                _ => "metadata",
+            };
         }
 
         private bool TryUsePeerThreadGitSnapshot(WorkspaceThread thread, string selectedPath, bool includeSelectedDiff, bool preferFastRefresh)
@@ -186,8 +297,8 @@ namespace SelfContainedDeployment
                 return false;
             }
 
-            bool requiresCompleteSnapshot = !preferFastRefresh && VisibleDiffPaneRequiresCompleteSnapshot(thread);
-            TimeSpan maxAge = ResolveGitSnapshotMaxAge(includeSelectedDiff, preferFastRefresh, requiresCompleteSnapshot);
+            ActiveGitRefreshMode refreshMode = ResolveActiveGitRefreshMode(thread, selectedPath, includeSelectedDiff, preferFastRefresh);
+            TimeSpan maxAge = ResolveGitSnapshotMaxAge(refreshMode);
             WorkspaceThread newestThread = null;
             DateTimeOffset newestCapturedAt = default;
 
@@ -199,8 +310,7 @@ namespace SelfContainedDeployment
                         candidate.LiveSnapshotCapturedAt,
                         threadRootPath,
                         selectedPath,
-                        includeSelectedDiff,
-                        requiresCompleteSnapshot,
+                        refreshMode,
                         maxAge))
                 {
                     continue;
@@ -245,7 +355,7 @@ namespace SelfContainedDeployment
             thread.WorktreePath = string.IsNullOrWhiteSpace(thread.WorktreePath)
                 ? snapshot.WorktreePath
                 : thread.WorktreePath;
-            thread.ChangedFileCount = snapshot.ChangedFiles.Count;
+            thread.ChangedFileCount = snapshot.EffectiveChangedFileCount;
             thread.SelectedDiffPath = snapshot.SelectedPath;
             thread.LiveSnapshot = snapshot;
             thread.LiveSnapshotCapturedAt = capturedAt;
@@ -289,7 +399,7 @@ namespace SelfContainedDeployment
                 ["projectId"] = _activeProject?.Id ?? string.Empty,
                 ["branch"] = snapshot.BranchName ?? string.Empty,
                 ["worktreePath"] = snapshot.WorktreePath ?? string.Empty,
-                ["changedFileCount"] = snapshot.ChangedFiles.Count.ToString(),
+                ["changedFileCount"] = snapshot.EffectiveChangedFileCount.ToString(),
                 ["selectedPath"] = snapshot.SelectedPath ?? string.Empty,
             });
         }

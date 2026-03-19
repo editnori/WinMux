@@ -1,0 +1,50 @@
+<UserControl
+    x:Class="SelfContainedDeployment.Controls.InspectorFilesPane"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:muxc="using:Microsoft.UI.Xaml.Controls"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <ScrollViewer x:Name="FilesContentScrollViewer"
+                  AutomationProperties.AutomationId="shell-inspector-files"
+                  VerticalScrollBarVisibility="Auto"
+                  HorizontalScrollBarVisibility="Disabled">
+        <StackPanel Padding="10,8,10,10"
+                    Spacing="8">
+            <StackPanel Spacing="4">
+                <TextBlock Text="DIRECTORY"
+                           Style="{StaticResource ShellInspectorLabelTextStyle}" />
+                <TextBlock x:Name="DirectoryRootTextBlock"
+                           AutomationProperties.AutomationId="shell-directory-root"
+                           Style="{StaticResource ShellBodyTextStyle}"
+                           Text="No active project"
+                           TextTrimming="CharacterEllipsis"
+                           TextWrapping="NoWrap" />
+                <TextBlock x:Name="DirectoryMetaTextBlock"
+                           AutomationProperties.AutomationId="shell-directory-meta"
+                           Style="{StaticResource ShellHintTextStyle}"
+                           Text="Open an editor pane to browse files."
+                           TextWrapping="WrapWholeWords" />
+            </StackPanel>
+
+            <muxc:TreeView x:Name="DirectoryTreeView"
+                           AutomationProperties.AutomationId="shell-directory-tree"
+                           Margin="-8,-2,0,0"
+                           SelectionMode="Single"
+                           DoubleTapped="OnDirectoryTreeDoubleTapped"
+                           KeyDown="OnDirectoryTreeKeyDown">
+                <muxc:TreeView.ItemTemplate>
+                    <DataTemplate x:DataType="muxc:TreeViewNode">
+                        <ContentPresenter Content="{x:Bind Content}" />
+                    </DataTemplate>
+                </muxc:TreeView.ItemTemplate>
+            </muxc:TreeView>
+
+            <TextBlock x:Name="DirectoryEmptyTextBlock"
+                       AutomationProperties.AutomationId="shell-directory-empty"
+                       Style="{StaticResource ShellHintTextStyle}"
+                       Text="No editable files were found for this thread."
+                       Visibility="Collapsed"
+                       TextWrapping="WrapWholeWords" />
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

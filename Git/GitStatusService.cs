@@ -60,7 +60,15 @@ namespace SelfContainedDeployment.Git
 
         public string Error { get; set; }
 
+        public int ChangedFileCount { get; set; }
+
+        public bool HasEnumeratedFiles { get; set; } = true;
+
+        public bool HasLineStats { get; set; } = true;
+
         public List<GitChangedFile> ChangedFiles { get; set; } = new();
+
+        public int EffectiveChangedFileCount => HasEnumeratedFiles ? ChangedFiles.Count : ChangedFileCount;
     }
 
     internal static class GitStatusService
@@ -99,12 +107,15 @@ namespace SelfContainedDeployment.Git
                 }
 
                 ParseMetadataSnapshot(snapshot, metadataResult.Output);
-                snapshot.StatusSummary = BuildStatusSummary(snapshot.ChangedFiles);
+                snapshot.HasEnumeratedFiles = true;
+                snapshot.HasLineStats = true;
+                snapshot.ChangedFileCount = snapshot.ChangedFiles.Count;
+                snapshot.StatusSummary = BuildStatusSummary(snapshot.EffectiveChangedFileCount);
                 StoreCachedSnapshot(normalizedPath, snapshot);
             }
             else if (string.IsNullOrWhiteSpace(snapshot.StatusSummary))
             {
-                snapshot.StatusSummary = BuildStatusSummary(snapshot.ChangedFiles);
+                snapshot.StatusSummary = BuildStatusSummary(snapshot.EffectiveChangedFileCount);
             }
 
             string resolvedSelectedPath = selectedPath;
@@ -149,30 +160,51 @@ namespace SelfContainedDeployment.Git
 
         public static GitThreadSnapshot CaptureMetadata(string workingPath, string selectedPath = null)
         {
-            return Capture(workingPath, selectedPath, includeSelectedDiff: false);
-        }
-
-        public static GitThreadSnapshot CaptureStatusOnly(string workingPath, string selectedPath = null)
-        {
             string normalizedPath = ShellProfiles.NormalizeProjectPath(workingPath);
-            GitThreadSnapshot cachedSnapshot = TryGetCachedSnapshot(normalizedPath);
-            GitThreadSnapshot snapshot = new()
+            GitThreadSnapshot snapshot = TryGetCachedSnapshot(normalizedPath);
+            if (snapshot is not null &&
+                snapshot.HasEnumeratedFiles &&
+                !snapshot.HasLineStats)
             {
-                WorktreePath = normalizedPath,
-                RepositoryRootPath = string.IsNullOrWhiteSpace(cachedSnapshot?.RepositoryRootPath)
-                    ? normalizedPath
-                    : cachedSnapshot.RepositoryRootPath,
-            };
+                GitCommandResult numStatResult = RunGitNumStat(normalizedPath);
+                if (!numStatResult.Ok)
+                {
+                    snapshot.Error = NormalizeGitError(numStatResult.Error);
+                    return snapshot;
+                }
 
-            GitCommandResult statusResult = RunGitStatusOnly(normalizedPath);
-            if (!statusResult.Ok)
-            {
-                snapshot.Error = NormalizeGitError(statusResult.Error);
-                return snapshot;
+                ApplyNumStat(snapshot, numStatResult.Output);
+                snapshot.HasLineStats = true;
+                snapshot.StatusSummary = string.IsNullOrWhiteSpace(snapshot.StatusSummary)
+                    ? BuildStatusSummary(snapshot.EffectiveChangedFileCount)
+                    : snapshot.StatusSummary;
+                StoreCachedSnapshot(normalizedPath, snapshot);
             }
+            else if (snapshot is null || !snapshot.HasEnumeratedFiles || !snapshot.HasLineStats)
+            {
+                snapshot = new()
+                {
+                    WorktreePath = normalizedPath,
+                };
 
-            ParseStatus(snapshot, statusResult.Output);
-            snapshot.StatusSummary = BuildStatusSummary(snapshot.ChangedFiles);
+                GitCommandResult metadataResult = RunGitSnapshot(normalizedPath, includeNumStat: true, untrackedFilesMode: "all");
+                if (!metadataResult.Ok)
+                {
+                    snapshot.Error = NormalizeGitError(metadataResult.Error);
+                    return snapshot;
+                }
+
+                ParseMetadataSnapshot(snapshot, metadataResult.Output);
+                snapshot.HasEnumeratedFiles = true;
+                snapshot.HasLineStats = true;
+                snapshot.ChangedFileCount = snapshot.ChangedFiles.Count;
+                snapshot.StatusSummary = BuildStatusSummary(snapshot.EffectiveChangedFileCount);
+                StoreCachedSnapshot(normalizedPath, snapshot);
+            }
+            else if (string.IsNullOrWhiteSpace(snapshot.StatusSummary))
+            {
+                snapshot.StatusSummary = BuildStatusSummary(snapshot.EffectiveChangedFileCount);
+            }
 
             string resolvedSelectedPath = selectedPath;
             bool selectedPathExists = !string.IsNullOrWhiteSpace(resolvedSelectedPath) &&
@@ -183,6 +215,85 @@ namespace SelfContainedDeployment.Git
             }
 
             snapshot.SelectedPath = resolvedSelectedPath;
+            snapshot.SelectedDiff = null;
+            return snapshot;
+        }
+
+        public static GitThreadSnapshot CaptureMetadataFast(string workingPath, string selectedPath = null, string fallbackBranchName = null)
+        {
+            string normalizedPath = ShellProfiles.NormalizeProjectPath(workingPath);
+            GitThreadSnapshot cachedSnapshot = TryGetCachedSnapshot(normalizedPath);
+            if (cachedSnapshot is not null && cachedSnapshot.HasEnumeratedFiles)
+            {
+                SelectDiffPath(cachedSnapshot, selectedPath);
+                if (string.IsNullOrWhiteSpace(cachedSnapshot.StatusSummary))
+                {
+                    cachedSnapshot.StatusSummary = BuildStatusSummary(cachedSnapshot.EffectiveChangedFileCount);
+                }
+
+                return cachedSnapshot;
+            }
+
+            GitThreadSnapshot snapshot = new()
+            {
+                WorktreePath = normalizedPath,
+                RepositoryRootPath = string.IsNullOrWhiteSpace(cachedSnapshot?.RepositoryRootPath)
+                    ? normalizedPath
+                    : cachedSnapshot.RepositoryRootPath,
+                BranchName = cachedSnapshot?.BranchName ?? fallbackBranchName,
+                HasEnumeratedFiles = true,
+                HasLineStats = false,
+            };
+
+            GitCommandResult statusResult = RunGitStatusMetadataOnly(normalizedPath);
+            if (!statusResult.Ok)
+            {
+                snapshot.Error = NormalizeGitError(statusResult.Error);
+                return snapshot;
+            }
+
+            ParseStatus(snapshot, statusResult.Output);
+            snapshot.ChangedFileCount = snapshot.ChangedFiles.Count;
+            snapshot.StatusSummary = BuildStatusSummary(snapshot.EffectiveChangedFileCount);
+            SelectDiffPath(snapshot, selectedPath);
+            StoreCachedSnapshot(normalizedPath, snapshot);
+            return snapshot;
+        }
+
+        public static GitThreadSnapshot CaptureStatusOnly(string workingPath, string selectedPath = null)
+        {
+            return CaptureStatusOnly(workingPath, selectedPath, fallbackBranchName: null);
+        }
+
+        public static GitThreadSnapshot CaptureStatusOnly(string workingPath, string selectedPath, string fallbackBranchName)
+        {
+            string normalizedPath = ShellProfiles.NormalizeProjectPath(workingPath);
+            GitThreadSnapshot cachedSnapshot = TryGetCachedSnapshot(normalizedPath);
+            GitThreadSnapshot snapshot = new()
+            {
+                WorktreePath = normalizedPath,
+                RepositoryRootPath = string.IsNullOrWhiteSpace(cachedSnapshot?.RepositoryRootPath)
+                    ? normalizedPath
+                    : cachedSnapshot.RepositoryRootPath,
+                BranchName = cachedSnapshot?.BranchName ?? fallbackBranchName,
+                ChangedFileCount = cachedSnapshot?.EffectiveChangedFileCount ?? 0,
+                HasEnumeratedFiles = false,
+                HasLineStats = false,
+            };
+
+            GitCommandResult statusResult = RunGitStatusSummaryOnly(normalizedPath);
+            if (!statusResult.Ok)
+            {
+                snapshot.Error = NormalizeGitError(statusResult.Error);
+                return snapshot;
+            }
+
+            snapshot.ChangedFileCount = CountStatusEntries(statusResult.Output);
+            snapshot.StatusSummary = BuildStatusSummary(snapshot.ChangedFileCount);
+
+            snapshot.SelectedPath = string.IsNullOrWhiteSpace(selectedPath)
+                ? cachedSnapshot?.SelectedPath
+                : selectedPath;
             return snapshot;
         }
 
@@ -244,7 +355,36 @@ namespace SelfContainedDeployment.Git
                 SelectedPath = snapshot.SelectedPath,
                 SelectedDiff = snapshot.SelectedDiff,
                 Error = snapshot.Error,
+                ChangedFileCount = snapshot.EffectiveChangedFileCount,
+                HasEnumeratedFiles = snapshot.HasEnumeratedFiles,
+                HasLineStats = snapshot.HasLineStats,
                 ChangedFiles = changedFiles,
+            };
+        }
+
+        public static GitThreadSnapshot CreateSummarySnapshot(GitThreadSnapshot snapshot)
+        {
+            if (snapshot is null)
+            {
+                return null;
+            }
+
+            return new GitThreadSnapshot
+            {
+                BranchName = snapshot.BranchName,
+                RepositoryRootPath = snapshot.RepositoryRootPath,
+                WorktreePath = snapshot.WorktreePath,
+                StatusSummary = string.IsNullOrWhiteSpace(snapshot.StatusSummary)
+                    ? BuildStatusSummary(snapshot.EffectiveChangedFileCount)
+                    : snapshot.StatusSummary,
+                DiffSummary = snapshot.DiffSummary,
+                SelectedPath = snapshot.SelectedPath,
+                SelectedDiff = snapshot.SelectedDiff,
+                Error = snapshot.Error,
+                ChangedFileCount = snapshot.EffectiveChangedFileCount,
+                HasEnumeratedFiles = false,
+                HasLineStats = snapshot.HasLineStats,
+                ChangedFiles = new List<GitChangedFile>(),
             };
         }
 
@@ -252,6 +392,18 @@ namespace SelfContainedDeployment.Git
         {
             if (snapshot is null)
             {
+                return;
+            }
+
+            if (!snapshot.HasEnumeratedFiles)
+            {
+                if (!string.IsNullOrWhiteSpace(selectedPath) &&
+                    !string.Equals(snapshot.SelectedPath, selectedPath, StringComparison.Ordinal))
+                {
+                    snapshot.SelectedPath = selectedPath;
+                    snapshot.SelectedDiff = null;
+                }
+
                 return;
             }
 
@@ -400,12 +552,43 @@ namespace SelfContainedDeployment.Git
 
         private static string BuildStatusSummary(IReadOnlyCollection<GitChangedFile> files)
         {
-            if (files is null || files.Count == 0)
+            return BuildStatusSummary(files?.Count ?? 0);
+        }
+
+        private static string BuildStatusSummary(int fileCount)
+        {
+            if (fileCount <= 0)
             {
                 return "No working tree changes";
             }
 
-            return files.Count == 1 ? "1 changed file" : $"{files.Count} changed files";
+            return fileCount == 1 ? "1 changed file" : $"{fileCount} changed files";
+        }
+
+        private static int CountStatusEntries(string output)
+        {
+            if (string.IsNullOrWhiteSpace(output))
+            {
+                return 0;
+            }
+
+            int count = 0;
+            string[] lines = output.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+            foreach (string rawLine in lines)
+            {
+                string line = rawLine?.TrimEnd() ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(line) || line.StartsWith("##", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                if (line.Length >= 3)
+                {
+                    count++;
+                }
+            }
+
+            return count;
         }
 
         private static void ParseMetadataSnapshot(GitThreadSnapshot snapshot, string output)
@@ -658,6 +841,54 @@ namespace SelfContainedDeployment.Git
                 "git --no-optional-locks -c core.quotepath=false status --porcelain=v1 -b --untracked-files=normal --ignore-submodules=all --no-renames");
         }
 
+        private static GitCommandResult RunGitStatusSummaryOnly(string workingPath)
+        {
+            if (TryResolveLocalGitPath(workingPath, out string localPath))
+            {
+                GitCommandResult localResult = RunWindowsGitStatusSummaryOnly(localPath);
+                if (localResult.Ok || !IsWindowsGitUnavailable(localResult.Error))
+                {
+                    return localResult;
+                }
+            }
+
+            return RunWslShell(
+                workingPath,
+                "git --no-optional-locks -c core.quotepath=false status --porcelain=v1 --untracked-files=normal --ignore-submodules=all --no-renames");
+        }
+
+        private static GitCommandResult RunGitStatusMetadataOnly(string workingPath)
+        {
+            if (TryResolveLocalGitPath(workingPath, out string localPath))
+            {
+                GitCommandResult localResult = RunWindowsGitStatusMetadataOnly(localPath);
+                if (localResult.Ok || !IsWindowsGitUnavailable(localResult.Error))
+                {
+                    return localResult;
+                }
+            }
+
+            return RunWslShell(
+                workingPath,
+                "git --no-optional-locks -c core.quotepath=false status --porcelain=v1 -b --untracked-files=all");
+        }
+
+        private static GitCommandResult RunGitNumStat(string workingPath)
+        {
+            if (TryResolveLocalGitPath(workingPath, out string localPath))
+            {
+                GitCommandResult localResult = RunWindowsGitNumStat(localPath);
+                if (localResult.Ok || !IsWindowsGitUnavailable(localResult.Error))
+                {
+                    return localResult;
+                }
+            }
+
+            return RunWslShell(
+                workingPath,
+                "git --no-optional-locks -c core.quotepath=false diff --numstat");
+        }
+
         private static GitCommandResult RunGitDiff(string workingPath, string selectedPath, string status)
         {
             string normalizedStatus = status?.Trim() ?? string.Empty;
@@ -815,6 +1046,53 @@ namespace SelfContainedDeployment.Git
                     "--untracked-files=normal",
                     "--ignore-submodules=all",
                     "--no-renames",
+                });
+        }
+
+        private static GitCommandResult RunWindowsGitStatusSummaryOnly(string workingPath)
+        {
+            return RunWindowsGit(
+                workingPath,
+                new[]
+                {
+                    "--no-optional-locks",
+                    "-c",
+                    "core.quotepath=false",
+                    "status",
+                    "--porcelain=v1",
+                    "--untracked-files=normal",
+                    "--ignore-submodules=all",
+                    "--no-renames",
+                });
+        }
+
+        private static GitCommandResult RunWindowsGitStatusMetadataOnly(string workingPath)
+        {
+            return RunWindowsGit(
+                workingPath,
+                new[]
+                {
+                    "--no-optional-locks",
+                    "-c",
+                    "core.quotepath=false",
+                    "status",
+                    "--porcelain=v1",
+                    "-b",
+                    "--untracked-files=all",
+                });
+        }
+
+        private static GitCommandResult RunWindowsGitNumStat(string workingPath)
+        {
+            return RunWindowsGit(
+                workingPath,
+                new[]
+                {
+                    "--no-optional-locks",
+                    "-c",
+                    "core.quotepath=false",
+                    "diff",
+                    "--numstat",
                 });
         }
 

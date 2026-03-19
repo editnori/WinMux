@@ -3,7 +3,9 @@ param(
     [int]$AutomationPort = 9331,
     [string]$Platform = "x64",
     [string]$Configuration = "Debug",
-    [switch]$SkipBuild
+    [switch]$SkipBuild,
+    [switch]$UsePersistedSession,
+    [switch]$ReuseDebugSession
 )
 
 $ErrorActionPreference = "Stop"
@@ -74,12 +76,32 @@ $env:WINMUX_AUTOMATION_TOKEN = $automationToken
 $env:WINMUX_ENABLE_WEBVIEW_DEVTOOLS = "1"
 $env:WINMUX_ENABLE_BROWSER_DEVTOOLS = "1"
 
+$debugSessionPath = Join-Path $repoRoot "tmp\webview2-debug-session.json"
+if (-not $UsePersistedSession) {
+    $debugSessionDirectory = Split-Path -Parent $debugSessionPath
+    if (-not (Test-Path $debugSessionDirectory)) {
+        New-Item -ItemType Directory -Path $debugSessionDirectory -Force | Out-Null
+    }
+
+    $env:WINMUX_SESSION_PATH = $debugSessionPath
+    if (-not $ReuseDebugSession) {
+        Remove-Item $debugSessionPath -ErrorAction SilentlyContinue
+        Remove-Item "$debugSessionPath.bak" -ErrorAction SilentlyContinue
+    }
+}
+
 $process = Start-Process -FilePath $exePath -WorkingDirectory $repoRoot -PassThru
 
 Write-Host "Started native app PID $($process.Id)"
 Write-Host "WebView2 CDP endpoint: http://127.0.0.1:$Port"
 Write-Host "Native automation endpoint: http://127.0.0.1:$AutomationPort"
 Write-Host "Renderer source root: $webRoot"
+if ($UsePersistedSession) {
+    Write-Host "Session mode: persisted workspace session"
+}
+else {
+    Write-Host "Session mode: isolated debug session ($debugSessionPath)"
+}
 Write-Host ""
 Write-Host "Playwright attach:"
 Write-Host "  chromium.connectOverCDP('http://127.0.0.1:$Port')"
@@ -89,11 +111,18 @@ $targetsUrl = "http://127.0.0.1:$Port/json/list"
 $lastTargets = $null
 $rendererReady = $false
 $automationReady = $false
+$spawnedBrowserPane = $false
+$browserPaneReady = $false
 
 Initialize-WinMuxAutomationClient -Port $AutomationPort | Out-Null
 
 for ($i = 0; $i -lt 40; $i++) {
     Start-Sleep -Milliseconds 250
+
+    if ($process.HasExited) {
+        Write-Error "WinMux exited before the automation/debug endpoints became ready. Check %LOCALAPPDATA%\\WinMux\\startup-error.log."
+        exit 1
+    }
 
     try {
         $targets = Invoke-RestMethod -Uri $targetsUrl -TimeoutSec 2
@@ -129,14 +158,38 @@ for ($i = 0; $i -lt 40; $i++) {
         }
     }
 
-    if ($rendererReady -and $automationReady) {
+    if ($automationReady) {
+        try {
+            $browserState = Invoke-AutomationPost "/browser-state" @{} -CompressJson -TimeoutSec 2
+            $browserPaneReady = @($browserState.panes).Count -gt 0
+        }
+        catch {
+        }
+    }
+
+    $shouldSeedBrowserPane = $automationReady -and -not $browserPaneReady -and -not $spawnedBrowserPane -and (
+        ($rendererReady -and $i -ge 4) -or
+        (-not $rendererReady -and $i -ge 8)
+    )
+
+    if ($shouldSeedBrowserPane) {
+        try {
+            Invoke-AutomationPost "/action" @{ action = "newBrowserPane" } -CompressJson | Out-Null
+            $spawnedBrowserPane = $true
+            Write-Host "Opened a browser pane to seed WebView2 debug targets."
+        }
+        catch {
+        }
+    }
+
+    if ($rendererReady -and $automationReady -and $browserPaneReady) {
         Write-Host "Detected WebView2 targets:"
         $lastTargets | Select-Object title, url, type | Format-Table -AutoSize
         Write-Host "Native automation server is healthy."
         exit 0
     }
 
-    if ($automationReady -and $lastTargets -and @($lastTargets).Count -gt 0) {
+    if ($automationReady -and $browserPaneReady -and $lastTargets -and @($lastTargets).Count -gt 0) {
         Write-Warning "Native automation is healthy and WebView2 has page targets, but the renderer is still on a transient page."
         $lastTargets | Select-Object title, url, type | Format-Table -AutoSize
         Write-Host "Native automation server is healthy."

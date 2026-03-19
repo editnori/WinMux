@@ -145,6 +145,12 @@ namespace SelfContainedDeployment.Persistence
 
         public string Error { get; set; }
 
+        public int? ChangedFileCount { get; set; }
+
+        public bool? HasEnumeratedFiles { get; set; }
+
+        public bool? HasLineStats { get; set; }
+
         public List<GitChangedFileSessionSnapshot> ChangedFiles { get; set; } = new();
     }
 

@@ -65,10 +65,32 @@ namespace SelfContainedDeployment.Panes
         private static readonly HashSet<string> IgnoredDirectoryNames = new(StringComparer.OrdinalIgnoreCase)
         {
             ".git",
+            ".cache",
+            ".direnv",
+            ".gradle",
+            ".idea",
+            ".mypy_cache",
             "node_modules",
+            ".parcel-cache",
+            ".pnpm-store",
+            ".pytest_cache",
+            ".ruff_cache",
+            ".sass-cache",
+            ".svelte-kit",
+            ".terraform",
+            ".tox",
+            ".turbo",
+            ".venv",
+            ".vs",
+            ".yarn",
             "bin",
-            "obj",
             "dist",
+            "DerivedData",
+            "obj",
+            "out",
+            "target",
+            "tmp",
+            "venv",
             "coverage",
             ".next",
             ".nuxt",
@@ -631,23 +653,19 @@ namespace SelfContainedDeployment.Panes
                     return;
                 }
 
-                await EditorView.EnsureCoreWebView2Async(environment).AsTask().ConfigureAwait(true);
+                core = await EnsureEditorCoreAsync(environment).ConfigureAwait(true);
                 if (_disposed)
                 {
                     return;
                 }
-
-                core = await WaitForCoreWebView2Async().ConfigureAwait(true);
             }
             catch
             {
-                await EditorView.EnsureCoreWebView2Async().AsTask().ConfigureAwait(true);
+                core = await EnsureEditorCoreAsync().ConfigureAwait(true);
                 if (_disposed)
                 {
                     return;
                 }
-
-                core = await WaitForCoreWebView2Async().ConfigureAwait(true);
             }
 
             if (_disposed)
@@ -693,19 +711,54 @@ namespace SelfContainedDeployment.Panes
                 string.Equals(value, "on", StringComparison.OrdinalIgnoreCase);
         }
 
-        private async Task<CoreWebView2> WaitForCoreWebView2Async()
+        private async Task<CoreWebView2> EnsureEditorCoreAsync(CoreWebView2Environment environment = null)
         {
-            for (int attempt = 0; attempt < 20; attempt++)
+            if (EditorView.CoreWebView2 is not null)
             {
+                return EditorView.CoreWebView2;
+            }
+
+            TaskCompletionSource<CoreWebView2> initialized = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            void OnCoreWebView2Initialized(WebView2 sender, CoreWebView2InitializedEventArgs args)
+            {
+                if (args.Exception is not null)
+                {
+                    initialized.TrySetException(args.Exception);
+                    return;
+                }
+
+                if (sender?.CoreWebView2 is not null)
+                {
+                    initialized.TrySetResult(sender.CoreWebView2);
+                }
+            }
+
+            EditorView.CoreWebView2Initialized += OnCoreWebView2Initialized;
+            try
+            {
+                if (environment is null)
+                {
+                    await EditorView.EnsureCoreWebView2Async().AsTask().ConfigureAwait(true);
+                }
+                else
+                {
+                    await EditorView.EnsureCoreWebView2Async(environment).AsTask().ConfigureAwait(true);
+                }
+
                 if (EditorView.CoreWebView2 is not null)
                 {
                     return EditorView.CoreWebView2;
                 }
 
-                await Task.Delay(50).ConfigureAwait(true);
+                using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(3));
+                using CancellationTokenRegistration registration = timeout.Token.Register(() =>
+                    initialized.TrySetException(new TimeoutException("Editor WebView2 core was not created.")));
+                return await initialized.Task.ConfigureAwait(true);
             }
-
-            throw new InvalidOperationException("Editor WebView2 core was not created.");
+            finally
+            {
+                EditorView.CoreWebView2Initialized -= OnCoreWebView2Initialized;
+            }
         }
 
         private void OnNavigationCompleted(CoreWebView2 sender, CoreWebView2NavigationCompletedEventArgs args)
@@ -1841,7 +1894,20 @@ namespace SelfContainedDeployment.Panes
                 }
             }
 
-            List<EditorPaneFileEntry> ordered = EnumerateProjectFilesCore(normalizedRootPath, cancellationToken);
+            bool preferGitEnumeration = LooksLikeGitRoot(normalizedRootPath);
+            List<EditorPaneFileEntry> ordered = preferGitEnumeration
+                ? EnumerateProjectFilesFromGit(normalizedRootPath, cancellationToken)
+                : new List<EditorPaneFileEntry>();
+            if (preferGitEnumeration && ordered.Count > 0)
+            {
+                NativeAutomationDiagnostics.IncrementCounter("editorFileScan.gitPrimary.count");
+            }
+
+            if (ordered.Count == 0)
+            {
+                ordered = EnumerateProjectFilesCore(normalizedRootPath, cancellationToken);
+            }
+
             if (ordered.Count == 0)
             {
                 NativeAutomationDiagnostics.IncrementCounter("editorFileScan.fallback.count");
@@ -1869,6 +1935,17 @@ namespace SelfContainedDeployment.Panes
                 PruneProjectFileCache(capturedAt);
                 return cachedFiles;
             }
+        }
+
+        private static bool LooksLikeGitRoot(string normalizedRootPath)
+        {
+            if (string.IsNullOrWhiteSpace(normalizedRootPath))
+            {
+                return false;
+            }
+
+            string gitPath = Path.Combine(normalizedRootPath, ".git");
+            return Directory.Exists(gitPath) || File.Exists(gitPath);
         }
 
         private static List<EditorPaneFileEntry> EnumerateProjectFilesCore(string normalizedRootPath, CancellationToken cancellationToken)
@@ -2021,6 +2098,9 @@ namespace SelfContainedDeployment.Panes
                 process.StartInfo.ArgumentList.Add("--exclude-standard");
 
                 process.Start();
+                Task<string> stderrTask = process.StandardError.ReadToEndAsync();
+                using MemoryStream stdoutStream = new();
+                Task stdoutTask = process.StandardOutput.BaseStream.CopyToAsync(stdoutStream);
                 if (!process.WaitForExit(10_000))
                 {
                     try
@@ -2031,7 +2111,25 @@ namespace SelfContainedDeployment.Panes
                     {
                     }
 
+                    try
+                    {
+                        stdoutTask.Wait(1000);
+                        stderrTask.Wait(1000);
+                    }
+                    catch
+                    {
+                    }
+
                     return new List<EditorPaneFileEntry>();
+                }
+
+                try
+                {
+                    stdoutTask.Wait(1000);
+                    stderrTask.Wait(1000);
+                }
+                catch
+                {
                 }
 
                 cancellationToken.ThrowIfCancellationRequested();
@@ -2040,9 +2138,9 @@ namespace SelfContainedDeployment.Panes
                     return new List<EditorPaneFileEntry>();
                 }
 
+                string output = Encoding.UTF8.GetString(stdoutStream.ToArray());
                 List<EditorPaneFileEntry> results = new();
-                foreach (string line in process.StandardOutput.ReadToEnd()
-                    .Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries))
+                foreach (string line in output.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries))
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     string relativePath = line.Trim().Replace('\\', '/');

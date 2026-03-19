@@ -16,6 +16,24 @@ namespace SelfContainedDeployment
 {
     public partial class MainPage
     {
+        private FrameworkElement InspectorNotesContent => InspectorNotesView;
+
+        private Button InspectorNotesThreadScopeButton => InspectorNotesView?.ThreadScopeButtonView;
+
+        private Button InspectorNotesProjectScopeButton => InspectorNotesView?.ProjectScopeButtonView;
+
+        private Button InspectorInlineAddNoteButton => InspectorNotesView?.InlineAddNoteButtonView;
+
+        private Button InspectorInlineSaveNoteButton => InspectorNotesView?.InlineSaveNoteButtonView;
+
+        private Button InspectorInlineDeleteNoteButton => InspectorNotesView?.InlineDeleteNoteButtonView;
+
+        private TextBlock InspectorNotesMetaText => InspectorNotesView?.NotesMetaText;
+
+        private TextBlock InspectorNotesEmptyText => InspectorNotesView?.NotesEmptyText;
+
+        private ItemsControl InspectorNotesGroupsItemsControl => InspectorNotesView?.NotesGroupsItemsControl;
+
         private void OnInspectorReviewTabClicked(object sender, RoutedEventArgs e)
         {
             SetInspectorSection(InspectorSection.Review);
@@ -370,7 +388,7 @@ namespace SelfContainedDeployment
             UpdateInspectorSectionChrome();
             if (section == InspectorSection.Files && refreshFiles && sectionChanged)
             {
-                RefreshInspectorFileBrowser(forceRebuild: sectionChanged);
+                RefreshInspectorFileBrowser();
             }
             else if (section == InspectorSection.Review && sectionChanged)
             {
@@ -378,7 +396,7 @@ namespace SelfContainedDeployment
             }
             else if (section == InspectorSection.Notes)
             {
-                RefreshInspectorNotes();
+                RefreshInspectorNotes(force: sectionChanged);
             }
         }
 
@@ -444,7 +462,10 @@ namespace SelfContainedDeployment
                 InspectorNotesActionsPanel.Visibility = _activeInspectorSection == InspectorSection.Notes ? Visibility.Visible : Visibility.Collapsed;
             }
 
-            RefreshInspectorNotes();
+            if (ShouldRefreshInspectorNotesUi())
+            {
+                RefreshInspectorNotes();
+            }
             UpdateInspectorFileActionState();
         }
 
@@ -774,7 +795,7 @@ namespace SelfContainedDeployment
             });
         }
 
-        private void RefreshInspectorNotes()
+        private void RefreshInspectorNotes(bool force = false)
         {
             if (InspectorNotesMetaText is null ||
                 InspectorNotesGroupsItemsControl is null ||
@@ -785,15 +806,21 @@ namespace SelfContainedDeployment
                 return;
             }
 
-            List<InspectorNoteGroupItem> noteGroups = BuildInspectorNoteGroups(_activeProject, _activeThread, _activeNotesListScope).ToList();
-            InspectorNotesGroupsItemsControl.ItemsSource = noteGroups;
+            string renderKey = BuildInspectorNotesRenderKey(_activeProject, _activeThread, _activeNotesListScope);
+            if (force || !string.Equals(renderKey, _lastInspectorNotesRenderKey, StringComparison.Ordinal))
+            {
+                List<InspectorNoteGroupItem> noteGroups = BuildInspectorNoteGroups(_activeProject, _activeThread, _activeNotesListScope).ToList();
+                InspectorNotesGroupsItemsControl.ItemsSource = noteGroups;
 
-            InspectorNotesEmptyText.Text = _activeNotesListScope == NotesListScope.Thread
-                ? "No thread notes yet. Add a note to pin context here."
-                : "No project notes yet.";
-            InspectorNotesEmptyText.Visibility = noteGroups.Sum(candidate => candidate.ActiveNotes.Count + candidate.ArchivedNotes.Count) == 0
-                ? Visibility.Visible
-                : Visibility.Collapsed;
+                InspectorNotesEmptyText.Text = _activeNotesListScope == NotesListScope.Thread
+                    ? "No thread notes yet. Add a note to pin context here."
+                    : "No project notes yet.";
+                InspectorNotesEmptyText.Visibility = noteGroups.Sum(candidate => candidate.ActiveNotes.Count + candidate.ArchivedNotes.Count) == 0
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+                _lastInspectorNotesRenderKey = renderKey;
+            }
+
             InspectorNotesThreadScopeButton.IsEnabled = _activeThread is not null;
             InspectorNotesProjectScopeButton.IsEnabled = _activeProject is not null;
             ApplyNotesListScopeButtonState(InspectorNotesThreadScopeButton, _activeNotesListScope == NotesListScope.Thread);
@@ -832,7 +859,6 @@ namespace SelfContainedDeployment
             }
 
             SetInspectorSection(InspectorSection.Notes, refreshFiles: false);
-            RefreshInspectorNotes();
 
             if (focusEditor)
             {
@@ -1228,6 +1254,101 @@ namespace SelfContainedDeployment
             return _activeNotesListScope == NotesListScope.Project
                 ? ReferenceEquals(thread.Project, _activeProject)
                 : ReferenceEquals(thread, _activeThread);
+        }
+
+        private bool ShouldRefreshInspectorNotesUi()
+        {
+            return _inspectorOpen &&
+                !_showingSettings &&
+                _activeInspectorSection == InspectorSection.Notes &&
+                _activeThread is not null;
+        }
+
+        private string BuildInspectorNotesRenderKey(WorkspaceProject project, WorkspaceThread thread, NotesListScope scope)
+        {
+            StringBuilder builder = new(512);
+            AppendInspectorNotesRenderKeyValue(builder, scope.ToString());
+            AppendInspectorNotesRenderKeyValue(builder, project?.Id);
+            AppendInspectorNotesRenderKeyValue(builder, thread?.Id);
+            AppendInspectorNotesRenderKeyValue(builder, _activeThread?.Id);
+            AppendInspectorNotesRenderKeyValue(builder, ResolveTheme(SampleConfig.CurrentTheme).ToString());
+
+            if (scope == NotesListScope.Thread)
+            {
+                AppendInspectorNotesThreadRenderKey(builder, thread, scope);
+                return builder.ToString();
+            }
+
+            if (project is null)
+            {
+                return builder.ToString();
+            }
+
+            foreach (WorkspaceThread ownerThread in project.Threads
+                         .Where(candidate => candidate.NoteEntries.Count > 0)
+                         .OrderByDescending(candidate => ReferenceEquals(candidate, _activeThread))
+                         .ThenByDescending(GetLatestThreadNoteActivity))
+            {
+                AppendInspectorNotesThreadRenderKey(builder, ownerThread, scope);
+            }
+
+            return builder.ToString();
+        }
+
+        private void AppendInspectorNotesThreadRenderKey(StringBuilder builder, WorkspaceThread thread, NotesListScope scope)
+        {
+            AppendInspectorNotesRenderKeyValue(builder, thread?.Id);
+            AppendInspectorNotesRenderKeyValue(builder, thread?.Name);
+            AppendInspectorNotesRenderKeyValue(builder, thread?.SelectedNoteId);
+            AppendInspectorNotesRenderKeyValue(builder, thread?.SelectedPaneId);
+            if (thread is null)
+            {
+                return;
+            }
+
+            int activeNoteCount = 0;
+            foreach (WorkspaceThreadNote note in thread.NoteEntries)
+            {
+                if (!note.IsArchived)
+                {
+                    activeNoteCount++;
+                }
+            }
+
+            AppendInspectorNotesRenderKeyValue(
+                builder,
+                (_expandedArchivedNoteThreadIds.Contains(thread.Id) || (scope == NotesListScope.Thread && activeNoteCount == 0)).ToString());
+
+            foreach (WorkspacePaneRecord pane in thread.Panes)
+            {
+                AppendInspectorNotesRenderKeyValue(builder, pane.Id);
+                AppendInspectorNotesRenderKeyValue(builder, pane.Kind.ToString());
+                AppendInspectorNotesRenderKeyValue(builder, pane.Title);
+            }
+
+            foreach (WorkspaceThreadNote note in thread.NoteEntries)
+            {
+                NoteDraftState draft = ResolveNoteDraftState(note);
+                AppendInspectorNotesRenderKeyValue(builder, note.Id);
+                AppendInspectorNotesRenderKeyValue(builder, note.Title);
+                AppendInspectorNotesRenderKeyValue(builder, note.Text);
+                AppendInspectorNotesRenderKeyValue(builder, note.PaneId);
+                AppendInspectorNotesRenderKeyValue(builder, note.IsArchived.ToString());
+                AppendInspectorNotesRenderKeyValue(builder, note.CreatedAt.UtcTicks.ToString());
+                AppendInspectorNotesRenderKeyValue(builder, note.UpdatedAt.UtcTicks.ToString());
+                AppendInspectorNotesRenderKeyValue(builder, note.ArchivedAt?.UtcTicks.ToString());
+                AppendInspectorNotesRenderKeyValue(builder, draft?.EditableTitle);
+                AppendInspectorNotesRenderKeyValue(builder, draft?.Text);
+                AppendInspectorNotesRenderKeyValue(builder, draft?.Dirty.ToString());
+            }
+        }
+
+        private static void AppendInspectorNotesRenderKeyValue(StringBuilder builder, string value)
+        {
+            builder.Append(value?.Length ?? -1);
+            builder.Append(':');
+            builder.Append(value);
+            builder.Append('|');
         }
 
         private IEnumerable<InspectorNoteGroupItem> BuildInspectorNoteGroups(WorkspaceProject project, WorkspaceThread thread, NotesListScope scope)

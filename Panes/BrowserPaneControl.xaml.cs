@@ -29,6 +29,10 @@ namespace SelfContainedDeployment.Panes
     public sealed partial class BrowserPaneControl : UserControl
     {
         private const string IsolatedBrowserProfileFolderName = "browser-profile-isolated";
+        private const string LegacyStartPageUri = "winmux://start";
+        private const string InternalStartPageHost = "winmux.browser";
+        private const string InternalStartPagePath = "/start";
+        private const string InternalStartPageUri = "https://winmux.browser/start";
         private const double CompactPaneWidthThreshold = 560;
         private const double CompactPaneHeightThreshold = 320;
         private const double CompactBrowserZoomFloor = 0.72;
@@ -89,6 +93,7 @@ namespace SelfContainedDeployment.Panes
         private int _lastResizeNotificationWidth;
         private int _lastResizeNotificationHeight;
         private double _lastAppliedZoomFactor = double.NaN;
+        private string _lastStartPageThemeName;
         private readonly UISettings _uiSettings = new();
         private int _resizeMaskSequence;
         private bool _liveResizeMode;
@@ -176,7 +181,7 @@ namespace SelfContainedDeployment.Panes
 
         public string InitialUri { get; set; }
 
-        public string CurrentUri => _currentUri;
+        public string CurrentUri => IsStartPageUri(_currentUri) ? LegacyStartPageUri : _currentUri;
 
         public string CurrentTitle => _currentTitle;
 
@@ -193,7 +198,7 @@ namespace SelfContainedDeployment.Panes
             {
                 Id = tab.Id,
                 Title = tab.Title,
-                Uri = tab.Uri,
+                Uri = IsStartPageUri(tab.Uri) ? LegacyStartPageUri : tab.Uri,
             })
             .ToList();
 
@@ -210,6 +215,47 @@ namespace SelfContainedDeployment.Panes
             .Select(item => item.Name)
             .ToList();
 
+        public void UpdateWorkspaceContext(string projectId, string projectName, string projectPath, string projectRootPath, string initialUri = null)
+        {
+            ProjectId = projectId;
+            ProjectName = projectName;
+            ProjectPath = projectPath;
+            ProjectRootPath = projectRootPath;
+
+            string normalizedInitialUri = string.IsNullOrWhiteSpace(initialUri) ? null : NormalizeUri(initialUri);
+            _browserTabs.Clear();
+            _selectedBrowserTabId = null;
+            _currentUri = null;
+            _currentTitle = "Preview";
+            _lastStateChangeSignature = null;
+            _lastBrowserTabStripStructureSignature = null;
+            _lastAppliedZoomFactor = double.NaN;
+            AddressBox.Text = string.Empty;
+            EnsureBrowserTabExists(normalizedInitialUri);
+            BrowserTabSession selectedTab = GetSelectedBrowserTab();
+            _currentUri = selectedTab.Uri;
+            _currentTitle = selectedTab.Title;
+            AddressBox.Text = IsStartPageUri(_currentUri) ? string.Empty : _currentUri;
+            RefreshBrowserTabStrip();
+            UpdateNavigationButtons();
+            UpdateCredentialAutofillStatus();
+            RaiseStateChangedIfNeeded();
+
+            if (!_initialized || BrowserView.CoreWebView2 is null)
+            {
+                InitialUri = normalizedInitialUri;
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(normalizedInitialUri))
+            {
+                Navigate(normalizedInitialUri);
+                return;
+            }
+
+            _ = NavigateToStartPageAsync();
+        }
+
         private void LogBrowserEvent(string name, string message = null, IReadOnlyDictionary<string, string> data = null)
         {
             NativeAutomationEventLog.Record("browser", name, message, data ?? new Dictionary<string, string>
@@ -223,12 +269,17 @@ namespace SelfContainedDeployment.Panes
 
         public void ApplyTheme(ElementTheme theme)
         {
+            ApplyTheme(theme, allowStartPageRefresh: true);
+        }
+
+        private void ApplyTheme(ElementTheme theme, bool allowStartPageRefresh)
+        {
             _themePreference = theme;
             RequestedTheme = theme;
             ApplyBrowserSurfaceTheme();
             ApplyBrowserPreferredColorScheme();
 
-            if (_initialized && string.Equals(_currentUri, "winmux://start", StringComparison.OrdinalIgnoreCase))
+            if (allowStartPageRefresh && _initialized && IsStartPageUri(_currentUri))
             {
                 _ = RefreshStartPageForThemeChangeAsync();
             }
@@ -242,15 +293,23 @@ namespace SelfContainedDeployment.Panes
             int maskSequence = ShowResizeMask();
             try
             {
+                string themeName = ResolveCurrentThemeName();
+                if (string.Equals(_lastStartPageThemeName, themeName, StringComparison.Ordinal))
+                {
+                    return;
+                }
+
                 if (_initialized && BrowserView.CoreWebView2 is not null)
                 {
-                    string themeName = ResolveCurrentThemeName();
                     string script = $"(() => {{ if (window.__winmuxStartPage?.setTheme) {{ window.__winmuxStartPage.setTheme('{themeName}'); return true; }} return false; }})()";
                     string result = await BrowserView.CoreWebView2.ExecuteScriptAsync(script).AsTask().ConfigureAwait(true);
                     if (!string.Equals(result, "true", StringComparison.OrdinalIgnoreCase))
                     {
                         await NavigateToStartPageAsync().ConfigureAwait(true);
+                        return;
                     }
+
+                    _lastStartPageThemeName = themeName;
                 }
                 else
                 {
@@ -380,6 +439,7 @@ namespace SelfContainedDeployment.Panes
                 BrowserView.CoreWebView2.SourceChanged -= OnSourceChanged;
                 BrowserView.CoreWebView2.ContextMenuRequested -= OnContextMenuRequested;
                 BrowserView.CoreWebView2.NewWindowRequested -= OnNewWindowRequested;
+                BrowserView.CoreWebView2.WebResourceRequested -= OnWebResourceRequested;
             }
 
             _browserTabs.Clear();
@@ -391,6 +451,7 @@ namespace SelfContainedDeployment.Panes
             _currentUri = null;
             _currentTitle = "Preview";
             _selectedBrowserTabId = null;
+            _lastStartPageThemeName = null;
             _lastStateChangeSignature = null;
             _lastBrowserTabStripStructureSignature = null;
             _initializationTask = null;
@@ -450,7 +511,7 @@ namespace SelfContainedDeployment.Panes
                 {
                     Id = string.IsNullOrWhiteSpace(tab.Id) ? Guid.NewGuid().ToString("N") : tab.Id,
                     Title = string.IsNullOrWhiteSpace(tab.Title) ? "New tab" : tab.Title.Trim(),
-                    Uri = string.IsNullOrWhiteSpace(tab.Uri) ? "winmux://start" : tab.Uri.Trim(),
+                    Uri = NormalizeStoredTabUri(tab.Uri),
                 });
             }
 
@@ -535,6 +596,7 @@ namespace SelfContainedDeployment.Panes
         {
             using var perfScope = NativeAutomationDiagnostics.TrackOperation("browser.webview.init");
             NativeAutomationDiagnostics.IncrementCounter("browserWebViewInit.count");
+            CoreWebView2 core;
             try
             {
                 CoreWebView2Environment environment;
@@ -549,7 +611,7 @@ namespace SelfContainedDeployment.Panes
 
                 using (NativeAutomationDiagnostics.TrackOperation("browser.core.ensure"))
                 {
-                    await BrowserView.EnsureCoreWebView2Async(environment);
+                    core = await EnsureBrowserCoreAsync(environment).ConfigureAwait(true);
                 }
                 if (_disposed)
                 {
@@ -565,7 +627,7 @@ namespace SelfContainedDeployment.Panes
                     ["error"] = ex.Message,
                 });
 
-                await BrowserView.EnsureCoreWebView2Async();
+                core = await EnsureBrowserCoreAsync().ConfigureAwait(true);
                 if (_disposed)
                 {
                     return;
@@ -575,7 +637,6 @@ namespace SelfContainedDeployment.Panes
                 LogBrowserEvent("webview.ready", "Browser WebView2 initialized with default profile");
             }
 
-            CoreWebView2 core = await WaitForCoreWebView2Async().ConfigureAwait(true);
             if (_disposed)
             {
                 return;
@@ -631,6 +692,8 @@ namespace SelfContainedDeployment.Panes
                 core.SourceChanged += OnSourceChanged;
                 core.ContextMenuRequested += OnContextMenuRequested;
                 core.NewWindowRequested += OnNewWindowRequested;
+                core.AddWebResourceRequestedFilter($"{InternalStartPageUri}*", CoreWebView2WebResourceContext.Document);
+                core.WebResourceRequested += OnWebResourceRequested;
                 BrowserView.GotFocus += OnInteractionRequested;
                 _initialized = true;
                 LogBrowserEvent("webview.configure", "Attached browser event handlers", new Dictionary<string, string>
@@ -638,7 +701,7 @@ namespace SelfContainedDeployment.Panes
                     ["step"] = "events.attached",
                 });
 
-                ApplyTheme(_themePreference == ElementTheme.Default ? ActualTheme : _themePreference);
+                ApplyTheme(_themePreference == ElementTheme.Default ? ActualTheme : _themePreference, allowStartPageRefresh: false);
                 LogBrowserEvent("webview.configure", "Applied browser theme", new Dictionary<string, string>
                 {
                     ["step"] = "theme.applied",
@@ -655,7 +718,7 @@ namespace SelfContainedDeployment.Panes
 
                 if (!string.IsNullOrWhiteSpace(selectedTab?.Uri) &&
                     !string.Equals(selectedTab.Uri, "about:blank", StringComparison.OrdinalIgnoreCase) &&
-                    !string.Equals(selectedTab.Uri, "winmux://start", StringComparison.OrdinalIgnoreCase))
+                    !IsStartPageUri(selectedTab.Uri))
                 {
                     string selectedUri = NormalizeUri(selectedTab.Uri);
                     AddressBox.Text = selectedUri;
@@ -670,7 +733,7 @@ namespace SelfContainedDeployment.Panes
                 }
                 else if (!string.IsNullOrWhiteSpace(_currentUri) &&
                     !string.Equals(_currentUri, "about:blank", StringComparison.OrdinalIgnoreCase) &&
-                    !string.Equals(_currentUri, "winmux://start", StringComparison.OrdinalIgnoreCase))
+                    !IsStartPageUri(_currentUri))
                 {
                     LogBrowserEvent("webview.configure", $"Preserving in-flight browser navigation to {_currentUri}", new Dictionary<string, string>
                     {
@@ -679,7 +742,8 @@ namespace SelfContainedDeployment.Panes
                     });
                 }
                 else if (!string.IsNullOrWhiteSpace(AddressBox.Text) &&
-                    !string.Equals(AddressBox.Text, "about:blank", StringComparison.OrdinalIgnoreCase))
+                    !string.Equals(AddressBox.Text, "about:blank", StringComparison.OrdinalIgnoreCase) &&
+                    !IsStartPageUri(AddressBox.Text))
                 {
                     string pendingUri = NormalizeUri(AddressBox.Text);
                     SyncSelectedBrowserTab(uri: pendingUri);
@@ -725,19 +789,54 @@ namespace SelfContainedDeployment.Panes
             }
         }
 
-        private async Task<CoreWebView2> WaitForCoreWebView2Async()
+        private async Task<CoreWebView2> EnsureBrowserCoreAsync(CoreWebView2Environment environment = null)
         {
-            for (int attempt = 0; attempt < 20; attempt++)
+            if (BrowserView.CoreWebView2 is not null)
             {
+                return BrowserView.CoreWebView2;
+            }
+
+            TaskCompletionSource<CoreWebView2> initialized = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            void OnCoreWebView2Initialized(WebView2 sender, CoreWebView2InitializedEventArgs args)
+            {
+                if (args.Exception is not null)
+                {
+                    initialized.TrySetException(args.Exception);
+                    return;
+                }
+
+                if (sender?.CoreWebView2 is not null)
+                {
+                    initialized.TrySetResult(sender.CoreWebView2);
+                }
+            }
+
+            BrowserView.CoreWebView2Initialized += OnCoreWebView2Initialized;
+            try
+            {
+                if (environment is null)
+                {
+                    await BrowserView.EnsureCoreWebView2Async().AsTask().ConfigureAwait(true);
+                }
+                else
+                {
+                    await BrowserView.EnsureCoreWebView2Async(environment).AsTask().ConfigureAwait(true);
+                }
+
                 if (BrowserView.CoreWebView2 is not null)
                 {
                     return BrowserView.CoreWebView2;
                 }
 
-                await Task.Delay(50).ConfigureAwait(true);
+                using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(3));
+                using CancellationTokenRegistration registration = timeout.Token.Register(() =>
+                    initialized.TrySetException(new TimeoutException("Browser CoreWebView2 was null after initialization.")));
+                return await initialized.Task.ConfigureAwait(true);
             }
-
-            throw new InvalidOperationException("Browser CoreWebView2 was null after initialization.");
+            finally
+            {
+                BrowserView.CoreWebView2Initialized -= OnCoreWebView2Initialized;
+            }
         }
 
         private void EnsureBrowserTabExists(string initialUri = null)
@@ -745,12 +844,12 @@ namespace SelfContainedDeployment.Panes
             if (_browserTabs.Count == 0)
             {
                 string normalizedUri = string.IsNullOrWhiteSpace(initialUri)
-                    ? "winmux://start"
-                    : initialUri.Trim();
+                    ? InternalStartPageUri
+                    : NormalizeUri(initialUri);
                 BrowserTabSession tab = new()
                 {
                     Id = Guid.NewGuid().ToString("N"),
-                    Title = string.Equals(normalizedUri, "winmux://start", StringComparison.OrdinalIgnoreCase) ? "Start" : "New tab",
+                    Title = IsStartPageUri(normalizedUri) ? "Start" : "New tab",
                     Uri = normalizedUri,
                 };
                 _browserTabs.Add(tab);
@@ -779,7 +878,7 @@ namespace SelfContainedDeployment.Panes
             bool uriChanged = false;
             if (!string.IsNullOrWhiteSpace(uri))
             {
-                string normalizedUri = uri.Trim();
+                string normalizedUri = NormalizeUri(uri);
                 uriChanged = !string.Equals(tab.Uri, normalizedUri, StringComparison.Ordinal);
                 tab.Uri = normalizedUri;
                 _currentUri = tab.Uri;
@@ -815,8 +914,8 @@ namespace SelfContainedDeployment.Panes
 
             _selectedBrowserTabId = nextTab.Id;
             _currentTitle = string.IsNullOrWhiteSpace(nextTab.Title) ? "Preview" : nextTab.Title;
-            _currentUri = string.IsNullOrWhiteSpace(nextTab.Uri) ? "winmux://start" : nextTab.Uri;
-            AddressBox.Text = string.Equals(_currentUri, "winmux://start", StringComparison.OrdinalIgnoreCase) ? string.Empty : _currentUri;
+            _currentUri = string.IsNullOrWhiteSpace(nextTab.Uri) ? InternalStartPageUri : NormalizeUri(nextTab.Uri);
+            AddressBox.Text = IsStartPageUri(_currentUri) ? string.Empty : _currentUri;
             _lastStateChangeSignature = null;
             UpdateBrowserTabSelectionVisuals();
             UpdateNavigationButtons();
@@ -828,7 +927,7 @@ namespace SelfContainedDeployment.Panes
                 return;
             }
 
-            if (string.Equals(_currentUri, "winmux://start", StringComparison.OrdinalIgnoreCase))
+            if (IsStartPageUri(_currentUri))
             {
                 _lastAppliedZoomFactor = double.NaN;
                 await NavigateToStartPageAsync().ConfigureAwait(true);
@@ -843,14 +942,14 @@ namespace SelfContainedDeployment.Panes
         private async Task AddBrowserTabAsync(string initialUri = null, string title = null, string tabId = null)
         {
             string normalizedUri = string.IsNullOrWhiteSpace(initialUri)
-                ? "winmux://start"
+                ? InternalStartPageUri
                 : NormalizeUri(initialUri);
 
             BrowserTabSession tab = new()
             {
                 Id = string.IsNullOrWhiteSpace(tabId) ? Guid.NewGuid().ToString("N") : tabId,
                 Title = string.IsNullOrWhiteSpace(title)
-                    ? (string.Equals(normalizedUri, "winmux://start", StringComparison.OrdinalIgnoreCase) ? "Start" : "New tab")
+                    ? (IsStartPageUri(normalizedUri) ? "Start" : "New tab")
                     : title.Trim(),
                 Uri = normalizedUri,
             };
@@ -864,7 +963,7 @@ namespace SelfContainedDeployment.Panes
             if (_browserTabs.Count <= 1)
             {
                 BrowserTabSession onlyTab = GetSelectedBrowserTab();
-                onlyTab.Uri = "winmux://start";
+                onlyTab.Uri = InternalStartPageUri;
                 onlyTab.Title = "Start";
                 await SelectBrowserTabAsync(onlyTab.Id).ConfigureAwait(true);
                 return;
@@ -1200,7 +1299,7 @@ namespace SelfContainedDeployment.Panes
                 return "ShellTextTertiaryBrush";
             }
 
-            if (string.Equals(uri, "winmux://start", StringComparison.OrdinalIgnoreCase))
+            if (IsStartPageUri(uri))
             {
                 return "ShellWarningBrush";
             }
@@ -1416,7 +1515,7 @@ namespace SelfContainedDeployment.Panes
             ApplyBrowserSurfaceTheme();
             ApplyBrowserPreferredColorScheme();
 
-            if (_themePreference == ElementTheme.Default && string.Equals(_currentUri, "winmux://start", StringComparison.OrdinalIgnoreCase))
+            if (_themePreference == ElementTheme.Default && IsStartPageUri(_currentUri))
             {
                 _ = RefreshStartPageForThemeChangeAsync();
             }
@@ -1465,15 +1564,16 @@ namespace SelfContainedDeployment.Panes
         {
             RaiseInteractionRequested();
             EnsureBrowserTabExists();
-            _currentUri = "winmux://start";
+            _currentUri = InternalStartPageUri;
             _currentTitle = "Start";
+            _lastStartPageThemeName = ResolveCurrentThemeName();
             AddressBox.Text = string.Empty;
             SyncSelectedBrowserTab(uri: _currentUri, title: _currentTitle);
             UpdateCredentialAutofillStatus();
             if (_initialized && BrowserView.CoreWebView2 is not null)
             {
                 _lastAppliedZoomFactor = double.NaN;
-                TryNavigateToMarkup(BrowserView.CoreWebView2, BuildStartPageHtml(), "start-page", _currentUri);
+                TryNavigateCore(BrowserView.CoreWebView2, InternalStartPageUri, "start-page", _selectedBrowserTabId);
             }
 
             UpdateNavigationButtons();
@@ -1549,7 +1649,7 @@ namespace SelfContainedDeployment.Panes
             }
 
             RaiseInteractionRequested();
-            if (string.Equals(_currentUri, "winmux://start", StringComparison.OrdinalIgnoreCase))
+            if (IsStartPageUri(_currentUri))
             {
                 _ = NavigateToStartPageAsync();
                 return;
@@ -1560,7 +1660,7 @@ namespace SelfContainedDeployment.Panes
 
         private void OnOpenCurrentPageInPaneClicked(object sender, RoutedEventArgs e)
         {
-            if (!string.IsNullOrWhiteSpace(_currentUri) && !string.Equals(_currentUri, "winmux://start", StringComparison.OrdinalIgnoreCase))
+            if (!string.IsNullOrWhiteSpace(_currentUri) && !IsStartPageUri(_currentUri))
             {
                 OpenPaneRequested?.Invoke(this, _currentUri);
                 return;
@@ -1603,7 +1703,7 @@ namespace SelfContainedDeployment.Panes
             MenuFlyoutItem duplicateCurrentPageItem = new()
             {
                 Text = "Open this page in another pane",
-                IsEnabled = !string.IsNullOrWhiteSpace(_currentUri) && !string.Equals(_currentUri, "winmux://start", StringComparison.OrdinalIgnoreCase),
+                IsEnabled = !string.IsNullOrWhiteSpace(_currentUri) && !IsStartPageUri(_currentUri),
             };
             duplicateCurrentPageItem.Click += (_, _) => OpenPaneRequested?.Invoke(this, _currentUri);
             flyout.Items.Add(duplicateCurrentPageItem);
@@ -1635,7 +1735,7 @@ namespace SelfContainedDeployment.Panes
                 Text = "Autofill this page",
                 IsEnabled = BrowserCredentialStore.GetCredentialCount() > 0
                     && !string.IsNullOrWhiteSpace(_currentUri)
-                    && !string.Equals(_currentUri, "winmux://start", StringComparison.OrdinalIgnoreCase),
+                    && !IsStartPageUri(_currentUri),
             };
             autofillItem.Click += async (_, _) => await ManualAutofillCurrentPageAsync().ConfigureAwait(true);
             flyout.Items.Add(autofillItem);
@@ -1766,7 +1866,7 @@ namespace SelfContainedDeployment.Panes
         public async Task<string> ExecuteBrowserScriptAsync(string script)
         {
             await EnsureInitializedAsync().ConfigureAwait(true);
-            CoreWebView2 core = await WaitForCoreWebView2Async().ConfigureAwait(true);
+            CoreWebView2 core = BrowserView.CoreWebView2 ?? await EnsureBrowserCoreAsync().ConfigureAwait(true);
             string effectiveScript = string.IsNullOrWhiteSpace(script) ? "document.title" : script;
             return await core.ExecuteScriptAsync(effectiveScript).AsTask().ConfigureAwait(true);
         }
@@ -1786,7 +1886,7 @@ namespace SelfContainedDeployment.Panes
         public async Task<(string Path, int Width, int Height)> CaptureBrowserPreviewAsync(string outputPath)
         {
             await EnsureInitializedAsync().ConfigureAwait(true);
-            CoreWebView2 core = await WaitForCoreWebView2Async().ConfigureAwait(true);
+            CoreWebView2 core = BrowserView.CoreWebView2 ?? await EnsureBrowserCoreAsync().ConfigureAwait(true);
 
             string finalPath = string.IsNullOrWhiteSpace(outputPath)
                 ? Path.Combine(Path.GetTempPath(), $"winmux-browser-{Environment.ProcessId}-{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}.png")
@@ -1807,7 +1907,7 @@ namespace SelfContainedDeployment.Panes
 
         private void OnNavigationCompleted(CoreWebView2 sender, CoreWebView2NavigationCompletedEventArgs args)
         {
-            if (!args.IsSuccess && !string.Equals(_currentUri, "winmux://start", StringComparison.OrdinalIgnoreCase))
+            if (!args.IsSuccess && !IsStartPageUri(_currentUri))
             {
                 UpdateCredentialAutofillStatus();
                 TryNavigateToMarkup(sender, BuildErrorPageHtml(args.WebErrorStatus.ToString(), _currentUri), "navigate.error-page", _currentUri);
@@ -1820,7 +1920,7 @@ namespace SelfContainedDeployment.Panes
                 return;
             }
 
-            if (!string.Equals(_currentUri, "winmux://start", StringComparison.OrdinalIgnoreCase))
+            if (!IsStartPageUri(_currentUri))
             {
                 AddressBox.Text = BrowserView.Source?.ToString() ?? _currentUri ?? string.Empty;
             }
@@ -1921,7 +2021,7 @@ namespace SelfContainedDeployment.Panes
             string title = sender.DocumentTitle;
             if (string.IsNullOrWhiteSpace(title))
             {
-                title = string.Equals(_currentUri, "winmux://start", StringComparison.OrdinalIgnoreCase)
+                title = IsStartPageUri(_currentUri)
                     ? "Preview"
                     : ProjectName ?? "Preview";
             }
@@ -1945,10 +2045,22 @@ namespace SelfContainedDeployment.Panes
                 return;
             }
 
-            _currentUri = sender.Source;
-            if (!string.Equals(_currentUri, "about:blank", StringComparison.OrdinalIgnoreCase))
+            _currentUri = IsInternalStartPageSource(sender.Source)
+                ? InternalStartPageUri
+                : sender.Source;
+            if (IsStartPageUri(_currentUri))
+            {
+                AddressBox.Text = string.Empty;
+                _lastStartPageThemeName = ResolveCurrentThemeName();
+            }
+            else if (!string.Equals(_currentUri, "about:blank", StringComparison.OrdinalIgnoreCase))
             {
                 AddressBox.Text = _currentUri;
+                _lastStartPageThemeName = null;
+            }
+            else
+            {
+                _lastStartPageThemeName = null;
             }
 
             _lastAppliedZoomFactor = double.NaN;
@@ -1956,6 +2068,24 @@ namespace SelfContainedDeployment.Panes
             UpdateNavigationButtons();
             LogBrowserEvent("source.changed", $"Browser source changed to {_currentUri}");
             RaiseStateChangedIfNeeded();
+        }
+
+        private void OnWebResourceRequested(CoreWebView2 sender, CoreWebView2WebResourceRequestedEventArgs args)
+        {
+            if (sender?.Environment is null ||
+                args?.Request is null ||
+                !IsInternalStartPageSource(args.Request.Uri))
+            {
+                return;
+            }
+
+            byte[] htmlBytes = Encoding.UTF8.GetBytes(BuildStartPageHtml());
+            MemoryStream stream = new(htmlBytes, writable: false);
+            args.Response = sender.Environment.CreateWebResourceResponse(
+                stream.AsRandomAccessStream(),
+                200,
+                "OK",
+                "Content-Type: text/html; charset=utf-8\r\nCache-Control: no-store");
         }
 
         private string BuildBrowserTabStripStructureSignature(double targetTitleWidth, bool compact, bool showInlineCloseButtons)
@@ -2092,7 +2222,7 @@ namespace SelfContainedDeployment.Panes
             }
 
             if (string.IsNullOrWhiteSpace(_currentUri) ||
-                string.Equals(_currentUri, "winmux://start", StringComparison.OrdinalIgnoreCase) ||
+                IsStartPageUri(_currentUri) ||
                 string.Equals(_currentUri, "about:blank", StringComparison.OrdinalIgnoreCase))
             {
                 return;
@@ -3015,7 +3145,7 @@ namespace SelfContainedDeployment.Panes
 
             if (trimmed.Contains("://", StringComparison.Ordinal))
             {
-                return trimmed;
+                return IsStartPageUri(trimmed) ? InternalStartPageUri : trimmed;
             }
 
             if (trimmed.StartsWith("localhost", StringComparison.OrdinalIgnoreCase) ||
@@ -3025,6 +3155,31 @@ namespace SelfContainedDeployment.Panes
             }
 
             return $"https://{trimmed}";
+        }
+
+        private static string NormalizeStoredTabUri(string value)
+        {
+            string trimmed = value?.Trim() ?? string.Empty;
+            return string.IsNullOrWhiteSpace(trimmed) ? InternalStartPageUri : NormalizeUri(trimmed);
+        }
+
+        private static bool IsStartPageUri(string uri)
+        {
+            if (string.IsNullOrWhiteSpace(uri))
+            {
+                return false;
+            }
+
+            return string.Equals(uri, LegacyStartPageUri, StringComparison.OrdinalIgnoreCase) ||
+                IsInternalStartPageSource(uri);
+        }
+
+        private static bool IsInternalStartPageSource(string uri)
+        {
+            return Uri.TryCreate(uri, UriKind.Absolute, out Uri absoluteUri) &&
+                string.Equals(absoluteUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(absoluteUri.Host, InternalStartPageHost, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(absoluteUri.AbsolutePath, InternalStartPagePath, StringComparison.Ordinal);
         }
     }
 }

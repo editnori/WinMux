@@ -16,49 +16,15 @@ namespace SelfContainedDeployment
 {
     public partial class MainPage
     {
-        private sealed class InspectorDirectoryDecoration
-        {
-            public GitChangedFile File { get; init; }
+        private FrameworkElement InspectorFilesContent => InspectorFilesView;
 
-            public bool HasChangedDescendant { get; init; }
-        }
+        private TextBlock InspectorDirectoryRootText => InspectorFilesView?.DirectoryRootText;
 
-        private sealed class InspectorDirectoryNodeModel
-        {
-            public string Name { get; init; }
+        private TextBlock InspectorDirectoryMetaText => InspectorFilesView?.DirectoryMetaText;
 
-            public string RelativePath { get; init; }
+        private TreeView InspectorDirectoryTree => InspectorFilesView?.DirectoryTree;
 
-            public bool IsDirectory { get; init; }
-
-            public InspectorDirectoryDecoration Decoration { get; init; }
-
-            public Dictionary<string, InspectorDirectoryNodeModel> Children { get; } = new(StringComparer.OrdinalIgnoreCase);
-        }
-
-        private sealed class InspectorDirectoryBuildResult
-        {
-            public string RootPath { get; init; }
-
-            public string RenderKey { get; init; }
-
-            public int FileCount { get; init; }
-
-            public List<InspectorDirectoryNodeModel> RootNodes { get; init; } = new();
-        }
-
-        private sealed class InspectorDirectoryUiCache
-        {
-            public string RootPath { get; init; }
-
-            public string RenderKey { get; init; }
-
-            public int FileCount { get; init; }
-
-            public List<InspectorDirectoryNodeModel> RootNodes { get; init; } = new();
-
-            public Dictionary<string, InspectorDirectoryNodeModel> ModelsByPath { get; init; } = new(StringComparer.OrdinalIgnoreCase);
-        }
+        private TextBlock InspectorDirectoryEmptyText => InspectorFilesView?.DirectoryEmptyText;
 
         private void OnInspectorCollapseAllClicked(object sender, RoutedEventArgs e)
         {
@@ -81,6 +47,16 @@ namespace SelfContainedDeployment
             MaterializeInspectorDirectoryChildren(args?.Node);
         }
 
+        private async void OnInspectorDirectoryItemInvoked(object sender, EventArgs e)
+        {
+            if (ResolveSelectedInspectorDirectoryItem() is not InspectorDirectoryTreeItem item || item.IsDirectory)
+            {
+                return;
+            }
+
+            await OpenEditorFileFromInspectorAsync(item.RelativePath).ConfigureAwait(true);
+        }
+
         private async void OnInspectorSaveFileClicked(object sender, RoutedEventArgs e)
         {
             EditorPaneRecord editorPane = ResolveInspectorEditorPane(createIfNeeded: false);
@@ -91,32 +67,6 @@ namespace SelfContainedDeployment
 
             await editorPane.Editor.SaveCurrentFilePublicAsync().ConfigureAwait(true);
             RefreshInspectorFileBrowser();
-        }
-
-        private async void OnInspectorDirectoryTreeDoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
-        {
-            if (ResolveSelectedInspectorDirectoryItem() is not InspectorDirectoryTreeItem item || item.IsDirectory)
-            {
-                return;
-            }
-
-            await OpenEditorFileFromInspectorAsync(item.RelativePath).ConfigureAwait(true);
-        }
-
-        private async void OnInspectorDirectoryTreeKeyDown(object sender, KeyRoutedEventArgs e)
-        {
-            if (e.Key != Windows.System.VirtualKey.Enter)
-            {
-                return;
-            }
-
-            if (ResolveSelectedInspectorDirectoryItem() is not InspectorDirectoryTreeItem item || item.IsDirectory)
-            {
-                return;
-            }
-
-            e.Handled = true;
-            await OpenEditorFileFromInspectorAsync(item.RelativePath).ConfigureAwait(true);
         }
 
         private void RefreshInspectorFileBrowserStatus()
@@ -157,15 +107,10 @@ namespace SelfContainedDeployment
             if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
             {
                 _lastInspectorDirectoryRootPath = null;
-                _inspectorDirectoryNodesByPath.Clear();
-                _inspectorDirectoryItemsByNode.Clear();
-                _inspectorDirectoryModelsByNode.Clear();
-                _inspectorDirectoryDepthByNode.Clear();
-                _inspectorDirectoryModelsByPath.Clear();
-                InspectorDirectoryTree.RootNodes.Clear();
+                ClearInspectorDirectoryUiState(emptyStateVisibility: Visibility.Visible);
+                InspectorDirectoryTree.Tag = null;
                 InspectorDirectoryRootText.Text = "No active project";
                 InspectorDirectoryMetaText.Text = "Open an editor pane to browse files.";
-                InspectorDirectoryEmptyText.Visibility = Visibility.Visible;
                 UpdateInspectorFileActionState();
                 return;
             }
@@ -180,7 +125,6 @@ namespace SelfContainedDeployment
             ToolTipService.SetToolTip(InspectorDirectoryRootText, ShellProfiles.ResolveDisplayPath(rootPath, _activeProject?.ShellProfileId ?? SampleConfig.DefaultShellProfileId));
             bool shouldRebuild = forceRebuild ||
                 !string.Equals(_lastInspectorDirectoryRootPath, rootPath, StringComparison.OrdinalIgnoreCase);
-            bool rootChanged = !string.Equals(_lastInspectorDirectoryRootPath, rootPath, StringComparison.OrdinalIgnoreCase);
             GitThreadSnapshot displayedSnapshot = ResolveDisplayedGitSnapshot();
             IReadOnlyList<GitChangedFile> liveFiles = displayedSnapshot?.ChangedFiles is { } changedFiles
                 ? changedFiles
@@ -203,12 +147,10 @@ namespace SelfContainedDeployment
                     shouldRebuild = false;
                 }
                 else if (!forceRebuild &&
-                    rootChanged &&
-                    (_activeGitSnapshot is null || liveFiles.Count == 0) &&
-                    TryGetInspectorDirectoryUiForRoot(rootPath, out InspectorDirectoryUiCache cachedRootUi) &&
-                    cachedRootUi.FileCount > 0)
+                    TryBuildInspectorDirectoryUiFromRootCache(rootPath, renderKey, liveFiles, out InspectorDirectoryUiCache decoratedUi))
                 {
-                    ApplyInspectorDirectoryUiCache(cachedRootUi);
+                    CacheInspectorDirectoryUi(decoratedUi);
+                    ApplyInspectorDirectoryUiCache(decoratedUi);
                     shouldRebuild = false;
                 }
             }
@@ -242,6 +184,69 @@ namespace SelfContainedDeployment
             _inspectorDirectoryBuildCancellation = null;
         }
 
+        private void QueueInspectorDirectoryWarmup(
+            string rootPath = null,
+            IReadOnlyList<GitChangedFile> changedFiles = null,
+            string correlationId = null)
+        {
+            if (_lifetimeResourcesReleased ||
+                _showingSettings ||
+                _activeThread is null ||
+                (_inspectorOpen && _activeInspectorSection == InspectorSection.Files))
+            {
+                return;
+            }
+
+            rootPath ??= ResolveThreadRootPath(_activeProject, _activeThread);
+            if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
+            {
+                return;
+            }
+
+            changedFiles ??= Array.Empty<GitChangedFile>();
+            string renderKey = BuildInspectorDirectoryRenderKey(changedFiles);
+            string cacheKey = BuildInspectorDirectoryCacheKey(rootPath, renderKey);
+            if ((_inspectorDirectoryUiCacheByKey.TryGetValue(cacheKey, out InspectorDirectoryUiCache exactCache) && exactCache.FileCount > 0) ||
+                (string.Equals(_pendingInspectorDirectoryRootPath, rootPath, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(_pendingInspectorDirectoryRenderKey, renderKey, StringComparison.Ordinal)) ||
+                (string.Equals(_pendingInspectorDirectoryWarmupRootPath, rootPath, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(_pendingInspectorDirectoryWarmupRenderKey, renderKey, StringComparison.Ordinal)))
+            {
+                return;
+            }
+
+            int requestId = ++_latestInspectorDirectoryWarmupRequestId;
+            _pendingInspectorDirectoryWarmupRootPath = rootPath;
+            _pendingInspectorDirectoryWarmupRenderKey = renderKey;
+            GitChangedFile[] snapshotFiles = changedFiles.Count == 0 ? Array.Empty<GitChangedFile>() : changedFiles.ToArray();
+            _ = System.Threading.Tasks.Task.Run(
+                () => BuildInspectorDirectoryTree(rootPath, snapshotFiles, renderKey, bypassCache: false, correlationId, default))
+                .ContinueWith(task =>
+                {
+                    DispatcherQueue.TryEnqueue(() =>
+                    {
+                        if (requestId != _latestInspectorDirectoryWarmupRequestId)
+                        {
+                            return;
+                        }
+
+                        _pendingInspectorDirectoryWarmupRootPath = null;
+                        _pendingInspectorDirectoryWarmupRenderKey = null;
+                        if (task.IsCanceled || task.IsFaulted || task.Result is null)
+                        {
+                            return;
+                        }
+
+                        NativeAutomationDiagnostics.IncrementCounter("inspectorDirectory.warmup.count");
+                        CacheInspectorDirectoryUi(CreateInspectorDirectoryUiCache(
+                            task.Result.RootPath,
+                            task.Result.RenderKey,
+                            task.Result.FileCount,
+                            task.Result.RootNodes));
+                    });
+                }, System.Threading.Tasks.TaskScheduler.Default);
+        }
+
         private void QueueInspectorDirectoryBuild(
             string rootPath,
             IReadOnlyList<GitChangedFile> changedFiles,
@@ -272,14 +277,7 @@ namespace SelfContainedDeployment
             bool rootChanged = !string.Equals(_lastInspectorDirectoryRootPath, rootPath, StringComparison.OrdinalIgnoreCase);
             if (rootChanged)
             {
-                _inspectorDirectoryNodesByPath.Clear();
-                _inspectorDirectoryItemsByNode.Clear();
-                _inspectorDirectoryModelsByNode.Clear();
-                _inspectorDirectoryDepthByNode.Clear();
-                _inspectorDirectoryModelsByPath.Clear();
-                InspectorDirectoryTree.SelectedNode = null;
-                InspectorDirectoryTree.RootNodes.Clear();
-                InspectorDirectoryEmptyText.Visibility = Visibility.Collapsed;
+                ClearInspectorDirectoryUiState(emptyStateVisibility: Visibility.Collapsed);
             }
 
             _ = System.Threading.Tasks.Task.Run(
@@ -392,6 +390,32 @@ namespace SelfContainedDeployment
                 uiCache is not null;
         }
 
+        private bool TryBuildInspectorDirectoryUiFromRootCache(
+            string rootPath,
+            string renderKey,
+            IReadOnlyList<GitChangedFile> changedFiles,
+            out InspectorDirectoryUiCache uiCache)
+        {
+            uiCache = null;
+            if (!TryGetInspectorDirectoryUiForRoot(rootPath, out InspectorDirectoryUiCache cachedRootUi) ||
+                cachedRootUi.FileCount <= 0)
+            {
+                return false;
+            }
+
+            NativeAutomationDiagnostics.IncrementCounter("inspectorDirectory.decorateReuse.count");
+            Dictionary<string, InspectorDirectoryDecoration> decorationsByPath = BuildInspectorDirectoryDecorations(changedFiles);
+            List<InspectorDirectoryNodeModel> rootNodes = cachedRootUi.RootNodes
+                .Select(node => CloneInspectorDirectoryNodeWithDecorations(node, decorationsByPath))
+                .ToList();
+            uiCache = CreateInspectorDirectoryUiCache(
+                cachedRootUi.RootPath,
+                renderKey,
+                cachedRootUi.FileCount,
+                rootNodes);
+            return true;
+        }
+
         private void ApplyInspectorDirectoryBuildResult(InspectorDirectoryBuildResult result, string correlationId = null)
         {
             if (_showingSettings || !_inspectorOpen || _activeThread is null || _activeInspectorSection != InspectorSection.Files)
@@ -414,27 +438,62 @@ namespace SelfContainedDeployment
                 });
             }
 
-            InspectorDirectoryUiCache uiCache = BuildInspectorDirectoryUiCache(result);
+            InspectorDirectoryUiCache uiCache = CreateInspectorDirectoryUiCache(
+                result.RootPath,
+                result.RenderKey,
+                result.FileCount,
+                result.RootNodes);
             CacheInspectorDirectoryUi(uiCache);
             ApplyInspectorDirectoryUiCache(uiCache);
         }
 
-        private InspectorDirectoryUiCache BuildInspectorDirectoryUiCache(InspectorDirectoryBuildResult result)
+        private static InspectorDirectoryUiCache CreateInspectorDirectoryUiCache(
+            string rootPath,
+            string renderKey,
+            int fileCount,
+            IReadOnlyList<InspectorDirectoryNodeModel> rootNodes)
         {
             InspectorDirectoryUiCache uiCache = new()
             {
-                RootPath = result.RootPath,
-                RenderKey = result.RenderKey,
-                FileCount = result.FileCount,
-                RootNodes = result.RootNodes,
+                RootPath = rootPath,
+                RenderKey = renderKey,
+                FileCount = fileCount,
+                RootNodes = rootNodes?.ToList() ?? new List<InspectorDirectoryNodeModel>(),
             };
 
-            foreach (InspectorDirectoryNodeModel node in result.RootNodes)
+            foreach (InspectorDirectoryNodeModel node in uiCache.RootNodes)
             {
                 IndexInspectorDirectoryNodeModel(node, uiCache.ModelsByPath);
             }
 
             return uiCache;
+        }
+
+        private static InspectorDirectoryNodeModel CloneInspectorDirectoryNodeWithDecorations(
+            InspectorDirectoryNodeModel source,
+            IReadOnlyDictionary<string, InspectorDirectoryDecoration> decorationsByPath)
+        {
+            if (source is null)
+            {
+                return null;
+            }
+
+            InspectorDirectoryDecoration decoration = null;
+            decorationsByPath?.TryGetValue(source.RelativePath ?? string.Empty, out decoration);
+            InspectorDirectoryNodeModel clone = new()
+            {
+                Name = source.Name,
+                RelativePath = source.RelativePath,
+                IsDirectory = source.IsDirectory,
+                Decoration = decoration,
+            };
+
+            foreach ((string name, InspectorDirectoryNodeModel child) in source.Children)
+            {
+                clone.Children[name] = CloneInspectorDirectoryNodeWithDecorations(child, decorationsByPath);
+            }
+
+            return clone;
         }
 
         private void CacheInspectorDirectoryUi(InspectorDirectoryUiCache uiCache)
@@ -469,13 +528,7 @@ namespace SelfContainedDeployment
         {
             _pendingInspectorDirectoryRootPath = null;
             _pendingInspectorDirectoryRenderKey = null;
-            _inspectorDirectoryNodesByPath.Clear();
-            _inspectorDirectoryItemsByNode.Clear();
-            _inspectorDirectoryModelsByNode.Clear();
-            _inspectorDirectoryDepthByNode.Clear();
-            _inspectorDirectoryModelsByPath.Clear();
-            InspectorDirectoryTree.SelectedNode = null;
-            InspectorDirectoryTree.RootNodes.Clear();
+            ClearInspectorDirectoryUiState();
             InspectorDirectoryTree.Tag = uiCache?.RenderKey;
             InspectorDirectoryEmptyText.Visibility = uiCache is null || uiCache.FileCount == 0 ? Visibility.Visible : Visibility.Collapsed;
             _lastInspectorDirectoryRootPath = uiCache?.RootPath;
@@ -499,6 +552,18 @@ namespace SelfContainedDeployment
             EditorPaneRecord editorPane = ResolveInspectorEditorPane(createIfNeeded: false);
             UpdateInspectorDirectorySelection(editorPane?.Editor.SelectedFilePath);
             UpdateInspectorFileActionState();
+        }
+
+        private void ClearInspectorDirectoryUiState(Visibility emptyStateVisibility = Visibility.Collapsed)
+        {
+            _inspectorDirectoryNodesByPath.Clear();
+            _inspectorDirectoryItemsByNode.Clear();
+            _inspectorDirectoryModelsByNode.Clear();
+            _inspectorDirectoryDepthByNode.Clear();
+            _inspectorDirectoryModelsByPath.Clear();
+            InspectorDirectoryTree.SelectedNode = null;
+            InspectorDirectoryTree.RootNodes.Clear();
+            InspectorDirectoryEmptyText.Visibility = emptyStateVisibility;
         }
 
         private static void IndexInspectorDirectoryNodeModel(

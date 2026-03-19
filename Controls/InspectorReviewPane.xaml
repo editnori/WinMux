@@ -1,0 +1,183 @@
+<UserControl
+    x:Class="SelfContainedDeployment.Controls.InspectorReviewPane"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <Border x:Name="ReviewContentBorder"
+            Padding="10,10,10,12">
+        <Grid RowSpacing="10">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <Grid x:Name="DiffReviewSourceSectionRoot"
+                  ColumnDefinitions="Auto,*"
+                  ColumnSpacing="10"
+                  Visibility="Collapsed">
+                <TextBlock Text="COMPARE"
+                           Style="{StaticResource ShellInspectorLabelTextStyle}" />
+                <StackPanel Grid.Column="1"
+                            Spacing="4">
+                    <ComboBox x:Name="DiffReviewSourceComboBoxControl"
+                              AutomationProperties.AutomationId="shell-diff-review-source"
+                              HorizontalAlignment="Stretch"
+                              PlaceholderText="Live working tree"
+                              SelectionChanged="OnReviewSourceSelectionChanged" />
+                    <TextBlock x:Name="DiffReviewSourceMetaTextBlock"
+                               AutomationProperties.AutomationId="shell-diff-review-meta"
+                               Style="{StaticResource ShellHintTextStyle}"
+                               Text="Live working tree"
+                               TextWrapping="WrapWholeWords" />
+                </StackPanel>
+            </Grid>
+
+            <Grid Grid.Row="1"
+                  ColumnDefinitions="Auto,*"
+                  ColumnSpacing="10"
+                  RowSpacing="6">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <TextBlock Text="BRANCH"
+                           Style="{StaticResource ShellInspectorLabelTextStyle}" />
+                <TextBlock x:Name="DiffBranchTextBlock"
+                           Grid.Column="1"
+                           AutomationProperties.AutomationId="shell-diff-branch"
+                           Style="{StaticResource ShellBodyTextStyle}"
+                           Text="No git context"
+                           TextTrimming="CharacterEllipsis"
+                           TextWrapping="NoWrap" />
+
+                <TextBlock Grid.Row="1"
+                           Text="ROOT"
+                           Style="{StaticResource ShellInspectorLabelTextStyle}" />
+                <TextBlock x:Name="DiffWorktreeTextBlock"
+                           Grid.Row="1"
+                           Grid.Column="1"
+                           AutomationProperties.AutomationId="shell-diff-worktree"
+                           Style="{StaticResource ShellSidebarMetaTextStyle}"
+                           TextTrimming="CharacterEllipsis"
+                           TextWrapping="NoWrap" />
+            </Grid>
+
+            <TextBlock x:Name="DiffSummaryTextBlock"
+                       Grid.Row="2"
+                       AutomationProperties.AutomationId="shell-diff-summary"
+                       Style="{StaticResource ShellSidebarMetaTextStyle}"
+                       Text="No working tree changes"
+                       TextWrapping="WrapWholeWords" />
+
+            <Grid Grid.Row="3"
+                  MinHeight="0"
+                  RowSpacing="8">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <TextBlock Text="CHANGED FILES"
+                           Style="{StaticResource ShellInspectorLabelTextStyle}" />
+
+                <Grid Grid.Row="1"
+                      MinHeight="0">
+                    <Grid>
+                        <ListView x:Name="DiffFileListViewControl"
+                                  AutomationProperties.AutomationId="shell-diff-file-list"
+                                  HorizontalContentAlignment="Stretch"
+                                  IsItemClickEnabled="False"
+                                  SelectionMode="None"
+                                  VerticalAlignment="Stretch"
+                                  ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                  ScrollViewer.VerticalScrollBarVisibility="Auto">
+                            <ListView.ItemContainerStyle>
+                                <Style TargetType="ListViewItem">
+                                    <Setter Property="Padding" Value="0" />
+                                    <Setter Property="Margin" Value="0,0,0,2" />
+                                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                </Style>
+                            </ListView.ItemContainerStyle>
+                            <ListView.ItemTemplate>
+                                <DataTemplate>
+                                    <Button AutomationProperties.AutomationId="{Binding AutomationId}"
+                                            AutomationProperties.Name="{Binding AutomationName}"
+                                            Click="OnDiffFileButtonClicked"
+                                            HorizontalAlignment="Stretch"
+                                            HorizontalContentAlignment="Stretch"
+                                            Loaded="OnDiffFileItemButtonLoaded"
+                                            PointerEntered="OnDiffFileItemButtonPointerEntered"
+                                            PointerExited="OnDiffFileItemButtonPointerExited"
+                                            Style="{StaticResource ShellDiffFileButtonStyle}"
+                                            Tag="{Binding File}"
+                                            Unloaded="OnDiffFileItemButtonUnloaded">
+                                        <Grid ColumnSpacing="8">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+
+                                            <Border Width="2"
+                                                    Margin="0,1,0,1"
+                                                    Background="{Binding StatusBrush}"
+                                                    CornerRadius="999"
+                                                    Opacity="0.9" />
+
+                                            <TextBlock Grid.Column="1"
+                                                       FontFamily="Consolas"
+                                                       FontSize="10.25"
+                                                       FontWeight="SemiBold"
+                                                       Foreground="{Binding StatusBrush}"
+                                                       Opacity="0.92"
+                                                       Text="{Binding StatusSymbol}"
+                                                       VerticalAlignment="Top" />
+
+                                            <StackPanel Grid.Column="2"
+                                                        Spacing="1">
+                                                <TextBlock FontSize="12"
+                                                           FontWeight="SemiBold"
+                                                           Text="{Binding FileName}"
+                                                           TextTrimming="CharacterEllipsis" />
+                                                <TextBlock FontSize="10.5"
+                                                           Opacity="0.74"
+                                                           Text="{Binding MetaText}"
+                                                           TextTrimming="CharacterEllipsis" />
+                                            </StackPanel>
+
+                                            <StackPanel Grid.Column="3"
+                                                        Orientation="Horizontal"
+                                                        Spacing="7"
+                                                        VerticalAlignment="Top">
+                                                <TextBlock FontSize="11"
+                                                           FontWeight="SemiBold"
+                                                           Foreground="{ThemeResource ShellSuccessBrush}"
+                                                           Text="{Binding AddedText}"
+                                                           Visibility="{Binding AddedVisibility}" />
+                                                <TextBlock FontSize="11"
+                                                           FontWeight="SemiBold"
+                                                           Foreground="{ThemeResource ShellDangerBrush}"
+                                                           Text="{Binding RemovedText}"
+                                                           Visibility="{Binding RemovedVisibility}" />
+                                            </StackPanel>
+                                        </Grid>
+                                    </Button>
+                                </DataTemplate>
+                            </ListView.ItemTemplate>
+                        </ListView>
+
+                        <TextBlock x:Name="DiffEmptyTextBlock"
+                                   VerticalAlignment="Top"
+                                   Style="{StaticResource ShellHintTextStyle}"
+                                   Text="No changed files in this thread."
+                                   Visibility="Collapsed" />
+                    </Grid>
+                </Grid>
+            </Grid>
+        </Grid>
+    </Border>
+</UserControl>
