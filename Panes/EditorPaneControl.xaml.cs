@@ -7,6 +7,7 @@ using Microsoft.UI.Dispatching;
 using Microsoft.Web.WebView2.Core;
 using SelfContainedDeployment.Shell;
 using SelfContainedDeployment.Automation;
+using SelfContainedDeployment.Git;
 using SelfContainedDeployment.Terminal;
 using System;
 using System.Collections.Generic;
@@ -193,7 +194,10 @@ namespace SelfContainedDeployment.Panes
         private bool _fileListLoaded;
         private const string DiffEmptyTitle = "No patch selected";
         private const string DiffEmptyBody = "Select a changed file from the review list.";
+        private const string InlineCompareSummary = "Inline diff";
         private const double MinFitWidthZoomFactor = 0.62;
+        private const double ManualZoomStep = 0.12;
+        private const double MaxManualZoomFactor = 2.4;
         private const double EditorCharacterWidth = 7.45;
         private const double CompareCharacterWidth = 7.2;
         private Task _initializationTask;
@@ -229,9 +233,13 @@ namespace SelfContainedDeployment.Panes
         private bool _showCompactHeader = true;
         private bool _autoFitWidthLocked;
         private bool _fitWidthRequested;
+        private double _userZoomFactor = 1.0;
         private double _lastAppliedZoomFactor = double.NaN;
         private int _maxVisibleLineLength;
         private bool _liveResizeMode;
+        private bool _hostedSurfaceSuppressed;
+        private string _hostedSurfaceSuppressionTitle;
+        private string _hostedSurfaceSuppressionMessage;
         private DateTimeOffset _lastLiveResizeLayoutAt;
 
         public EditorPaneControl()
@@ -241,6 +249,7 @@ namespace SelfContainedDeployment.Panes
             PointerPressed += (_, _) => RaiseInteractionRequested();
             ActualThemeChanged += OnActualThemeChanged;
             SizeChanged += OnEditorSizeChanged;
+            EditorView.PointerWheelChanged += OnEditorViewPointerWheelChanged;
             _layoutTimer = DispatcherQueue.CreateTimer();
             _layoutTimer.IsRepeating = false;
             _layoutTimer.Interval = TimeSpan.FromMilliseconds(45);
@@ -262,6 +271,10 @@ namespace SelfContainedDeployment.Panes
         }
 
         public string InitialFilePath { get; set; }
+
+        public GitChangedFile InitialCompareFile { get; set; }
+
+        public string InitialCompareWorkingPath { get; set; }
 
         public string SelectedFilePath => _selectedRelativePath;
 
@@ -312,6 +325,26 @@ namespace SelfContainedDeployment.Panes
             _ = ExecuteEditorScriptAsync("window.__winmuxEditorHost?.focus?.();");
         }
 
+        public void NavigateToNextDiff()
+        {
+            if (!DiffModeEnabled)
+            {
+                return;
+            }
+
+            _ = ExecuteEditorScriptAsync("window.__winmuxEditorHost?.goToNextDiff?.();");
+        }
+
+        public void NavigateToPreviousDiff()
+        {
+            if (!DiffModeEnabled)
+            {
+                return;
+            }
+
+            _ = ExecuteEditorScriptAsync("window.__winmuxEditorHost?.goToPreviousDiff?.();");
+        }
+
         public Task WarmupAsync()
         {
             return EnsureInitializedAsync();
@@ -335,6 +368,34 @@ namespace SelfContainedDeployment.Panes
             {
                 QueueEditorLayout(force: true);
             }
+        }
+
+        public void SetHostedSurfaceSuppressed(bool suppressed, string title = null, string message = null)
+        {
+            _hostedSurfaceSuppressed = suppressed;
+            _hostedSurfaceSuppressionTitle = suppressed ? title?.Trim() : null;
+            _hostedSurfaceSuppressionMessage = suppressed ? message?.Trim() : null;
+            if (EditorView is not null)
+            {
+                EditorView.Visibility = suppressed ? Visibility.Collapsed : Visibility.Visible;
+            }
+
+            if (suppressed)
+            {
+                ShowOverlay(title, message);
+                return;
+            }
+
+            if (_editorReady)
+            {
+                HideOverlay();
+            }
+            else
+            {
+                ShowOverlay("Loading editor", "Preparing the code surface...");
+            }
+
+            QueueEditorLayout(force: true);
         }
 
         public void ApplyFitToWidth(bool autoLock)
@@ -389,6 +450,7 @@ namespace SelfContainedDeployment.Panes
             CancelPendingDocumentApply();
             ActualThemeChanged -= OnActualThemeChanged;
             SizeChanged -= OnEditorSizeChanged;
+            EditorView.PointerWheelChanged -= OnEditorViewPointerWheelChanged;
             _files.Clear();
             _fileListLoaded = false;
             _selectedFullPath = null;
@@ -409,15 +471,16 @@ namespace SelfContainedDeployment.Panes
             }
         }
 
-        internal async Task OpenFilePathAsync(string path)
+        internal async Task OpenFilePathAsync(string path, GitChangedFile compareFile = null)
         {
-            if (DiffModeEnabled)
+            await EnsureInitializedAsync().ConfigureAwait(true);
+            await EnsureFileListLoadedAsync().ConfigureAwait(true);
+            if (compareFile is not null)
             {
+                await OpenCompareFileAsync(path, compareFile).ConfigureAwait(true);
                 return;
             }
 
-            await EnsureInitializedAsync().ConfigureAwait(true);
-            await EnsureFileListLoadedAsync().ConfigureAwait(true);
             await OpenFileAsync(path).ConfigureAwait(true);
         }
 
@@ -445,10 +508,17 @@ namespace SelfContainedDeployment.Panes
             await SaveCurrentFileAsync(silent: false).ConfigureAwait(true);
         }
 
-        internal void SetCompareDocument(string path, string originalText, string modifiedText, string diffText, string summary = null)
+        internal void SetCompareDocument(
+            string path,
+            string originalText,
+            string modifiedText,
+            string diffText,
+            string summary = null,
+            string fullPath = null,
+            bool readOnly = true)
         {
             DiffModeEnabled = true;
-            _selectedFullPath = null;
+            _selectedFullPath = string.IsNullOrWhiteSpace(fullPath) ? null : fullPath;
             _selectedRelativePath = string.IsNullOrWhiteSpace(path) ? string.Empty : path.Replace('\\', '/');
             _compareOriginalText = originalText ?? string.Empty;
             _compareModifiedText = modifiedText ?? string.Empty;
@@ -458,14 +528,14 @@ namespace SelfContainedDeployment.Panes
             _loadedEncoding = new UTF8Encoding(false);
             _lineEnding = DetectLineEnding(_compareModifiedText);
             _dirty = false;
-            _readOnly = true;
+            _readOnly = readOnly || string.IsNullOrWhiteSpace(_selectedFullPath);
             _diffSummary = string.IsNullOrWhiteSpace(summary)
-                ? (string.IsNullOrWhiteSpace(_selectedRelativePath) ? "Patch review" : "Patch view")
+                ? (_readOnly
+                    ? (string.IsNullOrWhiteSpace(_selectedRelativePath) ? "Patch review" : "Patch view")
+                    : InlineCompareSummary)
                 : summary;
             UpdateContentMetrics();
-            SetStatusText(string.IsNullOrWhiteSpace(_selectedRelativePath)
-                ? _diffSummary
-                : $"Reviewing {_selectedRelativePath}");
+            SetStatusText(ResolveCompareStatusText());
             UpdateTitle();
 
             if (!HasCompareContent() && string.IsNullOrWhiteSpace(_compareRawDiffText))
@@ -769,6 +839,7 @@ namespace SelfContainedDeployment.Panes
             ApplyEditorSurfaceTheme();
             _ = ApplyEditorShellThemeAsync();
             _ = ApplyEditorThemeAsync();
+            _ = PushDocumentToEditorAsync();
         }
 
         private async void OnWebMessageReceived(CoreWebView2 sender, CoreWebView2WebMessageReceivedEventArgs args)
@@ -804,14 +875,15 @@ namespace SelfContainedDeployment.Panes
                     break;
                 case "contentchanged":
                     _currentText = message.Text ?? string.Empty;
+                    if (DiffModeEnabled)
+                    {
+                        _compareModifiedText = _currentText;
+                        _compareRawDiffText = string.Empty;
+                    }
                     _dirty = !string.Equals(_currentText, _loadedText, StringComparison.Ordinal);
                     int previousMaxVisibleLineLength = _maxVisibleLineLength;
                     UpdateContentMetrics();
-                    SetStatusText(_dirty
-                        ? $"{_selectedRelativePath} - unsaved changes"
-                        : string.IsNullOrWhiteSpace(_selectedRelativePath)
-                            ? "Select a file to start editing."
-                            : $"Editing {_selectedRelativePath}");
+                    SetStatusText(ResolveEditableStatusText());
                     if (_autoFitWidthLocked && previousMaxVisibleLineLength != _maxVisibleLineLength)
                     {
                         QueueEditorLayout(force: true);
@@ -819,6 +891,7 @@ namespace SelfContainedDeployment.Panes
                     RaiseStateChanged();
                     break;
                 case "documentapplied":
+                    _editorReady = true;
                     if (!string.IsNullOrWhiteSpace(message.RequestId))
                     {
                         _lastAppliedDocumentRequestId = message.RequestId;
@@ -828,6 +901,22 @@ namespace SelfContainedDeployment.Panes
                     if (_fitWidthRequested || _autoFitWidthLocked)
                     {
                         QueueEditorLayout(force: true);
+                    }
+
+                    if (DiffModeEnabled)
+                    {
+                        if (!HasCompareContent())
+                        {
+                            ShowOverlay(DiffEmptyTitle, DiffEmptyBody);
+                        }
+                        else
+                        {
+                            HideOverlay();
+                        }
+                    }
+                    else
+                    {
+                        HideOverlay();
                     }
 
                     break;
@@ -929,6 +1018,29 @@ namespace SelfContainedDeployment.Panes
                 return;
             }
 
+            if (InitialCompareFile is not null)
+            {
+                GitChangedFile initialCompareFile = InitialCompareFile;
+                string compareWorkingPath = InitialCompareWorkingPath;
+                InitialCompareFile = null;
+                InitialCompareWorkingPath = null;
+                if (!HasCompareContent(initialCompareFile) && !string.IsNullOrWhiteSpace(compareWorkingPath))
+                {
+                    await Task.Run(() => GitStatusService.EnsureCompareTexts(compareWorkingPath, initialCompareFile)).ConfigureAwait(true);
+                }
+
+                string comparePath = string.IsNullOrWhiteSpace(initialCompareFile?.Path)
+                    ? InitialFilePath
+                    : initialCompareFile.Path;
+                await OpenCompareFileAsync(comparePath, initialCompareFile, savePendingChanges: false).ConfigureAwait(true);
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(_selectedFullPath) || !string.IsNullOrWhiteSpace(_selectedRelativePath))
+            {
+                return;
+            }
+
             string targetPath = ResolveInitialPath();
             if (!string.IsNullOrWhiteSpace(targetPath))
             {
@@ -940,6 +1052,7 @@ namespace SelfContainedDeployment.Panes
             {
                 _selectedFullPath = null;
                 _selectedRelativePath = null;
+                ResetCompareState();
                 _currentText = string.Empty;
                 _loadedText = string.Empty;
                 _dirty = false;
@@ -990,6 +1103,7 @@ namespace SelfContainedDeployment.Panes
             }
 
             RaiseInteractionRequested();
+            ResetCompareState();
 
             string rootPath = NormalizeRootPath(ProjectRootPath);
             EditorPaneFileOpenTarget target = ResolveFileOpenTarget(rootPath, path);
@@ -1082,9 +1196,41 @@ namespace SelfContainedDeployment.Panes
             }
         }
 
+        private async Task OpenCompareFileAsync(string path, GitChangedFile compareFile, bool savePendingChanges = true)
+        {
+            if (_disposed || string.IsNullOrWhiteSpace(path) || compareFile is null)
+            {
+                return;
+            }
+
+            if (savePendingChanges && !await SaveCurrentFileAsync(silent: false, skipIfClean: true).ConfigureAwait(true))
+            {
+                return;
+            }
+
+            RaiseInteractionRequested();
+
+            string rootPath = NormalizeRootPath(ProjectRootPath);
+            EditorPaneFileOpenTarget target = ResolveFileOpenTarget(rootPath, path);
+            if (string.IsNullOrWhiteSpace(target.FullPath) || Directory.Exists(target.FullPath) || !HasCompareContent(compareFile))
+            {
+                await OpenFileAsync(path, savePendingChanges: false).ConfigureAwait(true);
+                return;
+            }
+
+            SetCompareDocument(
+                target.RelativePath,
+                compareFile.OriginalText,
+                compareFile.ModifiedText,
+                compareFile.DiffText,
+                InlineCompareSummary,
+                target.FullPath,
+                readOnly: false);
+        }
+
         private async Task<bool> SaveCurrentFileAsync(bool silent, bool skipIfClean = false)
         {
-            if (DiffModeEnabled || string.IsNullOrWhiteSpace(_selectedFullPath) || _readOnly)
+            if (string.IsNullOrWhiteSpace(_selectedFullPath) || _readOnly)
             {
                 return true;
             }
@@ -1115,6 +1261,11 @@ namespace SelfContainedDeployment.Panes
 
                 _loadedText = textToWrite;
                 _currentText = textToWrite;
+                if (DiffModeEnabled)
+                {
+                    _compareModifiedText = textToWrite;
+                    _compareRawDiffText = string.Empty;
+                }
                 _dirty = false;
                 UpdateContentMetrics();
                 SetStatusText($"Saved {_selectedRelativePath}");
@@ -1132,6 +1283,7 @@ namespace SelfContainedDeployment.Panes
 
         private void SetUnavailableDocumentState(string fullPath, string relativePath, string statusText, string overlayMessage)
         {
+            ResetCompareState();
             _selectedFullPath = string.IsNullOrWhiteSpace(fullPath) ? relativePath : fullPath;
             _selectedRelativePath = string.IsNullOrWhiteSpace(relativePath) ? _selectedFullPath : relativePath;
             _loadedText = string.Empty;
@@ -1293,7 +1445,7 @@ namespace SelfContainedDeployment.Panes
 
         private async Task PushDocumentToEditorAsync()
         {
-            if (!_editorReady)
+            if (_disposed || !_webViewInitialized || EditorView.CoreWebView2 is null)
             {
                 return;
             }
@@ -1310,7 +1462,7 @@ namespace SelfContainedDeployment.Panes
                 Language = ResolveLanguage(_selectedRelativePath),
                 Theme = ResolveCurrentThemeName(),
                 LineEnding = _lineEnding,
-                ReadOnly = DiffModeEnabled || _readOnly || string.IsNullOrWhiteSpace(_selectedFullPath),
+                ReadOnly = _readOnly || string.IsNullOrWhiteSpace(_selectedFullPath),
                 LineNumbers = "on",
                 RenderLineHighlight = DiffModeEnabled ? "line" : "gutter",
                 EmptyTitle = DiffModeEnabled ? DiffEmptyTitle : "No file selected",
@@ -1323,11 +1475,23 @@ namespace SelfContainedDeployment.Panes
                 return;
             }
 
-            var applyCompletion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-            SetPendingDocumentApply(requestId, signature, applyCompletion);
-            PostEditorMessage("document", payload);
-            Task completedTask = await Task.WhenAny(applyCompletion.Task, Task.Delay(DocumentApplyAckTimeout)).ConfigureAwait(true);
-            if (completedTask == applyCompletion.Task || string.Equals(_lastAppliedDocumentRequestId, requestId, StringComparison.Ordinal))
+            if (_editorReady)
+            {
+                var applyCompletion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                SetPendingDocumentApply(requestId, signature, applyCompletion);
+                PostEditorMessage("document", payload);
+                Task completedTask = await Task.WhenAny(applyCompletion.Task, Task.Delay(DocumentApplyAckTimeout)).ConfigureAwait(true);
+                if (completedTask == applyCompletion.Task || string.Equals(_lastAppliedDocumentRequestId, requestId, StringComparison.Ordinal))
+                {
+                    return;
+                }
+            }
+            else
+            {
+                CancelPendingDocumentApply();
+            }
+
+            if (await TryApplyDocumentViaScriptAsync(payload, requestId, signature).ConfigureAwait(true))
             {
                 return;
             }
@@ -1337,9 +1501,13 @@ namespace SelfContainedDeployment.Panes
                 return;
             }
 
-            string json = JsonSerializer.Serialize(payload, JsonOptions);
-            string base64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(json));
-            await ExecuteEditorScriptAsync($"window.__winmuxEditorHost?.setDocument?.(JSON.parse(atob('{base64}')));").ConfigureAwait(true);
+            LogEditorEvent("editor", "document.failed", "Editor document apply failed after direct script fallback", new Dictionary<string, string>
+            {
+                ["paneId"] = _paneId ?? string.Empty,
+                ["selectedPath"] = _selectedRelativePath ?? string.Empty,
+                ["requestId"] = requestId,
+                ["diffMode"] = DiffModeEnabled.ToString(),
+            });
         }
 
         private void SetPendingDocumentApply(string requestId, string signature, TaskCompletionSource<bool> completion)
@@ -1375,6 +1543,81 @@ namespace SelfContainedDeployment.Panes
             completion?.TrySetCanceled();
         }
 
+        private async Task<bool> TryApplyDocumentViaScriptAsync(EditorDocumentPayload payload, string requestId, string signature)
+        {
+            if (_disposed || !_webViewInitialized || EditorView.CoreWebView2 is null || payload is null)
+            {
+                return false;
+            }
+
+            string json = JsonSerializer.Serialize(payload, JsonOptions);
+            string base64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(json));
+            string applyScript = $"window.__winmuxEditorHost?.setDocument?.(JSON.parse(atob('{base64}')));";
+            await ExecuteEditorScriptAsync(applyScript).ConfigureAwait(true);
+
+            bool applied = await WaitForEditorDocumentApplyAsync(requestId).ConfigureAwait(true);
+            if (!applied)
+            {
+                return false;
+            }
+
+            _editorReady = await IsEditorRuntimeReadyAsync().ConfigureAwait(true) || _editorReady;
+            _lastAppliedDocumentRequestId = requestId;
+            _lastAppliedDocumentSignature = signature;
+            CancelPendingDocumentApply();
+            return true;
+        }
+
+        private async Task<bool> WaitForEditorDocumentApplyAsync(string requestId)
+        {
+            if (string.IsNullOrWhiteSpace(requestId))
+            {
+                return false;
+            }
+
+            for (int attempt = 0; attempt < 12; attempt++)
+            {
+                if (_disposed || !_webViewInitialized || EditorView.CoreWebView2 is null)
+                {
+                    return false;
+                }
+
+                string lastAppliedRequestId = await ReadEditorRuntimeStringAsync("window.__winmuxEditorHostState?.lastAppliedRequestId ?? ''").ConfigureAwait(true);
+                if (string.Equals(lastAppliedRequestId, requestId, StringComparison.Ordinal))
+                {
+                    return true;
+                }
+
+                await Task.Delay(50).ConfigureAwait(true);
+            }
+
+            return false;
+        }
+
+        private async Task<bool> IsEditorRuntimeReadyAsync()
+        {
+            string raw = await ExecuteEditorScriptWithResultAsync("Boolean(window.__winmuxEditorHostState?.ready)").ConfigureAwait(true);
+            return string.Equals(raw, "true", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private async Task<string> ReadEditorRuntimeStringAsync(string expression)
+        {
+            string raw = await ExecuteEditorScriptWithResultAsync(expression).ConfigureAwait(true);
+            if (string.IsNullOrWhiteSpace(raw) || string.Equals(raw, "null", StringComparison.OrdinalIgnoreCase))
+            {
+                return string.Empty;
+            }
+
+            try
+            {
+                return JsonSerializer.Deserialize<string>(raw, JsonOptions) ?? string.Empty;
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+
         private static string BuildDocumentSignature(EditorDocumentPayload payload)
         {
             HashCode hash = new();
@@ -1402,22 +1645,28 @@ namespace SelfContainedDeployment.Panes
             }
 
             string theme = ResolveCurrentThemeName();
-            await ExecuteEditorScriptAsync($"window.__winmuxEditorHost?.setTheme?.('{theme}');").ConfigureAwait(true);
+            string palette = BuildEditorShellPaletteJson();
+            await ExecuteEditorScriptAsync($"window.__winmuxEditorHost?.setTheme?.('{theme}', {palette});").ConfigureAwait(true);
         }
 
         private async Task ApplyEditorShellThemeAsync()
         {
             string theme = ResolveCurrentThemeName();
+            string palette = BuildEditorShellPaletteJson();
             await ExecuteEditorScriptAsync(
-                $"(() => {{ document.documentElement.dataset.theme = '{theme}'; if (document.body) document.body.dataset.theme = '{theme}'; }})()")
+                $"(() => {{ const palette = {palette}; document.documentElement.dataset.theme = '{theme}'; if (document.body) document.body.dataset.theme = '{theme}'; window.__winmuxEditorHost?.applyShellPalette?.(palette); }})()")
                 .ConfigureAwait(true);
         }
 
         private void ApplyEditorSurfaceTheme()
         {
-            Color backgroundColor = ResolveCurrentThemeName() == "light"
-                ? Color.FromArgb(0xFF, 0xFF, 0xFF, 0xFF)
-                : Color.FromArgb(0xFF, 0x11, 0x12, 0x14);
+            ElementTheme theme = ResolveEffectiveTheme();
+            Color backgroundColor = ResolveShellColor(
+                theme,
+                "ShellSurfaceBackgroundBrush",
+                theme == ElementTheme.Light
+                    ? Color.FromArgb(0xFF, 0xF9, 0xFB, 0xFD)
+                    : Color.FromArgb(0xFF, 0x10, 0x12, 0x16));
 
             if (EditorView is not null)
             {
@@ -1518,6 +1767,23 @@ namespace SelfContainedDeployment.Panes
             }
         }
 
+        private async Task<string> ExecuteEditorScriptWithResultAsync(string script)
+        {
+            if (_disposed || !_webViewInitialized || EditorView.CoreWebView2 is null || string.IsNullOrWhiteSpace(script))
+            {
+                return null;
+            }
+
+            try
+            {
+                return await EditorView.CoreWebView2.ExecuteScriptAsync(script).AsTask().ConfigureAwait(true);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
         private void PostEditorMessage<TPayload>(string type, TPayload payload)
         {
             if (_disposed || !_webViewInitialized || EditorView.CoreWebView2 is null || string.IsNullOrWhiteSpace(type))
@@ -1547,15 +1813,30 @@ namespace SelfContainedDeployment.Panes
             TitleChanged?.Invoke(this, title);
         }
 
+        private static void LogEditorEvent(string category, string name, string message, IReadOnlyDictionary<string, string> data = null)
+        {
+            NativeAutomationEventLog.Record(category, name, message, data);
+        }
+
         private void ShowOverlay(string title, string message)
         {
-            EditorOverlayTitle.Text = title;
-            EditorOverlayText.Text = message;
+            EditorOverlayTitle.Text = _hostedSurfaceSuppressed
+                ? (string.IsNullOrWhiteSpace(_hostedSurfaceSuppressionTitle) ? "Dialog open" : _hostedSurfaceSuppressionTitle)
+                : title;
+            EditorOverlayText.Text = _hostedSurfaceSuppressed
+                ? (string.IsNullOrWhiteSpace(_hostedSurfaceSuppressionMessage) ? "Finish the dialog to return to the live pane." : _hostedSurfaceSuppressionMessage)
+                : message;
             EditorOverlay.Visibility = Visibility.Visible;
         }
 
         private void HideOverlay()
         {
+            if (_hostedSurfaceSuppressed)
+            {
+                EditorOverlay.Visibility = Visibility.Visible;
+                return;
+            }
+
             EditorOverlay.Visibility = Visibility.Collapsed;
         }
 
@@ -1563,6 +1844,35 @@ namespace SelfContainedDeployment.Panes
         {
             _statusText = status ?? string.Empty;
             UpdateCompactHeader();
+        }
+
+        private string ResolveEditableStatusText()
+        {
+            if (_dirty)
+            {
+                return $"{_selectedRelativePath} - unsaved changes";
+            }
+
+            if (DiffModeEnabled)
+            {
+                return ResolveCompareStatusText();
+            }
+
+            return string.IsNullOrWhiteSpace(_selectedRelativePath)
+                ? "Select a file to start editing."
+                : $"Editing {_selectedRelativePath}";
+        }
+
+        private string ResolveCompareStatusText()
+        {
+            if (string.IsNullOrWhiteSpace(_selectedRelativePath))
+            {
+                return _diffSummary;
+            }
+
+            return _readOnly
+                ? $"Reviewing {_selectedRelativePath}"
+                : $"Editing {_selectedRelativePath} with inline diff";
         }
 
         private void RaiseInteractionRequested()
@@ -1579,6 +1889,21 @@ namespace SelfContainedDeployment.Panes
         {
             return !string.IsNullOrWhiteSpace(_compareOriginalText) ||
                 !string.IsNullOrWhiteSpace(_compareModifiedText);
+        }
+
+        private static bool HasCompareContent(GitChangedFile changedFile)
+        {
+            return !string.IsNullOrWhiteSpace(changedFile?.OriginalText) ||
+                !string.IsNullOrWhiteSpace(changedFile?.ModifiedText);
+        }
+
+        private void ResetCompareState()
+        {
+            DiffModeEnabled = false;
+            _compareOriginalText = string.Empty;
+            _compareModifiedText = string.Empty;
+            _compareRawDiffText = string.Empty;
+            _diffSummary = "Patch view";
         }
 
         private void UpdateCompactHeader()
@@ -1598,13 +1923,30 @@ namespace SelfContainedDeployment.Panes
                 ? (DiffModeEnabled ? "Patch review" : "No file selected")
                 : _selectedRelativePath.Replace('\\', '/');
             EditorHeaderMetaText.Text = ResolveHeaderMetaText();
+            Visibility diffNavigationVisibility = DiffModeEnabled ? Visibility.Visible : Visibility.Collapsed;
+            if (EditorPreviousDiffButton is not null)
+            {
+                EditorPreviousDiffButton.Visibility = diffNavigationVisibility;
+            }
+
+            if (EditorNextDiffButton is not null)
+            {
+                EditorNextDiffButton.Visibility = diffNavigationVisibility;
+            }
         }
 
         private string ResolveHeaderMetaText()
         {
             if (DiffModeEnabled)
             {
-                return string.IsNullOrWhiteSpace(_diffSummary) ? "Patch view" : _diffSummary;
+                if (_dirty)
+                {
+                    return "Unsaved";
+                }
+
+                return string.IsNullOrWhiteSpace(_diffSummary)
+                    ? (_readOnly ? "Patch view" : InlineCompareSummary)
+                    : _diffSummary;
             }
 
             if (_readOnly)
@@ -1618,6 +1960,16 @@ namespace SelfContainedDeployment.Panes
             }
 
             return string.IsNullOrWhiteSpace(_selectedRelativePath) ? "Waiting" : "Ready";
+        }
+
+        private void OnEditorPreviousDiffClicked(object sender, RoutedEventArgs e)
+        {
+            NavigateToPreviousDiff();
+        }
+
+        private void OnEditorNextDiffClicked(object sender, RoutedEventArgs e)
+        {
+            NavigateToNextDiff();
         }
 
         private void UpdateContentMetrics()
@@ -1690,6 +2042,7 @@ namespace SelfContainedDeployment.Panes
                 ? 1.0
                 : Math.Clamp(availableWidth / estimatedWidth, MinFitWidthZoomFactor, 1.0);
             zoomFactor = zoomFactor >= 0.98 ? 1.0 : zoomFactor;
+            zoomFactor = Math.Clamp(zoomFactor * _userZoomFactor, MinFitWidthZoomFactor, MaxManualZoomFactor);
             if (!double.IsNaN(_lastAppliedZoomFactor) && Math.Abs(_lastAppliedZoomFactor - zoomFactor) < 0.01)
             {
                 _fitWidthRequested = false;
@@ -1702,6 +2055,36 @@ namespace SelfContainedDeployment.Panes
             await ExecuteEditorScriptAsync(
                 $"(() => {{ document.documentElement.style.zoom = '{zoomText}'; if (document.body) document.body.style.zoom = '{zoomText}'; }})()")
                 .ConfigureAwait(true);
+        }
+
+        private void OnEditorViewPointerWheelChanged(object sender, PointerRoutedEventArgs e)
+        {
+            if ((e.KeyModifiers & Windows.System.VirtualKeyModifiers.Control) != Windows.System.VirtualKeyModifiers.Control)
+            {
+                return;
+            }
+
+            int delta = e.GetCurrentPoint(EditorView)?.Properties?.MouseWheelDelta ?? 0;
+            if (delta == 0)
+            {
+                return;
+            }
+
+            double nextZoomFactor = Math.Clamp(
+                _userZoomFactor + (delta > 0 ? ManualZoomStep : -ManualZoomStep),
+                MinFitWidthZoomFactor,
+                MaxManualZoomFactor);
+            if (Math.Abs(nextZoomFactor - _userZoomFactor) < 0.01)
+            {
+                return;
+            }
+
+            _userZoomFactor = nextZoomFactor;
+            _autoFitWidthLocked = false;
+            _fitWidthRequested = true;
+            _lastAppliedZoomFactor = double.NaN;
+            _ = ApplyFitWidthAsync();
+            e.Handled = true;
         }
 
         private double EstimateDesiredContentWidth()
@@ -1771,6 +2154,121 @@ namespace SelfContainedDeployment.Panes
             };
         }
 
+        private string BuildEditorShellPaletteJson()
+        {
+            ElementTheme theme = ResolveEffectiveTheme();
+            bool lightTheme = theme == ElementTheme.Light;
+            Color background = ResolveShellColor(
+                theme,
+                "ShellSurfaceBackgroundBrush",
+                lightTheme
+                    ? Color.FromArgb(0xFF, 0xF9, 0xFB, 0xFD)
+                    : Color.FromArgb(0xFF, 0x10, 0x12, 0x16));
+            Color mutedSurface = ResolveShellColor(
+                theme,
+                "ShellMutedSurfaceBrush",
+                lightTheme
+                    ? Color.FromArgb(0xFF, 0xF2, 0xF6, 0xFA)
+                    : Color.FromArgb(0xFF, 0x14, 0x16, 0x1B));
+            Color foreground = ResolveShellColor(
+                theme,
+                "ShellTextPrimaryBrush",
+                lightTheme
+                    ? Color.FromArgb(0xFF, 0x1A, 0x1E, 0x23)
+                    : Color.FromArgb(0xFF, 0xF3, 0xF4, 0xF6));
+            Color subtext = ResolveShellColor(
+                theme,
+                "ShellTextSecondaryBrush",
+                lightTheme
+                    ? Color.FromArgb(0xFF, 0x39, 0x42, 0x4D)
+                    : Color.FromArgb(0xFF, 0xA7, 0xAD, 0xB7));
+            Color faint = ResolveShellColor(
+                theme,
+                "ShellTextTertiaryBrush",
+                lightTheme
+                    ? Color.FromArgb(0xFF, 0x55, 0x60, 0x6D)
+                    : Color.FromArgb(0xFF, 0x7A, 0x80, 0x8B));
+            Color success = ResolveShellColor(
+                theme,
+                "ShellSuccessBrush",
+                lightTheme
+                    ? Color.FromArgb(0xFF, 0x16, 0xA3, 0x4A)
+                    : Color.FromArgb(0xFF, 0x4A, 0xDE, 0x80));
+            Color danger = ResolveShellColor(
+                theme,
+                "ShellDangerBrush",
+                lightTheme
+                    ? Color.FromArgb(0xFF, 0xDC, 0x26, 0x26)
+                    : Color.FromArgb(0xFF, 0xF8, 0x71, 0x71));
+
+            return JsonSerializer.Serialize(new
+            {
+                theme = ResolveThemeName(theme),
+                background = ToCssHex(background),
+                text = ToCssHex(foreground),
+                subtext = ToCssHex(subtext),
+                faint = ToCssHex(faint),
+                lineHighlight = ToCssHex(MixColors(background, mutedSurface, lightTheme ? 0.72 : 0.56)),
+                insertedTextBackground = ToCssHex(TintColor(success, lightTheme ? (byte)0x40 : (byte)0x36)),
+                removedTextBackground = ToCssHex(TintColor(danger, lightTheme ? (byte)0x3A : (byte)0x36)),
+                insertedLineBackground = ToCssHex(MixColors(background, success, lightTheme ? 0.11 : 0.18)),
+                removedLineBackground = ToCssHex(MixColors(background, danger, lightTheme ? 0.10 : 0.18)),
+                insertedGutterBackground = ToCssHex(LiftColor(success, lightTheme)),
+                removedGutterBackground = ToCssHex(LiftColor(danger, lightTheme)),
+            });
+        }
+
+        private ElementTheme ResolveEffectiveTheme()
+        {
+            ElementTheme resolvedTheme = _themePreference == ElementTheme.Default ? ActualTheme : _themePreference;
+            if (resolvedTheme == ElementTheme.Default)
+            {
+                resolvedTheme = SelfContainedDeployment.MainPage.Current?.ActualTheme == ElementTheme.Light
+                    ? ElementTheme.Light
+                    : SelfContainedDeployment.SampleConfig.CurrentTheme == ElementTheme.Light
+                        ? ElementTheme.Light
+                        : ElementTheme.Dark;
+            }
+
+            return resolvedTheme == ElementTheme.Light ? ElementTheme.Light : ElementTheme.Dark;
+        }
+
+        private static Color ResolveShellColor(ElementTheme theme, string key, Color fallback)
+        {
+            return ShellTheme.ResolveColorForTheme(theme, key, fallback);
+        }
+
+        private static Color MixColors(Color baseColor, Color overlayColor, double overlayWeight)
+        {
+            double clampedWeight = Math.Clamp(overlayWeight, 0, 1);
+            double baseWeight = 1 - clampedWeight;
+            return Color.FromArgb(
+                0xFF,
+                (byte)Math.Round((baseColor.R * baseWeight) + (overlayColor.R * clampedWeight)),
+                (byte)Math.Round((baseColor.G * baseWeight) + (overlayColor.G * clampedWeight)),
+                (byte)Math.Round((baseColor.B * baseWeight) + (overlayColor.B * clampedWeight)));
+        }
+
+        private static Color LiftColor(Color color, bool lightTheme)
+        {
+            return MixColors(
+                color,
+                Color.FromArgb(0xFF, 0xFF, 0xFF, 0xFF),
+                lightTheme ? 0.14 : 0.22);
+        }
+
+        private static Color TintColor(Color color, byte alpha)
+        {
+            return Color.FromArgb(alpha, color.R, color.G, color.B);
+        }
+
+        private static string ToCssHex(Color color)
+        {
+            return color.A == 0xFF
+                ? $"#{color.R:X2}{color.G:X2}{color.B:X2}"
+                : $"#{color.R:X2}{color.G:X2}{color.B:X2}{color.A:X2}";
+        }
+
         private static string ResolveEditorHostPath()
         {
             string overrideRoot = Environment.GetEnvironmentVariable("NATIVE_TERMINAL_WEB_ROOT");
@@ -1799,17 +2297,7 @@ namespace SelfContainedDeployment.Panes
 
         private string ResolveCurrentThemeName()
         {
-            ElementTheme resolvedTheme = _themePreference == ElementTheme.Default ? ActualTheme : _themePreference;
-            if (resolvedTheme == ElementTheme.Default)
-            {
-                resolvedTheme = SelfContainedDeployment.MainPage.Current?.ActualTheme == ElementTheme.Light
-                    ? ElementTheme.Light
-                    : SelfContainedDeployment.SampleConfig.CurrentTheme == ElementTheme.Light
-                        ? ElementTheme.Light
-                        : ElementTheme.Dark;
-            }
-
-            return ResolveThemeName(resolvedTheme);
+            return ResolveThemeName(ResolveEffectiveTheme());
         }
 
         private static string ResolveThemeName(ElementTheme theme)

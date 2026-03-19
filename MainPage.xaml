@@ -198,7 +198,7 @@
                       Background="{ThemeResource ShellPageBackgroundBrush}">
                     <SplitView x:Name="InspectorSplitView"
                                AutomationProperties.AutomationId="shell-inspector-split-view"
-                               CompactPaneLength="0"
+                               CompactPaneLength="40"
                                DisplayMode="CompactInline"
                                IsPaneOpen="True"
                                OpenPaneLength="320"
@@ -281,6 +281,7 @@
                                                 ToolTipService.ToolTip="Hide inspector">
                                             <FontIcon FontSize="11" Glyph="&#xE7F8;" />
                                         </Button>
+
                                     </StackPanel>
                                 </Grid>
 
@@ -302,7 +303,8 @@
                                     AutomationProperties.AutomationId="shell-diff-sidebar"
                                     Background="{ThemeResource ShellSurfaceBackgroundBrush}"
                                     BorderBrush="{ThemeResource ShellBorderBrush}"
-                                    BorderThickness="1,0,0,0">
+                                    BorderThickness="1,0,0,0"
+                                    Visibility="Collapsed">
                                 <Border.Transitions>
                                     <TransitionCollection>
                                         <EntranceThemeTransition FromHorizontalOffset="20"
@@ -311,12 +313,13 @@
                                     </TransitionCollection>
                                 </Border.Transitions>
                                 <Grid RowDefinitions="Auto,*">
-                                    <Grid Padding="10,9,10,8"
+                                    <Grid Padding="8,9,6,8"
                                           BorderBrush="{ThemeResource ShellBorderBrush}"
                                           BorderThickness="0,0,0,1"
                                           ColumnDefinitions="Auto,*,Auto"
                                           ColumnSpacing="6">
-                                        <StackPanel Orientation="Horizontal"
+                                        <StackPanel x:Name="InspectorHeaderTabsPanel"
+                                                    Orientation="Horizontal"
                                                     Spacing="4"
                                                     VerticalAlignment="Center">
                                             <Button x:Name="InspectorReviewTabButton"
@@ -353,110 +356,111 @@
                                             </Button>
                                         </StackPanel>
 
-                                        <StackPanel x:Name="InspectorReviewActionsPanel"
-                                                    Grid.Column="2"
-                                                    Orientation="Horizontal"
-                                                    Spacing="4"
-                                                    VerticalAlignment="Center">
-                                            <Button x:Name="OpenFullPatchButton"
-                                                    AutomationProperties.AutomationId="shell-open-full-patch"
-                                                    Click="OnOpenFullPatchClicked"
-                                                    Style="{StaticResource ShellToolbarButtonStyle}"
-                                                    ToolTipService.ToolTip="Review all changed files">
-                                                <FontIcon FontSize="11"
-                                                          Glyph="&#xE8A5;" />
-                                            </Button>
+                                        <Grid x:Name="InspectorHeaderActionsHost"
+                                              Grid.Column="2">
+                                            <StackPanel x:Name="InspectorReviewActionsPanel"
+                                                        Orientation="Horizontal"
+                                                        Spacing="4"
+                                                        VerticalAlignment="Center">
+                                                <Button x:Name="OpenFullPatchButton"
+                                                        AutomationProperties.AutomationId="shell-open-full-patch"
+                                                        Click="OnOpenFullPatchClicked"
+                                                        Style="{StaticResource ShellToolbarButtonStyle}"
+                                                        ToolTipService.ToolTip="Review all changed files">
+                                                    <FontIcon FontSize="11"
+                                                              Glyph="&#xE8A5;" />
+                                                </Button>
 
-                                            <Button x:Name="CaptureCheckpointButton"
-                                                    AutomationProperties.AutomationId="shell-diff-capture-checkpoint"
-                                                    Click="OnCaptureCheckpointClicked"
-                                                    Style="{StaticResource ShellToolbarButtonStyle}"
-                                                    ToolTipService.ToolTip="Capture checkpoint">
-                                                <FontIcon FontSize="11"
-                                                          Glyph="&#xE823;" />
-                                            </Button>
+                                                <Button x:Name="CaptureCheckpointButton"
+                                                        AutomationProperties.AutomationId="shell-diff-capture-checkpoint"
+                                                        Click="OnCaptureCheckpointClicked"
+                                                        Style="{StaticResource ShellToolbarButtonStyle}"
+                                                        ToolTipService.ToolTip="Capture checkpoint">
+                                                    <FontIcon FontSize="11"
+                                                              Glyph="&#xE823;" />
+                                                </Button>
 
-                                            <Button x:Name="RefreshDiffButton"
-                                                    AutomationProperties.AutomationId="shell-diff-refresh"
-                                                    Click="OnRefreshDiffClicked"
-                                                    Style="{StaticResource ShellToolbarButtonStyle}"
-                                                    ToolTipService.ToolTip="Refresh review">
-                                                <FontIcon FontSize="11"
-                                                          Glyph="&#xE72C;" />
-                                            </Button>
-                                        </StackPanel>
+                                                <Button x:Name="RefreshDiffButton"
+                                                        AutomationProperties.AutomationId="shell-diff-refresh"
+                                                        Click="OnRefreshDiffClicked"
+                                                        Style="{StaticResource ShellToolbarButtonStyle}"
+                                                        ToolTipService.ToolTip="Refresh review">
+                                                    <FontIcon FontSize="11"
+                                                              Glyph="&#xE72C;" />
+                                                </Button>
+                                            </StackPanel>
 
-                                        <StackPanel x:Name="InspectorFileActionsPanel"
-                                                    Grid.Column="2"
-                                                    Orientation="Horizontal"
-                                                    Spacing="4"
-                                                    VerticalAlignment="Center"
-                                                    Visibility="Collapsed">
-                                            <Button x:Name="InspectorCollapseAllButton"
-                                                    AutomationProperties.AutomationId="shell-directory-collapse-all"
-                                                    Click="OnInspectorCollapseAllClicked"
-                                                    Style="{StaticResource ShellToolbarButtonStyle}"
-                                                    ToolTipService.ToolTip="Collapse all folders">
-                                                <TextBlock FontSize="12"
-                                                           FontWeight="SemiBold"
-                                                           Text="−" />
-                                            </Button>
+                                            <StackPanel x:Name="InspectorFileActionsPanel"
+                                                        Orientation="Horizontal"
+                                                        Spacing="4"
+                                                        VerticalAlignment="Center"
+                                                        Visibility="Collapsed">
+                                                <Button x:Name="InspectorCollapseAllButton"
+                                                        AutomationProperties.AutomationId="shell-directory-collapse-all"
+                                                        Click="OnInspectorCollapseAllClicked"
+                                                        Style="{StaticResource ShellToolbarButtonStyle}"
+                                                        ToolTipService.ToolTip="Collapse all folders">
+                                                    <TextBlock FontSize="12"
+                                                               FontWeight="SemiBold"
+                                                               Text="−" />
+                                                </Button>
 
-                                            <Button x:Name="InspectorSaveFileButton"
-                                                    AutomationProperties.AutomationId="shell-editor-save-file"
-                                                    Click="OnInspectorSaveFileClicked"
-                                                    Style="{StaticResource ShellToolbarButtonStyle}"
-                                                    ToolTipService.ToolTip="Save file">
-                                                <FontIcon FontSize="11"
-                                                          Glyph="&#xE74E;" />
-                                            </Button>
-                                        </StackPanel>
+                                                <Button x:Name="InspectorSaveFileButton"
+                                                        AutomationProperties.AutomationId="shell-editor-save-file"
+                                                        Click="OnInspectorSaveFileClicked"
+                                                        Style="{StaticResource ShellToolbarButtonStyle}"
+                                                        ToolTipService.ToolTip="Save file">
+                                                    <FontIcon FontSize="11"
+                                                              Glyph="&#xE74E;" />
+                                                </Button>
+                                            </StackPanel>
 
-                                        <StackPanel x:Name="InspectorNotesActionsPanel"
-                                                    Grid.Column="2"
-                                                    Orientation="Horizontal"
-                                                    Spacing="4"
-                                                    VerticalAlignment="Center"
-                                                    Visibility="Collapsed">
-                                            <Button x:Name="InspectorAddNoteButton"
-                                                    AutomationProperties.AutomationId="shell-thread-note-add"
-                                                    Click="OnInspectorAddNoteClicked"
-                                                    Style="{StaticResource ShellToolbarButtonStyle}"
-                                                    ToolTipService.ToolTip="New note">
-                                                <FontIcon FontSize="11"
-                                                          Glyph="&#xE710;" />
-                                            </Button>
+                                            <StackPanel x:Name="InspectorNotesActionsPanel"
+                                                        Orientation="Horizontal"
+                                                        Spacing="4"
+                                                        VerticalAlignment="Center"
+                                                        Visibility="Collapsed">
+                                                <Button x:Name="InspectorAddNoteButton"
+                                                        AutomationProperties.AutomationId="shell-thread-note-add"
+                                                        Click="OnInspectorAddNoteClicked"
+                                                        Style="{StaticResource ShellToolbarButtonStyle}"
+                                                        ToolTipService.ToolTip="New note">
+                                                    <FontIcon FontSize="11"
+                                                              Glyph="&#xE710;" />
+                                                </Button>
 
-                                            <Button x:Name="InspectorSaveNoteButton"
-                                                    AutomationProperties.AutomationId="shell-thread-note-save"
-                                                    Click="OnInspectorSaveNoteClicked"
-                                                    Style="{StaticResource ShellToolbarButtonStyle}"
-                                                    ToolTipService.ToolTip="Save selected note">
-                                                <FontIcon FontSize="11"
-                                                          Glyph="&#xE74E;" />
-                                            </Button>
+                                                <Button x:Name="InspectorSaveNoteButton"
+                                                        AutomationProperties.AutomationId="shell-thread-note-save"
+                                                        Click="OnInspectorSaveNoteClicked"
+                                                        Style="{StaticResource ShellToolbarButtonStyle}"
+                                                        ToolTipService.ToolTip="Save selected note">
+                                                    <FontIcon FontSize="11"
+                                                              Glyph="&#xE74E;" />
+                                                </Button>
 
-                                            <Button x:Name="InspectorDeleteNoteButton"
-                                                    AutomationProperties.AutomationId="shell-thread-note-delete"
-                                                    Click="OnInspectorDeleteNoteClicked"
-                                                    Style="{StaticResource ShellToolbarButtonStyle}"
-                                                    ToolTipService.ToolTip="Delete selected note">
-                                                <FontIcon FontSize="11"
-                                                          Glyph="&#xE74D;" />
-                                            </Button>
-                                        </StackPanel>
+                                                <Button x:Name="InspectorDeleteNoteButton"
+                                                        AutomationProperties.AutomationId="shell-thread-note-delete"
+                                                        Click="OnInspectorDeleteNoteClicked"
+                                                        Style="{StaticResource ShellToolbarButtonStyle}"
+                                                        ToolTipService.ToolTip="Delete selected note">
+                                                    <FontIcon FontSize="11"
+                                                              Glyph="&#xE74D;" />
+                                                </Button>
+                                            </StackPanel>
+                                        </Grid>
+
                                     </Grid>
 
-                                    <controls:InspectorReviewPane x:Name="InspectorReviewView"
-                                                                  Grid.Row="1" />
+                                    <Grid x:Name="InspectorBodyHost"
+                                          Grid.Row="1">
+                                        <controls:InspectorReviewPane x:Name="InspectorReviewView" />
 
-                                    <controls:InspectorFilesPane x:Name="InspectorFilesView"
-                                                                 Grid.Row="1"
-                                                                 Visibility="Collapsed" />
+                                        <controls:InspectorFilesPane x:Name="InspectorFilesView"
+                                                                     Visibility="Collapsed" />
 
-                                    <controls:InspectorNotesPane x:Name="InspectorNotesView"
-                                                                 Grid.Row="1"
-                                                                 Visibility="Collapsed" />
+                                        <controls:InspectorNotesPane x:Name="InspectorNotesView"
+                                                                     Visibility="Collapsed" />
+                                    </Grid>
                                 </Grid>
                             </Border>
                         </SplitView.Pane>

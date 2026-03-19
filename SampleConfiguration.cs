@@ -7,6 +7,7 @@ namespace SelfContainedDeployment
     {
         public const string FeatureName = "WinMux";
         public static ElementTheme CurrentTheme = ElementTheme.Default;
+        public static string CurrentThemePackId = ShellTheme.DefaultPackId;
         public static string DefaultShellProfileId = ShellProfileIds.Wsl;
         public static int MaxPaneCountPerThread = 4;
     }

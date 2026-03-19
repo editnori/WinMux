@@ -68,7 +68,7 @@
                                 Spacing="4">
                         <TextBlock Style="{StaticResource ShellSectionTextStyle}" Text="Preferences" />
                         <TextBlock Style="{StaticResource ShellHintTextStyle}"
-                                   Text="Theme, shell defaults, pane density, and browser vault." />
+                                   Text="Theme mode, palette, shell defaults, pane density, and browser vault." />
                     </StackPanel>
                 </Grid>
 
@@ -89,12 +89,18 @@
                                     x:Name="AppearanceSectionLabel"
                                     Spacing="2">
                             <TextBlock Style="{StaticResource ShellPreferenceGroupLabelTextStyle}" Text="Appearance" />
-                            <TextBlock Style="{StaticResource ShellPreferenceGroupMetaTextStyle}" Text="Chrome + terminal" />
+                            <TextBlock Style="{StaticResource ShellPreferenceGroupMetaTextStyle}" Text="Mode + palette" />
                         </StackPanel>
 
                         <StackPanel x:Name="AppearanceSectionContent"
                                     Grid.Row="1"
-                                    Spacing="4">
+                                    Spacing="10">
+                            <StackPanel Spacing="3">
+                                <TextBlock Style="{StaticResource ShellPreferenceGroupMetaTextStyle}" Text="Theme mode" />
+                                <TextBlock Style="{StaticResource ShellPreferenceOptionHintTextStyle}"
+                                           Text="Choose whether WinMux stays light, stays dark, or follows Windows." />
+                            </StackPanel>
+
                             <StackPanel x:Name="themePanel"
                                         Spacing="4">
                                 <RadioButton AutomationProperties.AutomationId="settings-theme-light"
@@ -134,6 +140,115 @@
                                     <RadioButton.Tag>
                                         <ElementTheme>Default</ElementTheme>
                                     </RadioButton.Tag>
+                                </RadioButton>
+                            </StackPanel>
+
+                            <StackPanel Spacing="3">
+                                <TextBlock Style="{StaticResource ShellPreferenceGroupMetaTextStyle}" Text="Theme pack" />
+                                <TextBlock Style="{StaticResource ShellPreferenceOptionHintTextStyle}"
+                                           Text="Keep the same mode and swap the shell palette underneath it." />
+                            </StackPanel>
+
+                            <StackPanel x:Name="themePackPanel"
+                                        Spacing="4">
+                                <RadioButton AutomationProperties.AutomationId="settings-theme-pack-graphite"
+                                             Style="{StaticResource ShellPreferenceRadioButtonStyle}"
+                                             Tag="graphite"
+                                             Checked="OnThemePackRadioButtonChecked">
+                                    <Grid RowDefinitions="Auto,Auto"
+                                          RowSpacing="2">
+                                        <Grid ColumnDefinitions="88,Auto,*"
+                                              ColumnSpacing="10">
+                                            <TextBlock Style="{StaticResource ShellPreferenceOptionTitleTextStyle}"
+                                                       Text="Graphite" />
+                                            <StackPanel Grid.Column="1"
+                                                        Orientation="Horizontal"
+                                                        Spacing="4"
+                                                        VerticalAlignment="Center">
+                                                <Border Width="14" Height="14" CornerRadius="2" Background="#101216" />
+                                                <Border Width="14" Height="14" CornerRadius="2" Background="#15181D" />
+                                                <Border Width="14" Height="14" CornerRadius="2" Background="#2DD4BF" />
+                                            </StackPanel>
+                                        </Grid>
+                                        <TextBlock Grid.Row="1"
+                                                   Style="{StaticResource ShellPreferenceOptionHintTextStyle}"
+                                                   Text="Neutral steel surfaces for the default WinMux feel." />
+                                    </Grid>
+                                </RadioButton>
+
+                                <RadioButton AutomationProperties.AutomationId="settings-theme-pack-harbor"
+                                             Style="{StaticResource ShellPreferenceRadioButtonStyle}"
+                                             Tag="harbor"
+                                             Checked="OnThemePackRadioButtonChecked">
+                                    <Grid RowDefinitions="Auto,Auto"
+                                          RowSpacing="2">
+                                        <Grid ColumnDefinitions="88,Auto,*"
+                                              ColumnSpacing="10">
+                                            <TextBlock Style="{StaticResource ShellPreferenceOptionTitleTextStyle}"
+                                                       Text="Harbor" />
+                                            <StackPanel Grid.Column="1"
+                                                        Orientation="Horizontal"
+                                                        Spacing="4"
+                                                        VerticalAlignment="Center">
+                                                <Border Width="14" Height="14" CornerRadius="2" Background="#101821" />
+                                                <Border Width="14" Height="14" CornerRadius="2" Background="#162633" />
+                                                <Border Width="14" Height="14" CornerRadius="2" Background="#52AEDB" />
+                                            </StackPanel>
+                                        </Grid>
+                                        <TextBlock Grid.Row="1"
+                                                   Style="{StaticResource ShellPreferenceOptionHintTextStyle}"
+                                                   Text="Cool blue-steel neutrals with a cleaner terminal accent." />
+                                    </Grid>
+                                </RadioButton>
+
+                                <RadioButton AutomationProperties.AutomationId="settings-theme-pack-moss"
+                                             Style="{StaticResource ShellPreferenceRadioButtonStyle}"
+                                             Tag="moss"
+                                             Checked="OnThemePackRadioButtonChecked">
+                                    <Grid RowDefinitions="Auto,Auto"
+                                          RowSpacing="2">
+                                        <Grid ColumnDefinitions="88,Auto,*"
+                                              ColumnSpacing="10">
+                                            <TextBlock Style="{StaticResource ShellPreferenceOptionTitleTextStyle}"
+                                                       Text="Moss" />
+                                            <StackPanel Grid.Column="1"
+                                                        Orientation="Horizontal"
+                                                        Spacing="4"
+                                                        VerticalAlignment="Center">
+                                                <Border Width="14" Height="14" CornerRadius="2" Background="#121712" />
+                                                <Border Width="14" Height="14" CornerRadius="2" Background="#19241C" />
+                                                <Border Width="14" Height="14" CornerRadius="2" Background="#71C899" />
+                                            </StackPanel>
+                                        </Grid>
+                                        <TextBlock Grid.Row="1"
+                                                   Style="{StaticResource ShellPreferenceOptionHintTextStyle}"
+                                                   Text="Subdued green tinting for calmer long-form review sessions." />
+                                    </Grid>
+                                </RadioButton>
+
+                                <RadioButton AutomationProperties.AutomationId="settings-theme-pack-copper"
+                                             Style="{StaticResource ShellPreferenceRadioButtonStyle}"
+                                             Tag="copper"
+                                             Checked="OnThemePackRadioButtonChecked">
+                                    <Grid RowDefinitions="Auto,Auto"
+                                          RowSpacing="2">
+                                        <Grid ColumnDefinitions="88,Auto,*"
+                                              ColumnSpacing="10">
+                                            <TextBlock Style="{StaticResource ShellPreferenceOptionTitleTextStyle}"
+                                                       Text="Copper" />
+                                            <StackPanel Grid.Column="1"
+                                                        Orientation="Horizontal"
+                                                        Spacing="4"
+                                                        VerticalAlignment="Center">
+                                                <Border Width="14" Height="14" CornerRadius="2" Background="#181310" />
+                                                <Border Width="14" Height="14" CornerRadius="2" Background="#261D18" />
+                                                <Border Width="14" Height="14" CornerRadius="2" Background="#C88758" />
+                                            </StackPanel>
+                                        </Grid>
+                                        <TextBlock Grid.Row="1"
+                                                   Style="{StaticResource ShellPreferenceOptionHintTextStyle}"
+                                                   Text="Warm copper and paper tones without sliding into a glossy theme." />
+                                    </Grid>
                                 </RadioButton>
                             </StackPanel>
                         </StackPanel>

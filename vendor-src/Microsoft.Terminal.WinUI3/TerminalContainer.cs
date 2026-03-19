@@ -29,6 +29,8 @@ namespace Microsoft.Terminal.WinUI3 {
 		private NativeMethods.ScrollCallback scrollCallback;
 		private NativeMethods.WriteCallback writeCallback;
 
+		internal event EventHandler InteractionOccurred;
+
 		/// <summary>
 		/// Initializes a new instance of the <see cref="TerminalContainer"/> class.
 		/// </summary>
@@ -58,6 +60,7 @@ namespace Microsoft.Terminal.WinUI3 {
 		private void TerminalContainer_GettingFocus(UIElement sender, GettingFocusEventArgs args) {
 			args.Handled=true;
 			Debug.WriteLine($"TerminalContainer_GettingFocus setting to hwnd");
+			RaiseInteractionOccurred();
 			PassFocus();
 		}
 
@@ -318,6 +321,10 @@ namespace Microsoft.Terminal.WinUI3 {
 			character = (char)vKey;
 		}
 
+		private void RaiseInteractionOccurred() {
+			InteractionOccurred?.Invoke(this, EventArgs.Empty);
+		}
+
 
 		private void TerminalContainer_MessageHook(object sender, WindowMessageEventArgs e) {
 			var msg = e.Message;
@@ -327,6 +334,7 @@ namespace Microsoft.Terminal.WinUI3 {
 			if (hwnd == this.hwnd) {
 				switch ((WindowsMessages)e.Message.MessageId) {
 					case WindowsMessages.SETFOCUS:
+						RaiseInteractionOccurred();
 						NativeMethods.TerminalSetFocus(this.terminal);
 						this.blinkTimer?.Start();
 						break;
@@ -336,8 +344,13 @@ namespace Microsoft.Terminal.WinUI3 {
 						NativeMethods.TerminalSetCursorVisible(this.terminal, false);
 						break;
 					case WindowsMessages.MOUSEACTIVATE:
+						RaiseInteractionOccurred();
 						this.Focus(FocusState.Pointer);
 						NativeMethods.SetFocus(this.hwnd);
+						break;
+					case WindowsMessages.LBUTTONDOWN:
+					case WindowsMessages.RBUTTONDOWN:
+						RaiseInteractionOccurred();
 						break;
 					case WindowsMessages.SYSKEYDOWN: // fallthrough
 					case WindowsMessages.KeyDown: {

@@ -264,6 +264,7 @@ namespace SelfContainedDeployment.Terminal
                 values["WSLENV"] = AppendWslenvEntry(values["WSLENV"], "WINMUX_PROJECT_ROOT/p");
                 values["WSLENV"] = AppendWslenvEntry(values["WSLENV"], "WINMUX_THREAD_ROOT/p");
                 values["WSLENV"] = AppendWslenvEntry(values["WSLENV"], "WINMUX_BROWSER_BRIDGE/p");
+                values["WSLENV"] = AppendWslenvEntry(values["WSLENV"], "STARSHIP_CONFIG/p");
 
                 CachedBaseLaunchEnvironment = values;
                 return CachedBaseLaunchEnvironment;

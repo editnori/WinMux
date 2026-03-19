@@ -135,7 +135,7 @@ namespace SelfContainedDeployment
                     projectButton.Height = double.NaN;
                     projectButton.MinHeight = 28;
                     projectButton.Width = double.NaN;
-                    projectButton.Padding = new Thickness(4, 4, 4, 4);
+                    projectButton.Padding = new Thickness(3, 4, 4, 4);
                     projectButton.HorizontalAlignment = HorizontalAlignment.Stretch;
                     projectButton.HorizontalContentAlignment = HorizontalAlignment.Stretch;
                     StackPanel textStack = new()
@@ -284,7 +284,7 @@ namespace SelfContainedDeployment
                     StackPanel threadStack = new()
                     {
                         Spacing = 2,
-                        Margin = new Thickness(6, 2, 0, 2),
+                        Margin = new Thickness(4, 2, 0, 2),
                         HorizontalAlignment = HorizontalAlignment.Stretch,
                     };
                     AutomationProperties.SetAutomationId(threadStack, $"shell-thread-list-{project.Id}");
@@ -301,7 +301,7 @@ namespace SelfContainedDeployment
                             HorizontalAlignment = HorizontalAlignment.Stretch,
                             Height = double.NaN,
                             MinHeight = 28,
-                            Padding = new Thickness(3, 3, 3, 3),
+                            Padding = new Thickness(2, 3, 3, 3),
                         };
                         AutomationProperties.SetAutomationId(threadButton, $"shell-thread-{thread.Id}");
                         AutomationProperties.SetName(threadButton, BuildThreadAutomationLabel(project, thread, activitySummary));
@@ -1037,6 +1037,8 @@ namespace SelfContainedDeployment
             ProjectRailRenderSnapshot snapshot = new();
             StringBuilder builder = new();
             builder.Append(ResolveTheme(SampleConfig.CurrentTheme))
+                .Append('|')
+                .Append(SampleConfig.CurrentThemePackId)
                 .Append('|')
                 .Append(ShellSplitView?.IsPaneOpen == true ? '1' : '0')
                 .Append('|')

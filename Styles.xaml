@@ -18,6 +18,16 @@
             <SolidColorBrush x:Key="ShellPaneBackgroundBrush" Color="#0C0D10" />
             <SolidColorBrush x:Key="ShellSurfaceBackgroundBrush" Color="#101216" />
             <SolidColorBrush x:Key="ShellMutedSurfaceBrush" Color="#14161B" />
+            <SolidColorBrush x:Key="BrowserChromeBackgroundBrush" Color="#101318" />
+            <SolidColorBrush x:Key="BrowserChromeRaisedBrush" Color="#171C23" />
+            <SolidColorBrush x:Key="BrowserChromeFieldBrush" Color="#0D1116" />
+            <SolidColorBrush x:Key="BrowserChromeDividerBrush" Color="#232A34" />
+            <SolidColorBrush x:Key="BrowserChromeFieldBorderBrush" Color="#2D3744" />
+            <SolidColorBrush x:Key="BrowserChromeTabBackgroundBrush" Color="#171E27" />
+            <SolidColorBrush x:Key="BrowserChromeTabBorderBrush" Color="#344152" />
+            <SolidColorBrush x:Key="BrowserChromeTabForegroundBrush" Color="#F3F4F6" />
+            <SolidColorBrush x:Key="BrowserChromeTabInactiveForegroundBrush" Color="#AEB5C0" />
+            <SolidColorBrush x:Key="BrowserChromeGlyphBrush" Color="#CCD3DD" />
             <SolidColorBrush x:Key="ShellBrandMarkBackgroundBrush" Color="#13161B" />
             <SolidColorBrush x:Key="ShellBrandMarkBorderBrush" Color="#262B33" />
             <SolidColorBrush x:Key="ShellBorderBrush" Color="#1E2127" />
@@ -78,6 +88,16 @@
             <SolidColorBrush x:Key="ShellPaneBackgroundBrush" Color="#F2F5F8" />
             <SolidColorBrush x:Key="ShellSurfaceBackgroundBrush" Color="#F9FBFD" />
             <SolidColorBrush x:Key="ShellMutedSurfaceBrush" Color="#F2F6FA" />
+            <SolidColorBrush x:Key="BrowserChromeBackgroundBrush" Color="#EAF1F7" />
+            <SolidColorBrush x:Key="BrowserChromeRaisedBrush" Color="#F7FAFC" />
+            <SolidColorBrush x:Key="BrowserChromeFieldBrush" Color="#FFFFFF" />
+            <SolidColorBrush x:Key="BrowserChromeDividerBrush" Color="#C8D5E1" />
+            <SolidColorBrush x:Key="BrowserChromeFieldBorderBrush" Color="#AFC1D1" />
+            <SolidColorBrush x:Key="BrowserChromeTabBackgroundBrush" Color="#FFFFFF" />
+            <SolidColorBrush x:Key="BrowserChromeTabBorderBrush" Color="#8FA6BC" />
+            <SolidColorBrush x:Key="BrowserChromeTabForegroundBrush" Color="#16202B" />
+            <SolidColorBrush x:Key="BrowserChromeTabInactiveForegroundBrush" Color="#445361" />
+            <SolidColorBrush x:Key="BrowserChromeGlyphBrush" Color="#314150" />
             <SolidColorBrush x:Key="ShellBrandMarkBackgroundBrush" Color="#F9FBFD" />
             <SolidColorBrush x:Key="ShellBrandMarkBorderBrush" Color="#CCD6E0" />
             <SolidColorBrush x:Key="ShellBorderBrush" Color="#B8C6D4" />
@@ -295,6 +315,30 @@
         <Setter Property="HorizontalContentAlignment" Value="Center" />
     </Style>
 
+    <Style x:Key="ShellBrowserToolbarButtonStyle" TargetType="Button" BasedOn="{StaticResource ShellPaneStripButtonStyle}">
+        <Setter Property="Width" Value="26" />
+        <Setter Property="Height" Value="26" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="CornerRadius" Value="0" />
+        <Setter Property="Foreground" Value="{ThemeResource BrowserChromeGlyphBrush}" />
+        <Setter Property="HorizontalContentAlignment" Value="Center" />
+    </Style>
+
+    <Style x:Key="ShellBrowserGroupedToolbarButtonStyle" TargetType="Button" BasedOn="{StaticResource ShellPaneStripButtonStyle}">
+        <Setter Property="Width" Value="26" />
+        <Setter Property="Height" Value="26" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="CornerRadius" Value="0" />
+        <Setter Property="Foreground" Value="{ThemeResource BrowserChromeGlyphBrush}" />
+        <Setter Property="HorizontalContentAlignment" Value="Center" />
+    </Style>
+
     <Style x:Key="ShellPaneStripButtonStyle" TargetType="Button" BasedOn="{StaticResource ShellFlatButtonBaseStyle}">
         <Setter Property="Width" Value="28" />
         <Setter Property="Height" Value="28" />
@@ -326,6 +370,14 @@
         <Setter Property="HorizontalContentAlignment" Value="Center" />
     </Style>
 
+    <Style x:Key="ShellDiffNavigationButtonStyle" TargetType="Button" BasedOn="{StaticResource ShellInlineActionButtonStyle}">
+        <Setter Property="Height" Value="20" />
+        <Setter Property="MinWidth" Value="30" />
+        <Setter Property="Padding" Value="4,0" />
+        <Setter Property="CornerRadius" Value="3" />
+        <Setter Property="Foreground" Value="{ThemeResource ShellTextSecondaryBrush}" />
+    </Style>
+
     <Style x:Key="ShellNoteFilterButtonStyle" TargetType="Button" BasedOn="{StaticResource ShellFlatButtonBaseStyle}">
         <Setter Property="Height" Value="24" />
         <Setter Property="Padding" Value="6,0" />
@@ -354,11 +406,22 @@
         <Setter Property="HorizontalContentAlignment" Value="Center" />
     </Style>
 
-    <Style x:Key="ShellBrowserTabButtonStyle" TargetType="Button" BasedOn="{StaticResource ShellButtonBaseStyle}">
-        <Setter Property="Height" Value="26" />
-        <Setter Property="Padding" Value="7,1" />
-        <Setter Property="CornerRadius" Value="2" />
+    <Style x:Key="ShellBrowserTabButtonStyle" TargetType="Button" BasedOn="{StaticResource ShellPaneStripButtonStyle}">
+        <Setter Property="Height" Value="30" />
+        <Setter Property="Padding" Value="10,0,8,0" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0,0,0,1" />
+        <Setter Property="CornerRadius" Value="0" />
         <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    </Style>
+
+    <Style x:Key="ShellBrowserChromeGroupBorderStyle" TargetType="Border">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="CornerRadius" Value="0" />
+        <Setter Property="Padding" Value="0" />
     </Style>
 
     <Style x:Key="ShellDiffFileButtonStyle" TargetType="Button" BasedOn="{StaticResource ShellButtonBaseStyle}">
@@ -484,9 +547,9 @@
     </Style>
 
     <Style x:Key="ShellPreferenceRadioButtonStyle" TargetType="RadioButton">
-        <Setter Property="Padding" Value="14,10" />
-        <Setter Property="Margin" Value="0,1,0,1" />
-        <Setter Property="MinHeight" Value="50" />
+        <Setter Property="Padding" Value="12,8" />
+        <Setter Property="Margin" Value="0" />
+        <Setter Property="MinHeight" Value="44" />
         <Setter Property="Foreground" Value="{ThemeResource ShellTextPrimaryBrush}" />
         <Setter Property="HorizontalContentAlignment" Value="Stretch" />
         <Setter Property="VerticalContentAlignment" Value="Center" />
@@ -511,22 +574,22 @@
                                     Opacity="0" />
 
                             <Grid Padding="{TemplateBinding Padding}"
-                                  ColumnSpacing="12">
+                                  ColumnSpacing="10">
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="18" />
+                                    <ColumnDefinition Width="16" />
                                     <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
 
-                                <Grid Width="18"
-                                      Height="18"
+                                <Grid Width="16"
+                                      Height="16"
                                       VerticalAlignment="Center">
                                     <Ellipse x:Name="OuterEllipse"
                                              Fill="Transparent"
                                              Stroke="{ThemeResource ShellTextTertiaryBrush}"
                                              StrokeThickness="1.5" />
                                     <Ellipse x:Name="InnerEllipse"
-                                             Width="6"
-                                             Height="6"
+                                             Width="5"
+                                             Height="5"
                                              HorizontalAlignment="Center"
                                              VerticalAlignment="Center"
                                              Fill="{ThemeResource ShellInfoBrush}"
@@ -537,7 +600,7 @@
                                                   Grid.Column="1"
                                                   Content="{TemplateBinding Content}"
                                                   ContentTemplate="{TemplateBinding ContentTemplate}"
-                                                  Margin="0,1,2,1"
+                                                  Margin="0"
                                                   HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
                                                   VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
                             </Grid>
@@ -605,13 +668,16 @@
     </Style>
 
     <Style x:Key="ShellPreferenceComboBoxStyle" TargetType="ComboBox">
-        <Setter Property="MinWidth" Value="148" />
-        <Setter Property="Height" Value="30" />
-        <Setter Property="Padding" Value="10,0,8,0" />
-        <Setter Property="Background" Value="{ThemeResource ShellMutedSurfaceBrush}" />
-        <Setter Property="BorderBrush" Value="Transparent" />
-        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="MinWidth" Value="156" />
+        <Setter Property="Height" Value="32" />
+        <Setter Property="Padding" Value="10,1,8,1" />
+        <Setter Property="Background" Value="{ThemeResource ShellSurfaceBackgroundBrush}" />
+        <Setter Property="BorderBrush" Value="{ThemeResource ShellBorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="4" />
         <Setter Property="Foreground" Value="{ThemeResource ShellTextPrimaryBrush}" />
+        <Setter Property="UseSystemFocusVisuals" Value="True" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
     </Style>
 
     <Style x:Key="ShellInlineTextBoxStyle" TargetType="TextBox">
@@ -624,6 +690,19 @@
         <Setter Property="Height" Value="28" />
         <Setter Property="FontSize" Value="12" />
         <Setter Property="MinWidth" Value="180" />
+    </Style>
+
+    <Style x:Key="ShellBrowserAddressTextBoxStyle" TargetType="TextBox" BasedOn="{StaticResource ShellInlineTextBoxStyle}">
+        <Setter Property="Background" Value="{ThemeResource BrowserChromeFieldBrush}" />
+        <Setter Property="BorderBrush" Value="{ThemeResource BrowserChromeFieldBorderBrush}" />
+        <Setter Property="Foreground" Value="{ThemeResource ShellTextPrimaryBrush}" />
+        <Setter Property="PlaceholderForeground" Value="{ThemeResource ShellTextTertiaryBrush}" />
+        <Setter Property="Padding" Value="30,0,10,0" />
+        <Setter Property="Height" Value="30" />
+        <Setter Property="MinWidth" Value="220" />
+        <Setter Property="FontSize" Value="12.25" />
+        <Setter Property="CornerRadius" Value="4" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
     </Style>
 
     <Style x:Key="ShellInlineInputStyle" TargetType="TextBox">

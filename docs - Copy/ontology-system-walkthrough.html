@@ -1,0 +1,2732 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kidney Stone Ontology: From Clinical Notes to Structured Registry</title>
+<style>
+  @page {
+    size: letter;
+    margin: 2cm 2cm 2.5cm 2cm;
+    @bottom-center {
+      content: counter(page);
+      font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+      font-size: 9pt;
+      color: #6B7280;
+    }
+  }
+
+  @page title-page {
+    @bottom-center { content: none; }
+  }
+
+  @page landscape-page {
+    size: letter landscape;
+    margin: 2cm 2cm 2.5cm 2cm;
+    @bottom-center {
+      content: counter(page);
+      font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+      font-size: 9pt;
+      color: #6B7280;
+    }
+  }
+
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  body {
+    font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    font-size: 10pt;
+    line-height: 1.55;
+    color: #1F2937;
+  }
+
+  /* Title page */
+  .title-page {
+    page: title-page;
+    page-break-after: always;
+    text-align: center;
+    padding-top: 30%;
+  }
+
+  .title-page h1 {
+    font-size: 26pt;
+    color: #2563EB;
+    font-weight: 700;
+    line-height: 1.2;
+    margin-bottom: 14pt;
+  }
+
+  .title-page .subtitle {
+    font-size: 13pt;
+    color: #6B7280;
+    font-style: italic;
+    margin-bottom: 36pt;
+  }
+
+  .title-page .date {
+    font-size: 12pt;
+    color: #374151;
+  }
+
+  /* Section headers */
+  h2 {
+    font-size: 15pt;
+    color: #2563EB;
+    font-weight: 700;
+    margin-bottom: 8pt;
+    padding-bottom: 3pt;
+    border-bottom: 2px solid #2563EB;
+  }
+
+  h3 {
+    font-size: 11.5pt;
+    color: #1E40AF;
+    font-weight: 600;
+    margin-top: 12pt;
+    margin-bottom: 5pt;
+  }
+
+  h4 {
+    font-size: 10pt;
+    color: #374151;
+    font-weight: 600;
+    margin-top: 8pt;
+    margin-bottom: 3pt;
+  }
+
+  p {
+    margin-bottom: 7pt;
+  }
+
+  .section {
+    page-break-before: always;
+  }
+
+  /* Flow diagram */
+  .flow-diagram {
+    background: #F9FAFB;
+    border: 1px solid #D1D5DB;
+    border-radius: 0;
+    padding: 12pt 16pt;
+    margin: 10pt 0;
+    font-family: "Consolas", "Courier New", monospace;
+    font-size: 9.5pt;
+    line-height: 1.5;
+    text-align: center;
+    color: #1F2937;
+  }
+
+  .flow-diagram .box {
+    display: inline-block;
+    border: 2px solid #2563EB;
+    border-radius: 0;
+    padding: 5pt 14pt;
+    margin: 1pt 0;
+    background: #EFF6FF;
+    font-weight: 600;
+    color: #1E40AF;
+  }
+
+  .flow-diagram .arrow {
+    display: block;
+    font-size: 11pt;
+    color: #6B7280;
+    margin: 1pt 0;
+  }
+
+  /* Stats bar */
+  .stats-bar {
+    display: flex;
+    justify-content: space-between;
+    gap: 6pt;
+    margin: 10pt 0;
+  }
+
+  .stat-box {
+    flex: 1;
+    background: #EFF6FF;
+    border: 1px solid #BFDBFE;
+    border-radius: 0;
+    padding: 6pt 8pt;
+    text-align: center;
+  }
+
+  .stat-box .number {
+    font-size: 14pt;
+    font-weight: 700;
+    color: #2563EB;
+    display: block;
+  }
+
+  .stat-box .label {
+    font-size: 7.5pt;
+    color: #6B7280;
+    text-transform: uppercase;
+    letter-spacing: 0.5pt;
+  }
+
+  /* Tables */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 6pt 0;
+    font-size: 9.5pt;
+    page-break-inside: avoid;
+  }
+
+  table th {
+    background: #2563EB;
+    color: white;
+    font-weight: 600;
+    text-align: left;
+    padding: 5pt 7pt;
+    border: 1px solid #1D4ED8;
+    border-radius: 0;
+  }
+
+  table td {
+    padding: 4pt 7pt;
+    border: 1px solid #E5E7EB;
+    vertical-align: top;
+  }
+
+  table tr:nth-child(even) td {
+    background: #F9FAFB;
+  }
+
+  table tr:nth-child(odd) td {
+    background: #FFFFFF;
+  }
+
+  /* Domain blocks */
+  .domain-block {
+    margin: 8pt 0;
+    border: 1px solid #D1D5DB;
+    border-radius: 0;
+    padding: 8pt 12pt;
+    background: #FFFFFF;
+  }
+
+  .domain-block h3 {
+    margin-top: 0;
+    color: #2563EB;
+    font-size: 10.5pt;
+    border-bottom: 1px solid #E5E7EB;
+    padding-bottom: 3pt;
+    margin-bottom: 4pt;
+  }
+
+  .domain-block .desc {
+    font-size: 9pt;
+    color: #374151;
+    margin-bottom: 3pt;
+  }
+
+  .domain-block .event-types {
+    font-size: 8.5pt;
+    color: #6B7280;
+    margin-bottom: 4pt;
+  }
+
+  .domain-block .event-types code {
+    background: #EFF6FF;
+    border: 1px solid #BFDBFE;
+    border-radius: 0;
+    padding: 1pt 3pt;
+    font-family: "Consolas", "Courier New", monospace;
+    font-size: 8pt;
+    color: #1E40AF;
+  }
+
+  .domain-block ul {
+    margin: 3pt 0 0 14pt;
+    font-size: 8.5pt;
+  }
+
+  .domain-block li {
+    margin-bottom: 1pt;
+  }
+
+  .domain-block li em {
+    color: #6B7280;
+    font-style: normal;
+    font-size: 8pt;
+  }
+
+  /* Side-by-side walkthrough */
+  .walkthrough {
+    margin: 10pt 0;
+    page-break-inside: avoid;
+  }
+
+  .walkthrough-title {
+    font-size: 10.5pt;
+    font-weight: 700;
+    color: #1E40AF;
+    margin-bottom: 2pt;
+  }
+
+  .walkthrough-source {
+    font-size: 8pt;
+    color: #6B7280;
+    margin-bottom: 6pt;
+  }
+
+  .side-by-side {
+    display: flex;
+    gap: 0;
+    border: 1px solid #D1D5DB;
+    border-radius: 0;
+  }
+
+  .note-col {
+    flex: 1;
+    background: #FFFBEB;
+    padding: 8pt;
+    border-right: 2px solid #D1D5DB;
+    font-size: 8pt;
+    line-height: 1.5;
+    font-family: "Consolas", "Courier New", monospace;
+  }
+
+  .note-col .col-header {
+    font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    font-size: 7.5pt;
+    font-weight: 700;
+    color: #92400E;
+    text-transform: uppercase;
+    letter-spacing: 0.5pt;
+    margin-bottom: 5pt;
+    border-bottom: 1px solid #FDE68A;
+    padding-bottom: 2pt;
+  }
+
+  .struct-col {
+    flex: 1.15;
+    background: #FFFFFF;
+    padding: 8pt;
+    font-size: 8pt;
+  }
+
+  .struct-col .col-header {
+    font-size: 7.5pt;
+    font-weight: 700;
+    color: #1E40AF;
+    text-transform: uppercase;
+    letter-spacing: 0.5pt;
+    margin-bottom: 5pt;
+    border-bottom: 1px solid #BFDBFE;
+    padding-bottom: 2pt;
+  }
+
+  mark {
+    background: #FEF08A;
+    padding: 0 1pt;
+    border-radius: 0;
+    color: #1F2937;
+  }
+
+  .struct-col h4 {
+    font-size: 8.5pt;
+    color: #1E40AF;
+    margin-top: 6pt;
+    margin-bottom: 2pt;
+  }
+
+  .struct-col h4:first-child {
+    margin-top: 0;
+  }
+
+  .struct-col table {
+    font-size: 8.5pt;
+    margin: 2pt 0 4pt 0;
+  }
+
+  .struct-col table th {
+    font-size: 8pt;
+    padding: 2pt 4pt;
+  }
+
+  .struct-col table td {
+    padding: 2pt 4pt;
+    font-size: 8.5pt;
+  }
+
+  /* Questions answered box */
+  .questions-answered {
+    margin-top: 6pt;
+    border: 1px solid #D1D5DB;
+    border-radius: 0;
+    padding: 6pt 8pt;
+    background: #EFF6FF;
+    page-break-inside: avoid;
+  }
+
+  .questions-answered h4 {
+    font-size: 8.5pt;
+    color: #1E40AF;
+    margin: 0 0 3pt 0;
+  }
+
+  .questions-answered table {
+    font-size: 8.5pt;
+  }
+
+  .questions-answered table th {
+    background: #1E40AF;
+    font-size: 8pt;
+    padding: 2pt 4pt;
+  }
+
+  .questions-answered table td {
+    padding: 2pt 4pt;
+  }
+
+  /* Concept box */
+  .concept-box {
+    background: #FEF2F2;
+    border: 1px solid #FECACA;
+    border-left: 4px solid #DC2626;
+    border-radius: 0;
+    padding: 6pt 10pt;
+    margin: 8pt 0;
+    font-size: 9pt;
+    color: #991B1B;
+    page-break-inside: avoid;
+  }
+
+  .concept-box strong {
+    color: #DC2626;
+  }
+
+  /* Design rationale box */
+  .rationale-box {
+    background: #F0FDF4;
+    border: 1px solid #BBF7D0;
+    border-left: 4px solid #16A34A;
+    border-radius: 0;
+    padding: 6pt 10pt;
+    margin: 8pt 0;
+    font-size: 9pt;
+    color: #166534;
+    page-break-inside: avoid;
+  }
+
+  .rationale-box strong {
+    color: #16A34A;
+  }
+
+  /* Cohort query block */
+  .cohort-query {
+    background: #F9FAFB;
+    border: 1px solid #D1D5DB;
+    border-radius: 0;
+    padding: 8pt 12pt;
+    margin: 8pt 0;
+    page-break-inside: avoid;
+  }
+
+  .cohort-query h4 {
+    font-size: 9pt;
+    color: #2563EB;
+    margin-top: 0;
+    margin-bottom: 3pt;
+  }
+
+  .cohort-query .filter {
+    font-family: "Consolas", "Courier New", monospace;
+    font-size: 8pt;
+    background: #EFF6FF;
+    border: 1px solid #BFDBFE;
+    border-radius: 0;
+    padding: 3pt 6pt;
+    margin: 2pt 0;
+    color: #1E40AF;
+  }
+
+  .cohort-query .join {
+    font-size: 8pt;
+    color: #6B7280;
+    font-weight: 600;
+    margin: 1pt 0 1pt 6pt;
+  }
+
+  /* Provenance chain */
+  .provenance-chain {
+    font-family: "Consolas", "Courier New", monospace;
+    font-size: 9pt;
+    line-height: 1.5;
+    text-align: center;
+    margin: 10pt 0;
+    color: #1F2937;
+    page-break-inside: avoid;
+  }
+
+  .provenance-chain .prov-box {
+    display: inline-block;
+    border: 2px solid #2563EB;
+    border-radius: 0;
+    padding: 3pt 12pt;
+    background: #EFF6FF;
+    font-weight: 600;
+    color: #1E40AF;
+    margin: 1pt 0;
+  }
+
+  .provenance-chain .prov-arrow {
+    display: block;
+    color: #6B7280;
+    font-size: 10pt;
+    margin: 1pt 0;
+  }
+
+  .provenance-chain .prov-desc {
+    font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    font-size: 7.5pt;
+    color: #6B7280;
+    display: block;
+    margin-bottom: 1pt;
+  }
+
+  /* Code/JSON block */
+  .code-block {
+    background: #F9FAFB;
+    border: 1px solid #D1D5DB;
+    border-radius: 0;
+    padding: 6pt 10pt;
+    font-family: "Consolas", "Courier New", monospace;
+    font-size: 8pt;
+    line-height: 1.45;
+    margin: 6pt 0;
+    white-space: pre-wrap;
+    color: #1F2937;
+    page-break-inside: avoid;
+  }
+
+  /* Badge/tag styles */
+  .badge {
+    display: inline-block;
+    padding: 1pt 5pt;
+    font-size: 7pt;
+    font-weight: 600;
+    border-radius: 0;
+    margin-right: 2pt;
+  }
+
+  .badge-confirmed { background: #D1FAE5; color: #059669; border: 1px solid #059669; }
+  .badge-possible { background: #FEF3C7; color: #D97706; border: 1px solid #D97706; }
+  .badge-negated { background: #FEE2E2; color: #DC2626; border: 1px solid #DC2626; }
+  .badge-current { background: #D1FAE5; color: #059669; border: 1px solid #059669; }
+  .badge-historical { background: #FEF3C7; color: #D97706; border: 1px solid #D97706; }
+  .badge-future { background: #DBEAFE; color: #2563EB; border: 1px solid #2563EB; }
+
+  /* Color-coded highlight classes for linking raw text to structured output */
+  mark.hl-blue { background: #DBEAFE; border-bottom: 2px solid #2563EB; }
+  mark.hl-green { background: #D1FAE5; border-bottom: 2px solid #059669; }
+  mark.hl-amber { background: #FEF3C7; border-bottom: 2px solid #D97706; }
+  mark.hl-red { background: #FEE2E2; border-bottom: 2px solid #DC2626; }
+  mark.hl-purple { background: #EDE9FE; border-bottom: 2px solid #7C3AED; }
+  mark.hl-teal { background: #CCFBF1; border-bottom: 2px solid #0D9488; }
+  mark.hl-pink { background: #FCE7F3; border-bottom: 2px solid #DB2777; }
+
+  /* Matching event header colors */
+  h4.ev-blue { color: #2563EB; border-left: 3px solid #2563EB; padding-left: 5pt; }
+  h4.ev-green { color: #059669; border-left: 3px solid #059669; padding-left: 5pt; }
+  h4.ev-amber { color: #D97706; border-left: 3px solid #D97706; padding-left: 5pt; }
+  h4.ev-red { color: #DC2626; border-left: 3px solid #DC2626; padding-left: 5pt; }
+  h4.ev-purple { color: #7C3AED; border-left: 3px solid #7C3AED; padding-left: 5pt; }
+  h4.ev-teal { color: #0D9488; border-left: 3px solid #0D9488; padding-left: 5pt; }
+  h4.ev-pink { color: #DB2777; border-left: 3px solid #DB2777; padding-left: 5pt; }
+
+  /* Compact list */
+  ul.compact {
+    margin: 3pt 0 6pt 14pt;
+    font-size: 9pt;
+  }
+
+  ul.compact li {
+    margin-bottom: 2pt;
+  }
+
+  /* Avoid breaks */
+  .no-break {
+    page-break-inside: avoid;
+  }
+
+  .page-break {
+    page-break-before: always;
+  }
+
+  /* Landscape section */
+  .landscape-section {
+    page: landscape-page;
+  }
+
+  /* JSON syntax highlighting (dark background) */
+  .json-key { color: #89B4FA; font-weight: 600; }
+  .json-str { color: #A6E3A1; }
+  .json-bool { color: #FAB387; }
+  .json-null { color: #9399B2; font-style: italic; }
+  .json-bracket { color: #CDD6F4; }
+  .json-num { color: #CBA6F7; }
+
+  /* Vocab section */
+  .vocab-example {
+    background: #F9FAFB;
+    border: 1px solid #D1D5DB;
+    border-radius: 0;
+    padding: 6pt 10pt;
+    margin: 6pt 0;
+    font-family: "Consolas", "Courier New", monospace;
+    font-size: 8pt;
+    line-height: 1.5;
+    page-break-inside: avoid;
+  }
+
+  .vocab-flow {
+    background: #EFF6FF;
+    border: 1px solid #BFDBFE;
+    border-radius: 0;
+    padding: 8pt 14pt;
+    margin: 8pt 0;
+    text-align: center;
+    font-size: 9pt;
+    page-break-inside: avoid;
+  }
+
+  .vocab-flow .vf-box {
+    display: inline-block;
+    border: 2px solid #2563EB;
+    padding: 4pt 10pt;
+    background: white;
+    font-weight: 600;
+    color: #1E40AF;
+    margin: 1pt 0;
+  }
+
+  .vocab-flow .vf-arrow {
+    display: block;
+    color: #6B7280;
+    font-size: 10pt;
+    margin: 1pt 0;
+  }
+
+  /* Glue text between sections */
+  .glue {
+    font-size: 9.5pt;
+    color: #374151;
+    margin: 6pt 0;
+    line-height: 1.55;
+  }
+
+  .glue-small {
+    font-size: 9pt;
+    color: #4B5563;
+    margin: 4pt 0;
+    line-height: 1.5;
+  }
+
+  /* Architecture diagram */
+  .arch-diagram {
+    margin: 10pt 0;
+    page-break-inside: avoid;
+  }
+
+  .arch-tier {
+    display: flex;
+    justify-content: center;
+    gap: 10pt;
+    margin: 4pt 0;
+  }
+
+  .arch-box {
+    display: inline-block;
+    border: 2px solid #2563EB;
+    padding: 6pt 14pt;
+    background: #EFF6FF;
+    font-weight: 600;
+    color: #1E40AF;
+    font-size: 9pt;
+    text-align: center;
+    min-width: 80pt;
+  }
+
+  .arch-box.box-teal { border-color: #0D9488; background: #CCFBF1; color: #0D9488; }
+  .arch-box.box-green { border-color: #059669; background: #D1FAE5; color: #065F46; }
+  .arch-box.box-amber { border-color: #D97706; background: #FEF3C7; color: #92400E; }
+  .arch-box.box-purple { border-color: #7C3AED; background: #EDE9FE; color: #5B21B6; }
+  .arch-box.box-red { border-color: #DC2626; background: #FEE2E2; color: #991B1B; }
+
+  .arch-box .box-count {
+    display: block;
+    font-size: 7.5pt;
+    font-weight: 400;
+    color: #6B7280;
+    margin-top: 1pt;
+  }
+
+  .arch-connector {
+    text-align: center;
+    color: #6B7280;
+    font-size: 10pt;
+    margin: 2pt 0;
+  }
+
+  .arch-label {
+    font-size: 7.5pt;
+    color: #6B7280;
+    text-align: center;
+    margin-top: 1pt;
+  }
+
+  /* Unified flow: compact cards with transformation highlights */
+  .uflow {
+    margin: 8pt 0;
+  }
+
+  .uflow-tier {
+    display: flex;
+    gap: 5pt;
+    margin: 0;
+  }
+
+  .uflow-card {
+    flex: 1;
+    border: 1.5pt solid #D1D5DB;
+    border-radius: 4pt;
+    overflow: hidden;
+  }
+
+  .uflow-card .uc-head {
+    padding: 2.5pt 8pt;
+    font-size: 7.5pt;
+    font-weight: 700;
+    color: #fff;
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+  }
+
+  .uflow-card .uc-head .uc-stat {
+    font-weight: 400;
+    font-size: 6.5pt;
+    opacity: 0.85;
+  }
+
+  .uflow-card .uc-body {
+    padding: 3pt 7pt 4pt 7pt;
+    font-size: 7pt;
+    line-height: 1.4;
+    background: #fff;
+  }
+
+  .uflow-card .uc-body .uc-raw {
+    font-family: "Courier New", monospace;
+    font-size: 7pt;
+    background: #F3F4F6;
+    padding: 2pt 4pt;
+    display: block;
+    margin: 1pt 0;
+    border-radius: 2pt;
+  }
+
+  .uflow-card .uc-body .uc-row {
+    display: flex;
+    gap: 3pt;
+    margin: 1pt 0;
+    font-size: 7pt;
+  }
+
+  .uflow-card .uc-body .uc-row .uk {
+    font-weight: 600;
+    color: #6B7280;
+    min-width: 48pt;
+    flex-shrink: 0;
+  }
+
+  .uflow-card .uc-body .uc-row .uv { color: #374151; }
+
+  /* Transformation highlights */
+  .uflow-card .uc-body .before {
+    color: #9CA3AF;
+    text-decoration: line-through;
+    text-decoration-color: #D1D5DB;
+    font-size: 6.5pt;
+  }
+
+  .uflow-card .uc-body .after {
+    color: #059669;
+    font-weight: 700;
+  }
+
+  .uflow-card .uc-body .ar {
+    color: #9CA3AF;
+    padding: 0 1pt;
+    font-size: 7pt;
+  }
+
+  .uflow-card .uc-body .new-tag {
+    display: inline-block;
+    background: #ECFDF5;
+    color: #059669;
+    font-size: 5.5pt;
+    font-weight: 700;
+    padding: 0 3pt;
+    border-radius: 2pt;
+    margin-left: 2pt;
+    vertical-align: middle;
+    text-transform: uppercase;
+    letter-spacing: 0.3pt;
+  }
+
+  .uflow-card .uc-body .pass-tag {
+    display: inline-block;
+    background: #F0FDF4;
+    color: #059669;
+    font-size: 5.5pt;
+    font-weight: 700;
+    padding: 0 3pt;
+    border-radius: 2pt;
+    margin-left: 2pt;
+    vertical-align: middle;
+  }
+
+  .uflow-card .uc-body .fail-tag {
+    display: inline-block;
+    background: #FEF2F2;
+    color: #DC2626;
+    font-size: 5.5pt;
+    font-weight: 700;
+    padding: 0 3pt;
+    border-radius: 2pt;
+    margin-left: 2pt;
+    vertical-align: middle;
+  }
+
+  .uflow-card .uc-body .muted {
+    color: #9CA3AF;
+    font-size: 6.5pt;
+  }
+
+  .uflow-card .uc-body .uc-sep {
+    border-top: 1px solid #E5E7EB;
+    margin: 2pt 0;
+  }
+
+  /* Card color variants */
+  .uflow-card.uc-blue { border-color: #2563EB; }
+  .uflow-card.uc-blue .uc-head { background: #2563EB; }
+
+  .uflow-card.uc-teal { border-color: #0D9488; }
+  .uflow-card.uc-teal .uc-head { background: #0D9488; }
+
+  .uflow-card.uc-amber { border-color: #D97706; }
+  .uflow-card.uc-amber .uc-head { background: #D97706; }
+
+  .uflow-card.uc-purple { border-color: #7C3AED; }
+  .uflow-card.uc-purple .uc-head { background: #7C3AED; }
+
+  .uflow-card.uc-green { border-color: #059669; }
+  .uflow-card.uc-green .uc-head { background: #059669; }
+
+  .uflow-card.uc-red { border-color: #DC2626; }
+  .uflow-card.uc-red .uc-head { background: #DC2626; }
+
+  .uflow-connector {
+    text-align: center;
+    color: #9CA3AF;
+    font-size: 8pt;
+    margin: 2pt 0;
+  }
+
+  .uflow-label {
+    font-size: 6.5pt;
+    color: #9CA3AF;
+    text-align: center;
+    margin: 0 0 2pt 0;
+  }
+
+  /* Family accent colors for Section 8 domain blocks */
+  .domain-block.family-procedure { border-left: 4px solid #2563EB; }
+  .domain-block.family-procedure h4 { color: #2563EB; }
+  .domain-block.family-procedure tr:nth-child(even) td { background: #EFF6FF; }
+
+  .domain-block.family-history { border-left: 4px solid #059669; }
+  .domain-block.family-history h4 { color: #059669; }
+  .domain-block.family-history tr:nth-child(even) td { background: #F0FDF4; }
+
+  .domain-block.family-outcomes { border-left: 4px solid #D97706; }
+  .domain-block.family-outcomes h4 { color: #D97706; }
+  .domain-block.family-outcomes tr:nth-child(even) td { background: #FFF7ED; }
+
+  .domain-block.family-symptoms { border-left: 4px solid #B45309; }
+  .domain-block.family-symptoms h4 { color: #B45309; }
+  .domain-block.family-symptoms tr:nth-child(even) td { background: #FFFBEB; }
+
+  .domain-block.family-medications { border-left: 4px solid #7C3AED; }
+  .domain-block.family-medications h4 { color: #7C3AED; }
+  .domain-block.family-medications tr:nth-child(even) td { background: #FAF5FF; }
+
+  /* Taxonomy tree */
+  .tax-tree { margin: 6pt 0; font-size: 7.5pt; line-height: 1.5; }
+  .tax-root { font-size: 10pt; font-weight: 700; color: #1F2937; margin-bottom: 6pt; }
+  .tax-root .tax-stat { font-weight: 400; color: #6B7280; font-size: 8pt; }
+  .tax-fam { margin: 4pt 0 2pt 0; padding: 3pt 8pt; border-radius: 4pt; color: #fff; font-weight: 700; font-size: 8pt; display: inline-block; }
+  .tax-fam-desc { color: #6B7280; font-size: 7pt; font-style: italic; margin-left: 4pt; }
+  .tax-et { margin: 2pt 0 1pt 16pt; font-weight: 600; font-size: 7.5pt; color: #374151; }
+  .tax-et .tax-count { font-weight: 400; color: #6B7280; }
+  .tax-concepts { margin: 0 0 0 32pt; }
+  .tax-concept { display: inline-block; background: #F3F4F6; border: 0.5pt solid #E5E7EB; border-radius: 3pt; padding: 0.5pt 5pt; margin: 1pt 2pt; font-size: 6.5pt; color: #374151; }
+  .tax-concept .tc-n { color: #9CA3AF; font-size: 6pt; }
+  .tax-attrs { margin: 1pt 0 3pt 32pt; }
+  .tax-attr { display: inline-block; background: #EEF2FF; border-radius: 2pt; padding: 0 4pt; margin: 0.5pt 1pt; font-size: 5.5pt; color: #4338CA; }
+  .tax-fam-hist { background: #3B82F6; }
+  .tax-fam-symp { background: #14B8A6; }
+  .tax-fam-proc { background: #F59E0B; }
+  .tax-fam-meds { background: #8B5CF6; }
+  .tax-fam-outc { background: #10B981; }
+  .tax-rels { margin: 8pt 0 0 0; padding: 4pt 8pt; background: #F9FAFB; border: 0.5pt solid #E5E7EB; border-radius: 4pt; font-size: 7pt; }
+  .tax-rels strong { font-size: 7.5pt; }
+  .tax-rel { display: inline-block; background: #FEF3C7; border-radius: 2pt; padding: 0 4pt; margin: 1pt 2pt; font-size: 6pt; color: #92400E; }
+
+  /* Definition nest */
+  .def-nest { margin: 4pt 0 0 0; font-size: 9pt; line-height: 1.65; }
+  .def-nest .dn-term { margin: 1.5pt 0; }
+  .def-nest .dn-term b { color: #1E40AF; font-weight: 600; }
+  .def-nest .dn-term code { font-size: 8pt; background: #F3F4F6; padding: 0 3pt; border-radius: 2pt; }
+  .def-nest .dn-sub { margin: 0 0 2pt 18pt; }
+  .def-nest .dn-sub .dn-term b { color: #374151; }
+  .def-nest .dn-expanded { color: #6B7280; font-size: 7.5pt; font-style: italic; margin-left: 4pt; }
+</style>
+</head>
+<body>
+
+<!-- TITLE PAGE -->
+<div class="title-page">
+  <h1>Kidney Stone Ontology:<br>From Clinical Notes to<br>Structured Registry</h1>
+  <div class="subtitle">A walkthrough of the data model, its design rationale,<br>and how raw text becomes answerable research data</div>
+  <div class="date">2026-03-12</div>
+</div>
+
+<!-- ================================================================== -->
+<!-- GLOSSARY                                                            -->
+<!-- ================================================================== -->
+<div class="section">
+  <h2>Definitions</h2>
+
+  <p class="glue-small">
+    Reference page. Every term in this document, one line each.
+  </p>
+
+  <div class="def-nest">
+    <div class="dn-term"><b>Clinical Event</b> &mdash; One clinical fact extracted from a note. A stone on imaging, a drug given, a procedure done. The central object in this system.</div>
+    <div class="dn-term"><b>Family</b> &mdash; One of 5 clinical domains that group related event types: history_timeline, symptoms_imaging, procedure_devices, medications, outcomes_complications.</div>
+    <div class="dn-term"><b>Event Type</b> &mdash; One of 10 specific kinds of clinical facts within a family. Each family contains 1&ndash;3 event types. The event type determines which attributes that event carries.</div>
+    <div class="dn-term"><b>Preferred Term</b> &mdash; The canonical name for what an event describes. &ldquo;ureteral stone&rdquo;, &ldquo;ureteroscopy&rdquo;, &ldquo;tamsulosin&rdquo;. Normalized through Event Terms.</div>
+    <div class="dn-term"><b>Concept ID</b> &mdash; A stable identifier built from family + event_type + preferred_term. Example: <code>symptoms_imaging.imaging_finding.ureteral_stone</code></div>
+    <div class="dn-term"><b>Attributes</b> &mdash; Key-value pairs that describe the details of an event. laterality=RIGHT, size=5, unit=mm. Each event type has its own attribute set.</div>
+    <div class="dn-term"><b>Evidence Set</b> &mdash; The exact quoted text from the note with character offsets and section name. Every event traces back to the sentence it came from.</div>
+    <div class="dn-term"><b>Assertion Strength</b> &mdash; How certain the clinician was. CONFIRMED = definitely present. POSSIBLE = suspected. NEGATED = explicitly ruled out.</div>
+    <div class="dn-term"><b>Temporal Status</b> &mdash; When relative to this visit. CURRENT = happening now. HISTORICAL = happened before. FUTURE = planned.</div>
+    <div class="dn-term"><b>Experiencer</b> &mdash; Who this happened to. PATIENT or FAMILY_MEMBER (for family history).</div>
+    <div class="dn-term"><b>Event Terms</b> &mdash; 990 aliases that map to 252 canonical preferred terms. Normalizes the name of the thing. &ldquo;UVJ calculus&rdquo; &rarr; &ldquo;ureteral stone&rdquo;.</div>
+    <div class="dn-term"><b>Attribute Terms</b> &mdash; 910 aliases that map to 327 canonical attribute values. Normalizes the details. &ldquo;right&rdquo; &rarr; RIGHT, &ldquo;ureterovesicular junction&rdquo; &rarr; UVJ.</div>
+    <div class="dn-term"><b>Normalization Status</b> &mdash; CANONICAL = alias found in vocab. PROVISIONAL = new term, flagged for review. CUSTOM = has a user-provided concept_id.</div>
+    <div class="dn-term"><b>Attribute Policy</b> &mdash; 89 rules defining what values are allowed per attribute per event type. Each rule specifies kind, style, and provisional.</div>
+    <div class="dn-sub">
+      <div class="dn-term"><b>attribute_kind</b> &mdash; controlled = must be in vocab. semi_structured = follows a pattern (dates, measurements). free_text = any value allowed.</div>
+      <div class="dn-term"><b>canonical_style</b> &mdash; How the value is formatted. upper_tokens = RIGHT, LEFT. lower_text = nonobstructing. clinical_mixed = UVJ, UPJ. Others: measurement_unit, numeric_or_text, date_or_span, free_text.</div>
+      <div class="dn-term"><b>allow_provisional</b> &mdash; true = unrecognized values accepted and flagged. false = unrecognized values rejected outright.</div>
+    </div>
+    <div class="dn-term"><b>Relation</b> &mdash; A typed link between two events in the same note. 9 types: performed_for, caused_by, follow_up_for, treated_by, decompresses, temporally_linked, modifies, resolved_after, causes_obstruction.</div>
+    <div class="dn-term"><b>Projection</b> &mdash; The process of computing answers from events. Events go in, answers to clinician questions come out.</div>
+    <div class="dn-term"><b>Resolver</b> &mdash; The function that reads events and extracts the right data to answer one question. Each of the 130 questions has exactly one resolver.</div>
+    <div class="dn-sub">
+      <div class="dn-term"><b>event_presence</b> &mdash; Checks if a matching event exists. Returns yes/no. Example: &ldquo;Was a stent placed?&rdquo;</div>
+      <div class="dn-term"><b>event_attribute_values</b> &mdash; Reads a specific attribute from matching events. Example: &ldquo;Where is the stone?&rdquo; &rarr; reads imaging_finding.location.</div>
+      <div class="dn-term"><b>event_concepts</b> &mdash; Matches events against keyword lists. Example: &ldquo;Did symptoms resolve?&rdquo; &rarr; matches outcome_event against [&ldquo;symptom resolution&rdquo;, &ldquo;pain resolved&rdquo;].</div>
+      <div class="dn-term"><b>event_grouped_counts</b> &mdash; Counts events grouped by a field. Example: &ldquo;How many medications?&rdquo; &rarr; counts medication_exposure events.</div>
+    </div>
+    <div class="dn-term"><b>Registry Question</b> &mdash; One of 130 clinician-designed questions. Each has a registry_id, a resolver, and a priority score from clinician voting.</div>
+    <div class="dn-sub">
+      <div class="dn-term"><b>registry_id</b> &mdash; Unique identifier for each question. Example: <code>stone_location</code>, <code>was_stent_placed</code>.</div>
+      <div class="dn-term"><b>Resolution State</b> &mdash; Whether a question was answered or unanswered for a given note. Unanswered means the note had no events matching the resolver.</div>
+      <div class="dn-term"><b>Answer Scope</b> &mdash; What data the question looks at. note = this note only. patient_timeline = all notes for this patient. encounter = this visit. <span class="dn-expanded">(expanded)</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- ================================================================== -->
+<!-- TAXONOMY TREE                                                       -->
+<!-- ================================================================== -->
+<div class="section">
+  <h2>Ontology Taxonomy Tree</h2>
+  <p class="glue-small">
+    The full schema. Five families, ten event types, and all 252 canonical preferred terms defined in the ontology. Attributes show their policy type: controlled, semi_structured, or free_text.
+  </p>
+
+  <div class="tax-tree">
+    <div class="tax-root">Kidney Stone Ontology <span class="tax-stat">&mdash; 5 families &middot; 10 event types &middot; 252 preferred terms &middot; 89 attribute policies &middot; 9 relation types</span></div>
+
+    <!-- history_timeline -->
+    <div><span class="tax-fam tax-fam-hist">history_timeline</span> <span class="tax-fam-desc">Prior history, family history, longitudinal stone history, social/support context</span></div>
+    <div class="tax-et">history_fact <span class="tax-count">(15 preferred terms &middot; 7 attributes)</span></div>
+    <div class="tax-concepts">
+      <span class="tax-concept">chronic kidney disease</span>
+      <span class="tax-concept">family history of kidney stones</span>
+      <span class="tax-concept">horseshoe kidney</span>
+      <span class="tax-concept">kidney stone history</span>
+      <span class="tax-concept">kidney stones during pregnancy</span>
+      <span class="tax-concept">medullary sponge kidney</span>
+      <span class="tax-concept">multidrug-resistant organism UTI</span>
+      <span class="tax-concept">obstetric complication</span>
+      <span class="tax-concept">prior lithotripsy</span>
+      <span class="tax-concept">prior nephrostomy</span>
+      <span class="tax-concept">prior percutaneous nephrolithotomy</span>
+      <span class="tax-concept">prior ureteral stent</span>
+      <span class="tax-concept">prior ureteroscopy</span>
+      <span class="tax-concept">recurrent urinary tract infection</span>
+      <span class="tax-concept">solitary kidney</span>
+    </div>
+    <div class="tax-attrs">
+      <span class="tax-attr">status</span><span class="tax-attr">count</span><span class="tax-attr">timeframe</span><span class="tax-attr">history_kind</span><span class="tax-attr">subject</span><span class="tax-attr">age_of_onset</span><span class="tax-attr">intervention_status</span>
+    </div>
+    <div class="tax-et">social_context_fact <span class="tax-count">(14 preferred terms &middot; 3 attributes)</span></div>
+    <div class="tax-concepts">
+      <span class="tax-concept">caregiver support</span>
+      <span class="tax-concept">disability</span>
+      <span class="tax-concept">education level</span>
+      <span class="tax-concept">employed</span>
+      <span class="tax-concept">employment status</span>
+      <span class="tax-concept">housing instability</span>
+      <span class="tax-concept">limited support</span>
+      <span class="tax-concept">lives alone</span>
+      <span class="tax-concept">no support</span>
+      <span class="tax-concept">social isolation</span>
+      <span class="tax-concept">transportation available</span>
+      <span class="tax-concept">transportation barrier</span>
+      <span class="tax-concept">unemployed</span>
+      <span class="tax-concept">uninsured</span>
+    </div>
+    <div class="tax-attrs">
+      <span class="tax-attr">support_type</span><span class="tax-attr">value</span><span class="tax-attr">timeframe</span>
+    </div>
+
+    <!-- symptoms_imaging -->
+    <div style="margin-top:4pt;"><span class="tax-fam tax-fam-symp">symptoms_imaging</span> <span class="tax-fam-desc">Stone-related symptoms, imaging findings, stone features</span></div>
+    <div class="tax-et">symptom_presentation <span class="tax-count">(1 preferred term &middot; 6 attributes)</span></div>
+    <div class="tax-concepts">
+      <span class="tax-concept">stone-related symptomatic presentation</span>
+    </div>
+    <div class="tax-attrs">
+      <span class="tax-attr">symptoms</span><span class="tax-attr">laterality</span><span class="tax-attr">severity</span><span class="tax-attr">clinical_context</span><span class="tax-attr">exam_finding</span><span class="tax-attr">onset_duration</span>
+    </div>
+    <div class="tax-et">imaging_finding <span class="tax-count">(23 preferred terms &middot; 15 attributes &middot; 3 relations)</span></div>
+    <div class="tax-concepts">
+      <span class="tax-concept">bladder stone</span>
+      <span class="tax-concept">calcium oxalate stone</span>
+      <span class="tax-concept">calcium phosphate stone</span>
+      <span class="tax-concept">calyceal diverticulum</span>
+      <span class="tax-concept">calyceal rupture</span>
+      <span class="tax-concept">cystine stone</span>
+      <span class="tax-concept">delayed nephrogram</span>
+      <span class="tax-concept">forniceal rupture</span>
+      <span class="tax-concept">hydronephrosis</span>
+      <span class="tax-concept">hydroureter</span>
+      <span class="tax-concept">hydroureteronephrosis</span>
+      <span class="tax-concept">kidney stone</span>
+      <span class="tax-concept">medullary nephrocalcinosis</span>
+      <span class="tax-concept">obstructive uropathy</span>
+      <span class="tax-concept">perinephric stranding</span>
+      <span class="tax-concept">periureteral stranding</span>
+      <span class="tax-concept">renal parenchymal thinning</span>
+      <span class="tax-concept">staghorn calculus</span>
+      <span class="tax-concept">struvite stone</span>
+      <span class="tax-concept">ureteral stone</span>
+      <span class="tax-concept">ureteral stricture</span>
+      <span class="tax-concept">uric acid stone</span>
+      <span class="tax-concept">urinoma</span>
+    </div>
+    <div class="tax-attrs">
+      <span class="tax-attr">laterality</span><span class="tax-attr">location</span><span class="tax-attr">severity</span><span class="tax-attr">size</span><span class="tax-attr">unit</span><span class="tax-attr">hounsfield_unit</span><span class="tax-attr">attribution</span><span class="tax-attr">status</span><span class="tax-attr">anatomic_detail</span><span class="tax-attr">calyceal_detail</span><span class="tax-attr">stone_count</span><span class="tax-attr">stone_burden</span><span class="tax-attr">comparison_status</span><span class="tax-attr">comparison_reference</span><span class="tax-attr">clinical_significance</span>
+    </div>
+
+    <!-- procedure_devices -->
+    <div style="margin-top:4pt;"><span class="tax-fam tax-fam-proc">procedure_devices</span> <span class="tax-fam-desc">Procedures, devices, stents, operative details</span></div>
+    <div class="tax-et">procedure_event <span class="tax-count">(23 preferred terms &middot; 21 attributes &middot; 4 relations)</span></div>
+    <div class="tax-concepts">
+      <span class="tax-concept">cystoscopy</span>
+      <span class="tax-concept">electrohydraulic lithotripsy</span>
+      <span class="tax-concept">extracorporeal shock wave lithotripsy</span>
+      <span class="tax-concept">laser lithotripsy</span>
+      <span class="tax-concept">lithotripsy</span>
+      <span class="tax-concept">nephrectomy</span>
+      <span class="tax-concept">nephrostogram</span>
+      <span class="tax-concept">nephrostomy exchange</span>
+      <span class="tax-concept">nephrostomy internalization</span>
+      <span class="tax-concept">nephrostomy placement</span>
+      <span class="tax-concept">nephrostomy removal</span>
+      <span class="tax-concept">nephroureterectomy</span>
+      <span class="tax-concept">open nephrolithotomy</span>
+      <span class="tax-concept">percutaneous access</span>
+      <span class="tax-concept">percutaneous nephrolithotomy</span>
+      <span class="tax-concept">pyeloplasty</span>
+      <span class="tax-concept">retrograde pyelogram</span>
+      <span class="tax-concept">stone basket retrieval</span>
+      <span class="tax-concept">ultrasonic lithotripsy</span>
+      <span class="tax-concept">ureteral stent exchange</span>
+      <span class="tax-concept">ureteral stent placement</span>
+      <span class="tax-concept">ureteral stent removal</span>
+      <span class="tax-concept">ureteroscopy</span>
+    </div>
+    <div class="tax-attrs">
+      <span class="tax-attr">laterality</span><span class="tax-attr">status</span><span class="tax-attr">approach</span><span class="tax-attr">procedure_date</span><span class="tax-attr">qualifier</span><span class="tax-attr">indication</span><span class="tax-attr">target_finding</span><span class="tax-attr">anatomic_target</span><span class="tax-attr">laser_power</span><span class="tax-attr">laser_frequency</span><span class="tax-attr">laser_type</span><span class="tax-attr">laser_fiber_type</span><span class="tax-attr">laser_fiber_size</span><span class="tax-attr">dilation_diameter</span><span class="tax-attr">irrigation_pressure</span><span class="tax-attr">suction_pressure</span><span class="tax-attr">shock_rate</span><span class="tax-attr">max_energy</span><span class="tax-attr">total_energy</span><span class="tax-attr">swl_machine_type</span><span class="tax-attr">lithotripter_energy_source</span>
+    </div>
+    <div class="tax-et">device_event <span class="tax-count">(20 preferred terms &middot; 11 attributes &middot; 5 relations)</span></div>
+    <div class="tax-concepts">
+      <span class="tax-concept">access sheath</span>
+      <span class="tax-concept">catheter</span>
+      <span class="tax-concept">cystoscope</span>
+      <span class="tax-concept">dual lumen catheter</span>
+      <span class="tax-concept">foley catheter</span>
+      <span class="tax-concept">grasping forceps</span>
+      <span class="tax-concept">guidewire</span>
+      <span class="tax-concept">laser fiber</span>
+      <span class="tax-concept">nephroscope</span>
+      <span class="tax-concept">nephrostomy tube</span>
+      <span class="tax-concept">nephroureteral stent</span>
+      <span class="tax-concept">percutaneous access needle</span>
+      <span class="tax-concept">pigtail catheter</span>
+      <span class="tax-concept">stone retrieval basket</span>
+      <span class="tax-concept">suprapubic catheter</span>
+      <span class="tax-concept">surgical drain</span>
+      <span class="tax-concept">ureteral access sheath</span>
+      <span class="tax-concept">ureteral catheter</span>
+      <span class="tax-concept">ureteral stent</span>
+      <span class="tax-concept">ureteroscope</span>
+    </div>
+    <div class="tax-attrs">
+      <span class="tax-attr">device_type</span><span class="tax-attr">laterality</span><span class="tax-attr">status</span><span class="tax-attr">size</span><span class="tax-attr">length</span><span class="tax-attr">unit</span><span class="tax-attr">indication</span><span class="tax-attr">target_finding</span><span class="tax-attr">anatomic_target</span><span class="tax-attr">diameter</span><span class="tax-attr">make_model</span>
+    </div>
+
+    <!-- medications -->
+    <div style="margin-top:4pt;"><span class="tax-fam tax-fam-meds">medications</span> <span class="tax-fam-desc">Medication administrations and prescriptions</span></div>
+    <div class="tax-et">medication_exposure <span class="tax-count">(88 preferred terms &middot; 9 attributes &middot; 1 relation)</span></div>
+    <div class="tax-concepts">
+      <span class="tax-concept">IV antibiotics</span>
+      <span class="tax-concept">IV fluids</span>
+      <span class="tax-concept">acetaminophen</span>
+      <span class="tax-concept">acetaminophen-codeine</span>
+      <span class="tax-concept">alfuzosin</span>
+      <span class="tax-concept">allopurinol</span>
+      <span class="tax-concept">amoxicillin</span>
+      <span class="tax-concept">amoxicillin-pot clavulanate</span>
+      <span class="tax-concept">ampicillin-sulbactam</span>
+      <span class="tax-concept">azithromycin</span>
+      <span class="tax-concept">bupivacaine</span>
+      <span class="tax-concept">calcium citrate</span>
+      <span class="tax-concept">cefazolin</span>
+      <span class="tax-concept">cefepime</span>
+      <span class="tax-concept">cefpodoxime</span>
+      <span class="tax-concept">ceftriaxone</span>
+      <span class="tax-concept">cefuroxime</span>
+      <span class="tax-concept">celecoxib</span>
+      <span class="tax-concept">cephalexin</span>
+      <span class="tax-concept">chlorthalidone</span>
+      <span class="tax-concept">ciprofloxacin</span>
+      <span class="tax-concept">clindamycin</span>
+      <span class="tax-concept">colchicine</span>
+      <span class="tax-concept">d-penicillamine</span>
+      <span class="tax-concept">dexamethasone</span>
+      <span class="tax-concept">diclofenac</span>
+      <span class="tax-concept">diphenhydramine</span>
+      <span class="tax-concept">doxazosin</span>
+      <span class="tax-concept">dutasteride</span>
+      <span class="tax-concept">enoxaparin</span>
+      <span class="tax-concept">ertapenem</span>
+      <span class="tax-concept">febuxostat</span>
+      <span class="tax-concept">fentanyl</span>
+      <span class="tax-concept">finasteride</span>
+      <span class="tax-concept">fosfomycin</span>
+      <span class="tax-concept">gabapentin</span>
+      <span class="tax-concept">gentamicin</span>
+      <span class="tax-concept">granisetron</span>
+      <span class="tax-concept">hydrochlorothiazide</span>
+      <span class="tax-concept">hydrocodone</span>
+      <span class="tax-concept">hydrocodone-acetaminophen</span>
+      <span class="tax-concept">hydromorphone</span>
+      <span class="tax-concept">ibuprofen</span>
+      <span class="tax-concept">indomethacin</span>
+      <span class="tax-concept">ketorolac</span>
+      <span class="tax-concept">lactated ringers</span>
+      <span class="tax-concept">levofloxacin</span>
+      <span class="tax-concept">lidocaine</span>
+      <span class="tax-concept">lisinopril</span>
+      <span class="tax-concept">meloxicam</span>
+      <span class="tax-concept">meropenem</span>
+      <span class="tax-concept">methylprednisolone</span>
+      <span class="tax-concept">metoclopramide</span>
+      <span class="tax-concept">metronidazole</span>
+      <span class="tax-concept">mirabegron</span>
+      <span class="tax-concept">morphine</span>
+      <span class="tax-concept">naproxen</span>
+      <span class="tax-concept">nitrofurantoin</span>
+      <span class="tax-concept">normal saline</span>
+      <span class="tax-concept">ondansetron</span>
+      <span class="tax-concept">oxybutynin</span>
+      <span class="tax-concept">oxycodone</span>
+      <span class="tax-concept">oxycodone-acetaminophen</span>
+      <span class="tax-concept">phenazopyridine</span>
+      <span class="tax-concept">piperacillin-tazobactam</span>
+      <span class="tax-concept">potassium chloride</span>
+      <span class="tax-concept">potassium citrate</span>
+      <span class="tax-concept">prednisone</span>
+      <span class="tax-concept">pregabalin</span>
+      <span class="tax-concept">prochlorperazine</span>
+      <span class="tax-concept">promethazine</span>
+      <span class="tax-concept">silodosin</span>
+      <span class="tax-concept">sodium bicarbonate</span>
+      <span class="tax-concept">sodium citrate-citric acid</span>
+      <span class="tax-concept">solifenacin</span>
+      <span class="tax-concept">spironolactone</span>
+      <span class="tax-concept">tamsulosin</span>
+      <span class="tax-concept">terazosin</span>
+      <span class="tax-concept">thiazide diuretic</span>
+      <span class="tax-concept">tiopronin</span>
+      <span class="tax-concept">tolterodine</span>
+      <span class="tax-concept">tramadol</span>
+      <span class="tax-concept">trimethoprim</span>
+      <span class="tax-concept">trimethoprim-sulfamethoxazole</span>
+      <span class="tax-concept">trospium</span>
+      <span class="tax-concept">vancomycin</span>
+      <span class="tax-concept">vitamin D</span>
+      <span class="tax-concept">warfarin</span>
+    </div>
+    <div class="tax-attrs">
+      <span class="tax-attr">drug_class</span><span class="tax-attr">dose</span><span class="tax-attr">route</span><span class="tax-attr">frequency</span><span class="tax-attr">duration</span><span class="tax-attr">date</span><span class="tax-attr">indication</span><span class="tax-attr">context</span><span class="tax-attr">status</span>
+    </div>
+
+    <!-- outcomes_complications -->
+    <div style="margin-top:4pt;"><span class="tax-fam tax-fam-outc">outcomes_complications</span> <span class="tax-fam-desc">Complications, outcomes, recommendations, follow-up</span></div>
+    <div class="tax-et">adverse_effect <span class="tax-count">(29 preferred terms &middot; 5 attributes &middot; 2 relations)</span></div>
+    <div class="tax-concepts">
+      <span class="tax-concept">acute kidney injury</span>
+      <span class="tax-concept">allergic reaction</span>
+      <span class="tax-concept">anaphylaxis</span>
+      <span class="tax-concept">anesthetic complication</span>
+      <span class="tax-concept">bacteremia</span>
+      <span class="tax-concept">bladder spasm</span>
+      <span class="tax-concept">bleeding</span>
+      <span class="tax-concept">clot retention</span>
+      <span class="tax-concept">contrast reaction</span>
+      <span class="tax-concept">dizziness</span>
+      <span class="tax-concept">fever</span>
+      <span class="tax-concept">gross hematuria</span>
+      <span class="tax-concept">hives</span>
+      <span class="tax-concept">nausea</span>
+      <span class="tax-concept">nausea and vomiting</span>
+      <span class="tax-concept">obstructive nephropathy</span>
+      <span class="tax-concept">perinephric hematoma</span>
+      <span class="tax-concept">pyelonephritis</span>
+      <span class="tax-concept">pyonephrosis</span>
+      <span class="tax-concept">rash</span>
+      <span class="tax-concept">sepsis</span>
+      <span class="tax-concept">steinstrasse</span>
+      <span class="tax-concept">subcapsular hematoma</span>
+      <span class="tax-concept">ureteral injury</span>
+      <span class="tax-concept">urinary retention</span>
+      <span class="tax-concept">urinary tract infection</span>
+      <span class="tax-concept">urosepsis</span>
+      <span class="tax-concept">vomiting</span>
+      <span class="tax-concept">wound complication</span>
+    </div>
+    <div class="tax-attrs">
+      <span class="tax-attr">reaction_type</span><span class="tax-attr">severity</span><span class="tax-attr">suspected_cause</span><span class="tax-attr">timing</span><span class="tax-attr">status</span>
+    </div>
+    <div class="tax-et">outcome_event <span class="tax-count">(16 preferred terms &middot; 7 attributes &middot; 3 relations)</span></div>
+    <div class="tax-concepts">
+      <span class="tax-concept">culture negative</span>
+      <span class="tax-concept">culture positive</span>
+      <span class="tax-concept">fever resolution</span>
+      <span class="tax-concept">infection resolved</span>
+      <span class="tax-concept">no stone passage</span>
+      <span class="tax-concept">pain controlled</span>
+      <span class="tax-concept">partial stone clearance</span>
+      <span class="tax-concept">readmission</span>
+      <span class="tax-concept">renal function improved</span>
+      <span class="tax-concept">renal function stable</span>
+      <span class="tax-concept">residual stone</span>
+      <span class="tax-concept">stent intolerance</span>
+      <span class="tax-concept">stone free</span>
+      <span class="tax-concept">stone passage</span>
+      <span class="tax-concept">stone recurrence</span>
+      <span class="tax-concept">symptom resolution</span>
+    </div>
+    <div class="tax-attrs">
+      <span class="tax-attr">status</span><span class="tax-attr">timing</span><span class="tax-attr">value</span><span class="tax-attr">qualifier</span><span class="tax-attr">count</span><span class="tax-attr">comparison_status</span><span class="tax-attr">comparison_reference</span>
+    </div>
+    <div class="tax-et">recommendation_event <span class="tax-count">(23 preferred terms &middot; 5 attributes &middot; 2 relations)</span> <span style="color:#6B7280;font-size:6.5pt;font-style:italic;">(expanded)</span></div>
+    <div class="tax-concepts">
+      <span class="tax-concept">24-hour urine collection</span>
+      <span class="tax-concept">activity modification</span>
+      <span class="tax-concept">dietary modification</span>
+      <span class="tax-concept">elective extracorporeal shock wave lithotripsy</span>
+      <span class="tax-concept">elective percutaneous nephrolithotomy</span>
+      <span class="tax-concept">elective ureteroscopy</span>
+      <span class="tax-concept">hydration</span>
+      <span class="tax-concept">low oxalate diet</span>
+      <span class="tax-concept">low purine diet</span>
+      <span class="tax-concept">low sodium diet</span>
+      <span class="tax-concept">medical expulsive therapy</span>
+      <span class="tax-concept">metabolic workup</span>
+      <span class="tax-concept">nephrology referral</span>
+      <span class="tax-concept">pharmacotherapy</span>
+      <span class="tax-concept">primary care follow-up</span>
+      <span class="tax-concept">repeat imaging</span>
+      <span class="tax-concept">return precautions</span>
+      <span class="tax-concept">stent removal</span>
+      <span class="tax-concept">stone analysis</span>
+      <span class="tax-concept">strain urine for stone</span>
+      <span class="tax-concept">thiazide therapy</span>
+      <span class="tax-concept">urology follow-up</span>
+      <span class="tax-concept">urology referral</span>
+    </div>
+    <div class="tax-attrs">
+      <span class="tax-attr">recommendation_type</span><span class="tax-attr">status</span><span class="tax-attr">target</span><span class="tax-attr">qualifier</span><span class="tax-attr">indication</span>
+    </div>
+
+    <!-- Relations -->
+    <div class="tax-rels">
+      <strong>Cross-cutting Relations</strong> (9 types linking events within the same note)<br>
+      <span class="tax-rel">performed_for</span>
+      <span class="tax-rel">caused_by</span>
+      <span class="tax-rel">follow_up_for</span>
+      <span class="tax-rel">treated_by</span>
+      <span class="tax-rel">decompresses</span>
+      <span class="tax-rel">temporally_linked</span>
+      <span class="tax-rel">modifies</span>
+      <span class="tax-rel">resolved_after</span>
+      <span class="tax-rel">causes_obstruction</span>
+    </div>
+  </div>
+</div>
+
+<!-- ================================================================== -->
+<!-- SECTION 1: The Problem and the Pipeline                            -->
+<!-- ================================================================== -->
+<div class="section">
+  <h2>1. The Problem</h2>
+
+  <p>
+    A note states: "Punctate 2 mm nonobstructing calculus at the right ureterovesicular junction." The question is how do you take that and make it structured. How do you get from a sentence a surgeon dictated into a queryable fact with a laterality, a location, a size, and a canonical name that matches every other note that mentions the same kind of stone.
+  </p>
+</div>
+
+<!-- ================================================================== -->
+<!-- SECTION 2: The Data Model                                          -->
+<!-- ================================================================== -->
+<div class="section">
+  <h2>2. The Data Model: Why These Elements</h2>
+
+  <p class="glue">
+    The central object in this system is the <strong>clinical event</strong>. An event represents
+    one clinical fact extracted from a note: a stone found on imaging, a drug administered, a
+    procedure performed, a complication documented. The model was designed around one question:
+    what are all the distinct things a clinician writes about in a kidney stone note that a
+    researcher would want to query later?
+  </p>
+
+  <p class="glue-small">
+    Kidney stone care follows a natural clinical arc. Five families cover it. Each one maps to a concern urologists think about as a unit.
+  </p>
+
+  <table>
+    <tr>
+      <th>Family</th>
+      <th>Clinical Concern</th>
+      <th>Event Types</th>
+      <th>What It Captures</th>
+    </tr>
+    <tr>
+      <td><strong>history_timeline</strong></td>
+      <td>What happened before this visit?</td>
+      <td>history_fact, social_context_fact</td>
+      <td>Prior stones, family history, anatomic variants, caregiver/transportation barriers</td>
+    </tr>
+    <tr>
+      <td><strong>symptoms_imaging</strong></td>
+      <td>What are we seeing now?</td>
+      <td>symptom_presentation, imaging_finding</td>
+      <td>Flank pain, hematuria, stone location/size/laterality, hydronephrosis, obstruction</td>
+    </tr>
+    <tr>
+      <td><strong>procedure_devices</strong></td>
+      <td>What did we do?</td>
+      <td>procedure_event, device_event</td>
+      <td>Ureteroscopy, PCNL, stent placement, nephrostomy tubes, laser settings</td>
+    </tr>
+    <tr>
+      <td><strong>medications</strong></td>
+      <td>What drugs were given?</td>
+      <td>medication_exposure</td>
+      <td>Drug name, dose, route, frequency, indication, context (ED, home, intra-op)</td>
+    </tr>
+    <tr>
+      <td><strong>outcomes_complications</strong></td>
+      <td>What was the result?</td>
+      <td>adverse_effect, outcome_event, recommendation_event</td>
+      <td>Complications, stone-free status, symptom resolution, follow-up instructions</td>
+    </tr>
+  </table>
+
+  <div class="rationale-box">
+    Fewer families means less ambiguity about where a concept belongs. Symptoms and imaging go together because clinicians evaluate them together.
+  </div>
+
+  <p class="glue-small">
+    Each event type captures a distinct clinical fact. Ten types across five families. A family is the clinical domain, the event type is the specific thing inside that domain. procedure_devices has two event types because the surgery itself and the stent left behind are different facts with different attributes and different research questions. The table below maps every type to its parent family.
+  </p>
+
+  <table>
+    <tr><th>Event Type</th><th>Family</th><th>What It Represents</th><th>Example</th></tr>
+    <tr>
+      <td>history_fact</td><td>history_timeline</td>
+      <td>A prior clinical fact: stone history, prior surgery, family history</td>
+      <td>"history of nephrolithiasis"</td>
+    </tr>
+    <tr>
+      <td>social_context_fact</td><td>history_timeline</td>
+      <td>Social support, transportation, caregiver availability</td>
+      <td>"caregiver present"</td>
+    </tr>
+    <tr>
+      <td>symptom_presentation</td><td>symptoms_imaging</td>
+      <td>Stone-related symptoms the patient presented with</td>
+      <td>"acute right flank pain with nausea"</td>
+    </tr>
+    <tr>
+      <td>imaging_finding</td><td>symptoms_imaging</td>
+      <td>A finding on imaging: stone, hydronephrosis, obstruction</td>
+      <td>"5mm calculus at right UVJ"</td>
+    </tr>
+    <tr>
+      <td>procedure_event</td><td>procedure_devices</td>
+      <td>A surgery or interventional procedure performed</td>
+      <td>"ureteroscopy with laser lithotripsy"</td>
+    </tr>
+    <tr>
+      <td>device_event</td><td>procedure_devices</td>
+      <td>A device placed, removed, or currently in the patient</td>
+      <td>"6F ureteral stent placed"</td>
+    </tr>
+    <tr>
+      <td>medication_exposure</td><td>medications</td>
+      <td>One drug administration or prescription</td>
+      <td>"tamsulosin 0.4 mg PO daily"</td>
+    </tr>
+    <tr>
+      <td>adverse_effect</td><td>outcomes_complications</td>
+      <td>A complication or side effect of treatment</td>
+      <td>"acute kidney injury post-operatively"</td>
+    </tr>
+    <tr>
+      <td>outcome_event</td><td>outcomes_complications</td>
+      <td>A treatment outcome: stone passage, symptom resolution</td>
+      <td>"stone-free on follow-up imaging"</td>
+    </tr>
+    <tr>
+      <td>recommendation_event</td><td>outcomes_complications</td>
+      <td>A follow-up or lifestyle recommendation</td>
+      <td>"follow up in urology clinic"</td>
+    </tr>
+  </table>
+
+  <h3>What Goes Inside an Event</h3>
+
+  <p class="glue">
+    Every event carries the same core fields. These were chosen so that each event is
+    self-contained: you can look at a single event and know what it is, when it happened
+    relative to this visit, how certain the clinician was, and exactly where in the note
+    it came from.
+  </p>
+
+  <table>
+    <tr><th>Field</th><th>What It Records</th><th>Example</th></tr>
+    <tr><td>event_id</td><td>Unique ID within this note</td><td>EV1, EV2, EV3...</td></tr>
+    <tr><td>family</td><td>Which of the 5 clinical domains</td><td>symptoms_imaging</td></tr>
+    <tr><td>event_type</td><td>Which of the 10 types</td><td>imaging_finding</td></tr>
+    <tr><td>preferred_term</td><td>Canonical name for the clinical concept</td><td>ureteral stone</td></tr>
+    <tr><td>attributes</td><td>Key-value pairs specific to the event type</td><td>{laterality: RIGHT, size: 5, unit: mm}</td></tr>
+    <tr><td>temporal_status</td><td>When relative to this visit</td><td>CURRENT, HISTORICAL, or FUTURE</td></tr>
+    <tr><td>assertion_strength</td><td>How certain the clinician was</td><td>CONFIRMED, POSSIBLE, or NEGATED</td></tr>
+    <tr><td>experiencer</td><td>Who this happened to</td><td>PATIENT or FAMILY_MEMBER</td></tr>
+    <tr><td>evidence_set</td><td>Exact quoted text with character offsets and section</td><td>"5mm calculus..." at chars 1204-1261</td></tr>
+    <tr><td>relations</td><td>Links to other events in the same note</td><td>performed_for -> EV1</td></tr>
+  </table>
+
+  <div class="rationale-box">
+    "Kidney stone" means three different things depending on context. A CURRENT stone is why the patient is here today. A HISTORICAL stone means they are a recurrent stone former. A NEGATED stone ("no evidence of calculus") means imaging was performed and nothing was found. That is clinically different from never having been imaged. Without temporal_status and assertion_strength, a query cannot distinguish these cases.
+  </div>
+</div>
+
+<!-- ================================================================== -->
+<!-- SECTION 2.5: System Architecture                                    -->
+<!-- ================================================================== -->
+<div class="section">
+  <h2>How the Pieces Connect</h2>
+
+  <p class="glue">
+    Below is every step that turns a sentence into a queryable fact. One real sentence from an ED note, every transformation, real data at every tier.
+  </p>
+
+  <p class="glue-small">
+    <strong>Clinical Note</strong> is the raw input. A surgeon dictated "Punctate 2 mm nonobstructing calculus at the right ureterovesicular junction" and that sentence needs to become structured data.
+    <strong>Event Terms</strong> normalize the name of the thing. The note says "UVJ calculus" but across 9,869 notes that same stone shows up as "ureterovesicular junction stone" and "distal ureteral calculus" so 990 aliases collapse to 252 canonical names and every spelling lands on one term.
+    <strong>Attribute Terms</strong> normalize the details about that thing. "right" becomes RIGHT, "ureterovesicular junction" becomes UVJ. 910 aliases map to 327 canonical values.
+    <strong>Assembled Event</strong> is what comes out. It has a family (the clinical domain like symptoms_imaging), an event_type (the specific thing inside that domain like imaging_finding), a preferred_term from Event Terms, and all the normalized attributes from Attribute Terms. Each family contains one to three event types and the event type determines which attributes that event carries.
+    <strong>Attribute Policy</strong> is the rulebook. 89 rules say which values are allowed for each attribute on each event type. Take laterality on an imaging_finding: the policy says kind=controlled, style=upper_tokens, provisional=false. That means only LEFT, RIGHT, BILATERAL are legal. The model produces "right", normalization maps it to RIGHT, policy checks RIGHT against the vocab, it passes. If the model had produced "both sides" and normalization could not map it, provisional=false means reject it outright. That value never enters the dataset.
+    <strong>Relations</strong> connect events within the same note. A medication was given for a stone, a stent was placed during a procedure. When one event is not enough to answer a question you follow the links.
+    <strong>Projection</strong> is where events become answers. A resolver is just a function that reads events and pulls the right data out to answer a specific question. The clinician asks "Where is the stone?" The resolver for that question is event_attribute_values. It finds all imaging_finding events in the note, reads their location attribute, and returns UVJ. A different question like "Was a stent placed?" uses event_presence. It looks for device_event events with device_type=ureteral stent and returns yes or no. Four resolver types total: event_presence (does a thing exist), event_attribute_values (read a specific field), event_concepts (match events against keyword lists), event_grouped_counts (count across multiple events).
+    <strong>Registry Questions</strong> are the 130 questions clinicians designed and prioritized. Each question has exactly one resolver wired to it and the resolver knows which event types to query and which attributes to read.
+  </p>
+
+  <div class="uflow">
+
+    <!-- TIER 1: Clinical Note -->
+    <div class="uflow-tier">
+      <div class="uflow-card uc-blue">
+        <div class="uc-head">Clinical Note <span class="uc-stat">free text input</span></div>
+        <div class="uc-body">
+          <span class="uc-raw">Punctate 2 mm nonobstructing calculus at the right ureterovesicular junction.</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="uflow-connector">&#8595; the model reads this and proposes a raw event</div>
+
+    <!-- TIER 2a: Two vocabulary cards side by side -->
+    <div class="uflow-tier">
+      <div class="uflow-card uc-teal">
+        <div class="uc-head">Event Terms <span class="uc-stat">990 aliases &rarr; 252 canonical</span></div>
+        <div class="uc-body">
+          <div class="uc-row"><span class="uk">raw term:</span><span class="uv"><span class="before">"UVJ calculus"</span> <span class="ar">&rarr;</span> <span class="after">"ureteral stone"</span></span></div>
+          <div class="uc-row"><span class="uk">status:</span><span class="uv"><span class="after">CANONICAL</span> <span class="muted">(alias found)</span></span></div>
+          <div class="uc-row"><span class="uk muted">on miss:</span><span class="uv muted">PROVISIONAL, flagged for review</span></div>
+        </div>
+      </div>
+      <div class="uflow-card uc-amber">
+        <div class="uc-head">Attribute Terms <span class="uc-stat">910 aliases &rarr; 327 canonical</span></div>
+        <div class="uc-body">
+          <div class="uc-row"><span class="uk">laterality:</span><span class="uv"><span class="before">"right"</span> <span class="ar">&rarr;</span> <span class="after">RIGHT</span> <span class="muted">upper_tokens</span></span></div>
+          <div class="uc-row"><span class="uk">location:</span><span class="uv"><span class="before">"ureterovesicular jx"</span> <span class="ar">&rarr;</span> <span class="after">UVJ</span> <span class="muted">clinical_mixed</span></span></div>
+          <div class="uc-row"><span class="uk">status:</span><span class="uv"><span class="before">"nonobstructing"</span> <span class="ar">&rarr;</span> <span class="after">nonobstructing</span> <span class="muted">lower_text</span></span></div>
+          <div class="uc-row"><span class="uk">stone_burden:</span><span class="uv"><span class="before">"punctate"</span> <span class="ar">&rarr;</span> <span class="after">punctate</span> <span class="muted">lower_text</span></span></div>
+          <div class="uc-row"><span class="uk">size / unit:</span><span class="uv">2 / mm <span class="muted">numeric, kept as-is</span></span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="uflow-label">left card normalizes the name of the thing, right card normalizes the details about it</div>
+
+    <!-- TIER 2b: Resulting event, full width -->
+    <div class="uflow-tier">
+      <div class="uflow-card uc-blue" style="flex: 1;">
+        <div class="uc-head">Assembled Event <span class="uc-stat">family &rarr; event_type &rarr; attributes</span></div>
+        <div class="uc-body" style="display:flex; gap:12pt;">
+          <div style="flex:1;">
+            <div class="uc-row"><span class="uk">family &rarr; type:</span><span class="uv">symptoms_imaging &rarr; imaging_finding <span class="muted">(1&ndash;3 types per family)</span></span></div>
+            <div class="uc-row"><span class="uk">preferred_term:</span><span class="uv"><span class="after">ureteral stone</span> <span class="new-tag">normalized</span></span></div>
+            <div class="uc-row"><span class="uk">concept_id:</span><span class="uv">symptoms_imaging.imaging_finding.ureteral_stone <span class="new-tag">generated</span></span></div>
+          </div>
+          <div style="flex:1;">
+            <div class="uc-row"><span class="uk">assertion:</span><span class="uv">CONFIRMED</span></div>
+            <div class="uc-row"><span class="uk">temporal:</span><span class="uv">CURRENT</span></div>
+            <div class="uc-row"><span class="uk">attributes:</span><span class="uv">{laterality: <span class="after">RIGHT</span>, location: <span class="after">UVJ</span>, status: <span class="after">nonobstructing</span>, size: 2, unit: mm, stone_burden: <span class="after">punctate</span>}</span></div>
+            <div class="uc-row"><span class="uk">evidence:</span><span class="uv">"Punctate 2 mm nonobstructing calculus..." <span class="muted">chars 847&ndash;921, Radiology section</span></span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="uflow-connector">&#8595; now check if those values are actually allowed and link events that belong together</div>
+
+    <!-- TIER 3: Policy + Relations -->
+    <div class="uflow-tier">
+      <div class="uflow-card uc-purple">
+        <div class="uc-head">Attribute Policy <span class="uc-stat">89 rules: kind + style + provisional</span></div>
+        <div class="uc-body">
+          <div class="uc-row"><span class="uk">laterality:</span><span class="uv">controlled, upper_tokens, provisional=false <span class="pass-tag">&#10003; RIGHT in vocab</span></span></div>
+          <div class="uc-row"><span class="uk">location:</span><span class="uv">controlled, clinical_mixed, provisional=false <span class="pass-tag">&#10003; UVJ in vocab</span></span></div>
+          <div class="uc-row"><span class="uk">status:</span><span class="uv">controlled, lower_text, provisional=false <span class="pass-tag">&#10003; in vocab</span></span></div>
+          <div class="uc-row"><span class="uk">size:</span><span class="uv">free_text <span class="pass-tag">&#10003; any value</span></span></div>
+          <div class="uc-row"><span class="uk muted">example fail:</span><span class="uv muted">"both sides" &rarr; unmappable, provisional=false &rarr; <span class="fail-tag">rejected</span></span></div>
+        </div>
+      </div>
+      <div class="uflow-card uc-green">
+        <div class="uc-head">Relations <span class="uc-stat">9 types linking events in this note</span></div>
+        <div class="uc-body">
+          <div class="uc-row"><span class="uk">note events:</span><span class="uv">7 total (1 stone, 1 symptom, 4 meds, 1 rec)</span></div>
+          <div class="uc-row"><span class="uk">EV3&ndash;EV6:</span><span class="uv">medication <span class="ar">&rarr;</span> <span class="after">indication_for</span> <span class="ar">&rarr;</span> EV1 (stone)</span></div>
+          <div class="uc-row"><span class="uk">EV7:</span><span class="uv">recommendation <span class="ar">&rarr;</span> <span class="after">follow_up_for</span> <span class="ar">&rarr;</span> EV1</span></div>
+          <div class="uc-row"><span class="uk muted">effect:</span><span class="uv muted">query "meds for ureteral stones" follows links</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="uflow-connector">&#8595; everything is normalized and validated, now answer the clinician's questions</div>
+
+    <!-- TIER 4: Projection + Registry -->
+    <div class="uflow-tier">
+      <div class="uflow-card uc-red">
+        <div class="uc-head">Projection <span class="uc-stat">answers traced to events</span></div>
+        <div class="uc-body">
+          <div class="uc-row"><span class="uk">Q:</span><span class="uv">"Where is the stone?"</span></div>
+          <div class="uc-row"><span class="uk">resolver:</span><span class="uv">event_attribute_values &rarr; imaging_finding.location</span></div>
+          <div class="uc-row"><span class="uk">answer:</span><span class="uv"><span class="after">UVJ</span> <span class="muted">backed by EV1</span></span></div>
+          <div class="uc-sep"></div>
+          <div class="uc-row"><span class="uk">Q:</span><span class="uv">"What is the laterality?"</span></div>
+          <div class="uc-row"><span class="uk">resolver:</span><span class="uv">event_attribute_values &rarr; imaging_finding.laterality</span></div>
+          <div class="uc-row"><span class="uk">answer:</span><span class="uv"><span class="after">RIGHT</span> <span class="muted">backed by EV1</span></span></div>
+          <div class="uc-sep"></div>
+          <div class="uc-row"><span class="uk">Q:</span><span class="uv">"Was a stent placed?"</span></div>
+          <div class="uc-row"><span class="uk">resolver:</span><span class="uv">event_presence &rarr; device_event where device_type=ureteral stent</span></div>
+          <div class="uc-row"><span class="uk">answer:</span><span class="uv"><span class="after">yes</span> <span class="muted">backed by EV2</span></span></div>
+          <div class="uc-sep"></div>
+          <div class="uc-row"><span class="uk muted">exclusion:</span><span class="uv muted">NEGATED or HISTORICAL events do not produce answers</span></div>
+        </div>
+      </div>
+      <div class="uflow-card uc-blue">
+        <div class="uc-head">Registry Questions <span class="uc-stat">130 clinician-designed</span></div>
+        <div class="uc-body">
+          <div class="uc-row"><span class="uk">this event:</span><span class="uv">answers <span class="after">2</span> of 9 symptoms_imaging questions</span></div>
+          <div class="uc-row"><span class="uk">this note:</span><span class="uv">7 events answer <span class="after">8</span> questions across 3 families</span></div>
+          <div class="uc-sep"></div>
+          <div class="uc-row"><span class="uk">stored as:</span><span class="uv">registry_id + answer + supporting event IDs</span></div>
+          <div class="uc-row"><span class="uk">audit trail:</span><span class="uv">answer <span class="ar">&rarr;</span> event <span class="ar">&rarr;</span> quoted text <span class="ar">&rarr;</span> section <span class="ar">&rarr;</span> offsets</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="uflow-label">each question has one resolver. the resolver finds matching events and reads the right fields to produce an answer.</div>
+
+  </div>
+
+</div>
+
+<!-- ================================================================== -->
+<!-- SECTION 3: Attributes by Event Type                                -->
+<!-- ================================================================== -->
+<div class="section">
+  <h2>3. What Each Event Type Captures</h2>
+
+  <p class="glue">
+    Each event type has its own set of attributes. These are the specific details a clinician
+    documents and a researcher needs. The attributes were chosen by reviewing the 130 registry
+    questions and asking: what structured fields do we need in order to answer each question?
+    For example, the question "What is the laterality of the stone?" requires that imaging_finding
+    events carry a laterality attribute.
+  </p>
+
+  <div class="no-break">
+  <h3>Imaging Finding</h3>
+  <p class="glue-small">
+    The most attribute-rich event type, because stone characterization drives treatment decisions.
+    A 2mm nonobstructing stone is managed differently from a 2cm staghorn calculus.
+  </p>
+  <table>
+    <tr><th>Attribute</th><th>What It Records</th><th>Example Values</th></tr>
+    <tr><td>laterality</td><td>Which side</td><td>LEFT, RIGHT, BILATERAL</td></tr>
+    <tr><td>location</td><td>Anatomic position</td><td>ureter, kidney, UVJ, UPJ, renal pelvis, bladder</td></tr>
+    <tr><td>size</td><td>Measurement</td><td>5 (paired with unit: mm)</td></tr>
+    <tr><td>status</td><td>Obstructing or not</td><td>obstructing, nonobstructing, partially obstructing</td></tr>
+    <tr><td>stone_burden</td><td>How many or how much</td><td>single, multiple, staghorn, punctate</td></tr>
+    <tr><td>severity</td><td>Grade if stated</td><td>mild, moderate, severe (for hydronephrosis)</td></tr>
+    <tr><td>hounsfield_unit</td><td>CT density</td><td>800 HU</td></tr>
+  </table>
+  </div>
+
+  <div class="no-break">
+  <h3>Symptom Presentation</h3>
+  <p class="glue-small">
+    Captures the symptom cluster the patient presented with. One event per symptomatic episode,
+    not one event per symptom, because clinicians describe them as a group.
+  </p>
+  <table>
+    <tr><th>Attribute</th><th>What It Records</th><th>Example Values</th></tr>
+    <tr><td>symptoms</td><td>List of presenting symptoms</td><td>flank pain, nausea, hematuria, dysuria</td></tr>
+    <tr><td>laterality</td><td>Which side</td><td>LEFT, RIGHT</td></tr>
+    <tr><td>severity</td><td>How severe</td><td>mild, moderate, severe</td></tr>
+  </table>
+  </div>
+
+  <div class="no-break">
+  <h3>Procedure Event</h3>
+  <p class="glue-small">
+    One event per distinct procedure. Operative details like laser settings and access approach
+    are captured as attributes rather than separate events.
+  </p>
+  <table>
+    <tr><th>Attribute</th><th>What It Records</th><th>Example Values</th></tr>
+    <tr><td>laterality</td><td>Which side</td><td>LEFT, RIGHT, BILATERAL</td></tr>
+    <tr><td>status</td><td>Completed or planned</td><td>completed, attempted, aborted</td></tr>
+    <tr><td>approach</td><td>Surgical approach</td><td>percutaneous, retrograde, antegrade, robotic</td></tr>
+    <tr><td>indication</td><td>Why it was done</td><td>decompression, stone removal, drainage</td></tr>
+    <tr><td>laser_power, laser_frequency</td><td>Laser parameters</td><td>0.8 J, 10 Hz</td></tr>
+  </table>
+  </div>
+
+  <div class="no-break">
+  <h3>Device Event</h3>
+  <p class="glue-small">
+    Devices are tracked separately from procedures because "was a stent left in place?" and
+    "what procedure was done?" are different research questions.
+  </p>
+  <table>
+    <tr><th>Attribute</th><th>What It Records</th><th>Example Values</th></tr>
+    <tr><td>device_type</td><td>Kind of device</td><td>ureteral stent, nephrostomy tube, Foley catheter</td></tr>
+    <tr><td>laterality</td><td>Which side</td><td>LEFT, RIGHT</td></tr>
+    <tr><td>status</td><td>Current state</td><td>placed, removed, in situ, exchanged</td></tr>
+    <tr><td>size</td><td>Device measurement</td><td>6 (paired with unit: Fr)</td></tr>
+  </table>
+  </div>
+
+  <div class="no-break">
+  <h3>Medication Exposure</h3>
+  <p class="glue-small">
+    One event per distinct drug. Medications relevant to stone care include pain control,
+    alpha-blockers for medical expulsive therapy, antibiotics, antiemetics, and stone prevention drugs.
+  </p>
+  <table>
+    <tr><th>Attribute</th><th>What It Records</th><th>Example Values</th></tr>
+    <tr><td>drug_class</td><td>Pharmacologic class</td><td>opioid, NSAID, alpha-blocker, antiemetic, antibiotic</td></tr>
+    <tr><td>dose</td><td>Amount given</td><td>0.4 mg, 15 mg, 500 mg</td></tr>
+    <tr><td>route</td><td>How administered</td><td>IV, PO, IM</td></tr>
+    <tr><td>frequency</td><td>How often</td><td>daily, BID, Q8H, PRN</td></tr>
+    <tr><td>context</td><td>Setting of administration</td><td>ED, intra-operative, at home, inpatient</td></tr>
+    <tr><td>indication</td><td>Why this drug was given</td><td>pain management, stone prevention, nausea/vomiting</td></tr>
+  </table>
+  </div>
+
+  <div class="no-break">
+  <h3>Adverse Effect, Outcome Event, Recommendation Event</h3>
+  <p class="glue-small">
+    These three types cover the results of care. Adverse effects are complications
+    (AKI, pyelonephritis, stent symptoms). Outcome events are treatment results (stone passage,
+    stone-free status). Recommendation events are instructions for what comes next (follow-up,
+    diet changes, strain urine).
+  </p>
+  <table>
+    <tr><th>Event Type</th><th>Key Attributes</th><th>Example</th></tr>
+    <tr>
+      <td>adverse_effect</td>
+      <td>reaction_type, severity, suspected_cause, timing, status</td>
+      <td>AKI, severity=moderate, suspected_cause=obstruction</td>
+    </tr>
+    <tr>
+      <td>outcome_event</td>
+      <td>status, value, qualifier, timing</td>
+      <td>stone-free status, value=true</td>
+    </tr>
+    <tr>
+      <td>recommendation_event</td>
+      <td>recommendation_type, target, status</td>
+      <td>follow_up, target=urology, status=scheduled</td>
+    </tr>
+  </table>
+  </div>
+
+  <div class="no-break">
+  <h3>History Fact and Social Context Fact</h3>
+  <p class="glue-small">
+    History facts capture what happened before this visit: prior stones, prior surgeries, family
+    history of stones, anatomic variants like horseshoe kidney. Social context facts capture
+    support barriers: does the patient have transportation? Is a caregiver available?
+    These are tracked because they affect treatment decisions and discharge planning.
+  </p>
+  <table>
+    <tr><th>Event Type</th><th>Key Attributes</th><th>Example</th></tr>
+    <tr>
+      <td>history_fact</td>
+      <td>history_kind, subject, count, intervention_status</td>
+      <td>kidney stone history, count=3, subject=PATIENT</td>
+    </tr>
+    <tr>
+      <td>social_context_fact</td>
+      <td>support_type, value</td>
+      <td>support_type=caregiver, value=available</td>
+    </tr>
+  </table>
+  </div>
+</div>
+
+<!-- ================================================================== -->
+<!-- SECTION 4: Side-by-Side Walkthroughs                               -->
+<!-- ================================================================== -->
+<div class="section">
+  <h2>4. Side-by-Side: Raw Text to Structured Events</h2>
+  <p class="glue">
+    These four examples show the system in action. On the left is the raw note text with
+    key phrases highlighted. On the right is the structured output: the events extracted
+    and the questions they answer. Each example demonstrates a different clinical scenario.
+  </p>
+
+  <!-- Example 1 -->
+  <div class="walkthrough">
+    <div class="walkthrough-title">Example 1: ED Visit with Ureteral Stone</div>
+    <div class="walkthrough-source">ED note. Acute stone, four medications, follow-up recommendation. Colors link raw text to the events they produce.</div>
+
+    <div class="side-by-side">
+      <div class="note-col">
+        <div class="col-header">Raw Note Text</div>
+...male with past medical history significant for kidney stones who presents to the ED with <mark class="hl-green">acute right flank pain</mark> as well as associated <mark class="hl-green">diffuse abdominal pain</mark> with <mark class="hl-green">nausea and vomiting</mark>.
+<br><br>
+<mark class="hl-blue">Punctate 2 mm nonobstructing calculus at the right ureterovesicular junction.</mark>
+<br><br>
+<mark class="hl-amber">ondansetron (ZOFRAN) injection 4 mg</mark> intraVENOUS
+<mark class="hl-amber">HYDROmorphone (DILAUDID) injection 0.5 mg</mark> intraVENOUS
+<mark class="hl-amber">ketorolac (TORADOL) injection 15 mg</mark> intravenous
+<br><br>
+discharged with <mark class="hl-amber">5 mg oxycodone for pain control</mark>
+<br><br>
+<mark class="hl-purple">a follow-up with urology</mark>
+      </div>
+      <div class="struct-col">
+        <div class="col-header">Structured Output</div>
+
+        <h4 class="ev-blue">EV1: Imaging Finding</h4>
+        <table>
+          <tr><th>Field</th><th>Value</th></tr>
+          <tr><td>preferred_term</td><td>ureteral stone</td></tr>
+          <tr><td>laterality</td><td>RIGHT</td></tr>
+          <tr><td>location</td><td>ureter (UVJ)</td></tr>
+          <tr><td>size / unit</td><td>2 mm</td></tr>
+          <tr><td>status</td><td>nonobstructing</td></tr>
+          <tr><td>stone_burden</td><td>punctate</td></tr>
+        </table>
+
+        <h4 class="ev-green">EV2: Symptom Presentation</h4>
+        <table>
+          <tr><th>Field</th><th>Value</th></tr>
+          <tr><td>preferred_term</td><td>stone-related symptomatic presentation</td></tr>
+          <tr><td>symptoms</td><td>right flank pain, abdominal pain, nausea and vomiting</td></tr>
+          <tr><td>laterality</td><td>RIGHT</td></tr>
+        </table>
+
+        <h4 class="ev-amber">EV3-EV6: Medications</h4>
+        <table>
+          <tr><th>Drug</th><th>Dose</th><th>Route</th><th>Class</th></tr>
+          <tr><td>ondansetron</td><td>4 mg</td><td>IV</td><td>antiemetic</td></tr>
+          <tr><td>hydromorphone</td><td>0.5 mg</td><td>IV</td><td>opioid</td></tr>
+          <tr><td>ketorolac</td><td>15 mg</td><td>IV</td><td>NSAID</td></tr>
+          <tr><td>oxycodone</td><td>5 mg</td><td>PO</td><td>opioid</td></tr>
+        </table>
+
+        <h4 class="ev-purple">EV7: Recommendation</h4>
+        <table>
+          <tr><th>Field</th><th>Value</th></tr>
+          <tr><td>preferred_term</td><td>urology follow-up</td></tr>
+          <tr><td>type</td><td>follow_up</td></tr>
+        </table>
+      </div>
+    </div>
+
+    <div class="questions-answered">
+      <h4>Questions Answered from This Note</h4>
+      <table>
+        <tr><th>Registry Question</th><th>Answer</th><th>Source</th></tr>
+        <tr><td>Was the patient symptomatic?</td><td>Yes</td><td>EV2</td></tr>
+        <tr><td>What were the symptoms?</td><td>right flank pain, abdominal pain, nausea and vomiting</td><td>EV2</td></tr>
+        <tr><td>Where is the stone?</td><td>ureter</td><td>EV1</td></tr>
+        <tr><td>What is the laterality?</td><td>RIGHT</td><td>EV1</td></tr>
+        <tr><td>What medication was given?</td><td>ondansetron, hydromorphone, ketorolac, oxycodone</td><td>EV3-6</td></tr>
+        <tr><td>What was the dose?</td><td>4 mg, 0.5 mg, 15 mg, 5 mg</td><td>EV3-6</td></tr>
+        <tr><td>What was the route?</td><td>IV, PO</td><td>EV3-6</td></tr>
+        <tr><td>What was the context?</td><td>ED</td><td>EV3-6</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <p class="glue-small">
+    One note, 7 events, 3 families, 8 answered questions. Every answer traces back to an event, and every event traces back to the colored highlight in the raw text.
+  </p>
+
+  <!-- Example 2 -->
+  <div class="walkthrough">
+    <div class="walkthrough-title">Example 2: Discharge Summary with Procedure and History</div>
+    <div class="walkthrough-source">Discharge note. Current stone, cystoscopy, prior stone history, follow-up. Relations link the procedure to the stone it treated.</div>
+
+    <div class="side-by-side">
+      <div class="note-col">
+        <div class="col-header">Raw Note Text</div>
+<mark class="hl-blue">Nephrolithiasis</mark> [N20.0]
+<br><br>
+57-year-old woman with CAD, COPD, and <mark class="hl-amber">history of nephrolithiasis</mark> transferred from an outside hospital for further management of obstructive nephrolithiasis
+<br><br>
+Patient <mark class="hl-green">underwent cystoscopy with decompression of the left side</mark> but will need a repeat cystoscopy for stone retrieval.
+<br><br>
+Patient will <mark class="hl-purple">follow up in urology clinic on 12/22/2020</mark>.
+      </div>
+      <div class="struct-col">
+        <div class="col-header">Structured Output</div>
+
+        <h4 class="ev-blue">EV1: Imaging Finding</h4>
+        <table>
+          <tr><th>Field</th><th>Value</th></tr>
+          <tr><td>preferred_term</td><td>kidney stone</td></tr>
+          <tr><td>temporal_status</td><td><span class="badge badge-current">CURRENT</span></td></tr>
+        </table>
+
+        <h4 class="ev-green">EV2: Procedure Event</h4>
+        <table>
+          <tr><th>Field</th><th>Value</th></tr>
+          <tr><td>preferred_term</td><td>cystoscopy</td></tr>
+          <tr><td>laterality</td><td>LEFT</td></tr>
+          <tr><td>indication</td><td>decompression</td></tr>
+          <tr><td>relation</td><td>performed_for -> EV1</td></tr>
+        </table>
+
+        <h4 class="ev-purple">EV3: Recommendation</h4>
+        <table>
+          <tr><th>Field</th><th>Value</th></tr>
+          <tr><td>preferred_term</td><td>urology follow-up</td></tr>
+          <tr><td>relation</td><td>follow_up_for -> EV1</td></tr>
+        </table>
+
+        <h4 class="ev-amber">EV4: History Fact</h4>
+        <table>
+          <tr><th>Field</th><th>Value</th></tr>
+          <tr><td>preferred_term</td><td>kidney stone history</td></tr>
+          <tr><td>history_kind</td><td>kidney stone history</td></tr>
+          <tr><td>temporal_status</td><td><span class="badge badge-historical">HISTORICAL</span></td></tr>
+        </table>
+      </div>
+    </div>
+
+    <div class="questions-answered">
+      <h4>Questions Answered from This Note</h4>
+      <table>
+        <tr><th>Registry Question</th><th>Answer</th><th>Source</th></tr>
+        <tr><td>Has the patient ever had a kidney stone before?</td><td>Yes</td><td>EV4</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <p class="glue-small">
+    The cystoscopy (EV2) links to the stone (EV1) with a <strong>performed_for</strong> relation. The follow-up (EV3) links back to EV1 with <strong>follow_up_for</strong>. The history fact (EV4) is tagged HISTORICAL, so it answers "has the patient ever had a stone before?" but not "does the patient have a stone now?" Same concept, different temporal tag, different query result.
+  </p>
+</div>
+
+<!-- Page break before examples 3 and 4 -->
+<div class="section">
+  <h2 style="border: none; padding: 0; margin-bottom: 4pt; font-size: 13pt;">4. Side-by-Side (continued)</h2>
+
+  <!-- Example 3 -->
+  <div class="walkthrough">
+    <div class="walkthrough-title">Example 3: Radiology Report. Confirmed vs. Negated Findings</div>
+    <div class="walkthrough-source">Radiology report. Hydronephrosis is present. Ureteral stone is explicitly ruled out. Both extracted, different assertion strengths.</div>
+
+    <div class="side-by-side">
+      <div class="note-col">
+        <div class="col-header">Raw Note Text</div>
+<mark class="hl-green">Right renal hydronephrosis</mark> and ureteral dilation <mark class="hl-red">without definite finding of ureteral calculus.</mark>
+      </div>
+      <div class="struct-col">
+        <div class="col-header">Structured Output</div>
+
+        <h4 class="ev-green">EV1: Imaging Finding</h4>
+        <table>
+          <tr><th>Field</th><th>Value</th></tr>
+          <tr><td>preferred_term</td><td>hydronephrosis</td></tr>
+          <tr><td>laterality</td><td>RIGHT</td></tr>
+          <tr><td>assertion</td><td><span class="badge badge-confirmed">CONFIRMED</span></td></tr>
+        </table>
+
+        <h4 class="ev-red">EV2: Imaging Finding</h4>
+        <table>
+          <tr><th>Field</th><th>Value</th></tr>
+          <tr><td>preferred_term</td><td>ureteral stone</td></tr>
+          <tr><td>assertion</td><td><span class="badge badge-negated">NEGATED</span></td></tr>
+        </table>
+      </div>
+    </div>
+
+    <div class="concept-box">
+      <strong>Note.</strong> "Right renal hydronephrosis" is a positive finding. CONFIRMED. "Without definite finding of ureteral calculus" is explicit negation. NEGATED.
+      Hydronephrosis without an identified stone is itself clinically meaningful. It could be a passed stone, a radiolucent stone, or a non-stone etiology. The projection system uses assertion_strength to route these correctly: CONFIRMED hydronephrosis answers "Is hydronephrosis present?" positively. The NEGATED stone does not answer "Where is the stone?"
+    </div>
+  </div>
+
+  <!-- Example 4 -->
+  <div class="walkthrough" style="margin-top: 14pt;">
+    <div class="walkthrough-title">Example 4: Inpatient Note with Social Context</div>
+    <div class="walkthrough-source">Inpatient note. Post-procedure. Historical procedure, current device still in place, pain, caregiver documented.</div>
+
+    <div class="side-by-side">
+      <div class="note-col">
+        <div class="col-header">Raw Note Text</div>
+...5 after <mark class="hl-green">percutaneous nephrostomy tube placement</mark>...
+<br><br>
+Altered mental status, <mark class="hl-blue">Pain</mark>...
+<br><br>
+Supine - in bed, <mark class="hl-teal">Caregiver present</mark>...
+      </div>
+      <div class="struct-col">
+        <div class="col-header">Structured Output</div>
+
+        <h4 class="ev-blue">EV1: Symptom Presentation</h4>
+        <table>
+          <tr><th>Field</th><th>Value</th></tr>
+          <tr><td>preferred_term</td><td>stone-related symptomatic presentation</td></tr>
+          <tr><td>symptoms</td><td>pain</td></tr>
+        </table>
+
+        <h4 class="ev-green">EV2: Procedure Event</h4>
+        <table>
+          <tr><th>Field</th><th>Value</th></tr>
+          <tr><td>preferred_term</td><td>nephrostomy placement</td></tr>
+          <tr><td>approach</td><td>percutaneous</td></tr>
+          <tr><td>temporal_status</td><td><span class="badge badge-historical">HISTORICAL</span></td></tr>
+        </table>
+
+        <h4 class="ev-green">EV3: Device Event</h4>
+        <table>
+          <tr><th>Field</th><th>Value</th></tr>
+          <tr><td>preferred_term</td><td>nephrostomy tube</td></tr>
+          <tr><td>device_type</td><td>nephrostomy tube</td></tr>
+          <tr><td>temporal_status</td><td><span class="badge badge-current">CURRENT</span> (still in place)</td></tr>
+        </table>
+
+        <h4 class="ev-teal">EV4: Social Context Fact</h4>
+        <table>
+          <tr><th>Field</th><th>Value</th></tr>
+          <tr><td>preferred_term</td><td>caregiver support</td></tr>
+          <tr><td>support_type</td><td>caregiver</td></tr>
+          <tr><td>value</td><td>available</td></tr>
+        </table>
+      </div>
+    </div>
+
+    <div class="questions-answered">
+      <h4>Questions Answered from This Note</h4>
+      <table>
+        <tr><th>Registry Question</th><th>Answer</th><th>Source</th></tr>
+        <tr><td>Was the patient symptomatic?</td><td>Yes</td><td>EV1</td></tr>
+        <tr><td>What were the symptoms?</td><td>pain</td><td>EV1</td></tr>
+        <tr><td>What was used for drainage?</td><td>nephrostomy tube</td><td>EV3</td></tr>
+        <tr><td>Is there a caregiver at home?</td><td>Yes</td><td>EV4</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <p class="glue-small">
+    Same source phrase produces two events. The procedure (EV2) is HISTORICAL because the placement already happened. The device (EV3) is CURRENT because the tube is still in the patient. Caregiver availability (EV4) becomes a queryable fact for discharge planning research.
+  </p>
+</div>
+
+<!-- ================================================================== -->
+<!-- SECTION 5: From Events to Answers (the Registry)                   -->
+<!-- ================================================================== -->
+<div class="section">
+  <h2>5. From Events to Answers: The Registry</h2>
+
+  <p class="glue">
+    Events are the raw material. The registry is what makes them useful for research. 130 questions, designed by clinicians, imported from a prioritization workbook where each question was scored for clinical importance. The system computes answers automatically by looking at the events in each note.
+  </p>
+
+  <h3>What a Registry Question Looks Like</h3>
+
+  <p class="glue-small">
+    Each question has a unique ID, the original text as written by clinicians, the family it
+    belongs to, and instructions for how to compute the answer from events. Here is the structure:
+  </p>
+
+  <table>
+    <tr><th>Field</th><th>What It Stores</th><th>Example</th></tr>
+    <tr><td>registry_id</td><td>Unique question identifier</td><td>what_medication_was_given</td></tr>
+    <tr><td>clinician_text</td><td>Original question as written</td><td>"What medication was given?"</td></tr>
+    <tr><td>family</td><td>Which clinical domain answers it</td><td>medications</td></tr>
+    <tr><td>answer_scope</td><td>Per-note or across all notes</td><td>note (or patient_timeline)</td></tr>
+    <tr><td>answer_shape</td><td>Type of answer returned</td><td>boolean, list, count, or grouped_count</td></tr>
+    <tr><td>resolver_id</td><td>Logic for computing the answer</td><td>event_concepts, event_presence, etc.</td></tr>
+  </table>
+
+  <h3>Answer Shapes</h3>
+
+  <p class="glue-small">
+    There are four ways a question can be answered. The shape determines what the answer looks like
+    and how the system computes it from the extracted events:
+  </p>
+
+  <table>
+    <tr><th>Shape</th><th>What It Returns</th><th>Example Question</th><th>Example Answer</th></tr>
+    <tr>
+      <td><strong>boolean</strong></td>
+      <td>Yes or No</td>
+      <td>"Was the patient symptomatic?"</td>
+      <td>true</td>
+    </tr>
+    <tr>
+      <td><strong>list</strong></td>
+      <td>One or more values</td>
+      <td>"What medication was given?"</td>
+      <td>["tamsulosin", "morphine"]</td>
+    </tr>
+    <tr>
+      <td><strong>count</strong></td>
+      <td>A number</td>
+      <td>"How many stones passed?"</td>
+      <td>3</td>
+    </tr>
+    <tr>
+      <td><strong>grouped_count</strong></td>
+      <td>Values grouped with counts</td>
+      <td>"Medications by class"</td>
+      <td>[{"opioid": 2}, {"NSAID": 1}]</td>
+    </tr>
+  </table>
+
+  <h3>How the Answer Is Stored: the Projection</h3>
+
+  <p class="glue-small">
+    When the system computes an answer, it stores it as a "projection." Think of it as the receipt:
+    it records which question was answered, what the answer is, and which events prove it.
+  </p>
+
+  <table>
+    <tr><th>Field</th><th>What It Stores</th><th>Example</th></tr>
+    <tr><td>registry_id</td><td>Which question this answers</td><td>what_medication_was_given</td></tr>
+    <tr><td>scope_key</td><td>Which note (or patient timeline)</td><td>ED.IDX.0000132</td></tr>
+    <tr><td>resolution_state</td><td>Was it answerable?</td><td>answered (or unanswered)</td></tr>
+    <tr><td>value</td><td>The answer itself</td><td>["hydromorphone", "ketorolac", "ondansetron", "oxycodone"]</td></tr>
+    <tr><td>supporting_event_ids</td><td>Which events prove this answer</td><td>[EV3, EV4, EV5, EV6]</td></tr>
+  </table>
+
+  <h3>A Real Projection</h3>
+
+  <p class="glue-small">
+    Here is what the system actually stores when it answers "What medication was given?" for
+    the ED visit from Example 1:
+  </p>
+
+  <div class="code-block">registry_id:           what_medication_was_given
+scope_key:             ED.IDX.0000132
+resolution_state:      answered
+value:                 ["hydromorphone", "ketorolac", "ondansetron", "oxycodone"]
+supporting_event_ids:  [EV3, EV4, EV5, EV6]</div>
+
+  <p class="glue-small">
+    A researcher can see the answer (four drugs) and immediately look up EV3 through EV6 to see
+    exactly where in the note each drug was mentioned. This is the full provenance chain:
+  </p>
+
+  <div class="provenance-chain">
+    <span class="prov-desc">The clinician's research question</span>
+    <span class="prov-box">Registry Question</span>
+    <span class="prov-arrow">|<br>v</span>
+    <span class="prov-desc">The computed answer with supporting events</span>
+    <span class="prov-box">Projection (answer + event IDs)</span>
+    <span class="prov-arrow">|<br>v</span>
+    <span class="prov-desc">The structured extraction with all attributes</span>
+    <span class="prov-box">Clinical Event</span>
+    <span class="prov-arrow">|<br>v</span>
+    <span class="prov-desc">Exact quote with character offsets and section label</span>
+    <span class="prov-box">Evidence Anchor</span>
+    <span class="prov-arrow">|<br>v</span>
+    <span class="prov-desc">The original clinical document</span>
+    <span class="prov-box">Raw Note Text</span>
+  </div>
+</div>
+
+<!-- ================================================================== -->
+<!-- SECTION 6: Cohort Definitions                                      -->
+<!-- ================================================================== -->
+<div class="section landscape-section">
+  <h2>6. Building Cohort Definitions</h2>
+
+  <p class="glue">
+    Because every note produces structured events and answered questions, you can query
+    across all 764 annotated notes to define patient cohorts for research. A cohort definition
+    is just a filter on the structured data.
+  </p>
+
+  <h3>Example Queries</h3>
+
+  <div class="cohort-query">
+    <h4>Patients with obstructing ureteral stones who received tamsulosin</h4>
+    <div class="filter">family = symptoms_imaging, event_type = imaging_finding,
+preferred_term = "ureteral stone", attributes.status = "obstructing"</div>
+    <div class="join">AND</div>
+    <div class="filter">family = medications, event_type = medication_exposure,
+preferred_term = "tamsulosin"</div>
+    <div class="join">JOIN on patient_id</div>
+  </div>
+
+  <p class="glue-small">
+    This query works because the stone's status (obstructing vs. nonobstructing) is stored as
+    a structured attribute on the imaging_finding event, and each medication is its own event
+    with a canonical preferred_term. You join across families on patient_id.
+  </p>
+
+  <div class="cohort-query">
+    <h4>Patients who had ureteroscopy and developed a post-operative complication</h4>
+    <div class="filter">family = procedure_devices, event_type = procedure_event,
+preferred_term contains "ureteroscopy"</div>
+    <div class="join">AND</div>
+    <div class="filter">family = outcomes_complications, event_type = adverse_effect</div>
+    <div class="join">JOIN on patient_id</div>
+  </div>
+
+  <div class="cohort-query">
+    <h4>Stone-free rate after ureteroscopy</h4>
+    <div class="filter">registry_id = "stone_free_status", resolution_state = "answered"</div>
+    <div class="join">FOR patients with</div>
+    <div class="filter">event_type = procedure_event, preferred_term contains "ureteroscopy"</div>
+  </div>
+
+  <p class="glue-small">
+    The third query demonstrates why the projection layer matters. Instead of scanning all events
+    to infer "stone-free," you query the pre-computed answer to the "stone-free status" question
+    directly. The projection already did the work of checking whether the right outcome_event
+    exists for each note.
+  </p>
+
+  <p class="glue-small">
+    When the structured events are flattened into tabular form for analysis, each row is one
+    note with its key clinical attributes. This is what a researcher exports to a spreadsheet
+    or statistical tool:
+  </p>
+
+  <table>
+    <tr>
+      <th>patient_id</th>
+      <th>note_date</th>
+      <th>stone_location</th>
+      <th>laterality</th>
+      <th>size</th>
+      <th>procedure</th>
+      <th>symptomatic</th>
+      <th>medications</th>
+      <th>complications</th>
+    </tr>
+    <tr>
+      <td>HID.972...</td>
+      <td>2025-02-13</td>
+      <td>ureter (UVJ)</td>
+      <td>RIGHT</td>
+      <td>2 mm</td>
+      <td>-</td>
+      <td>Yes</td>
+      <td>ondansetron, hydromorphone, ketorolac, oxycodone</td>
+      <td>-</td>
+    </tr>
+    <tr>
+      <td>HID.112...</td>
+      <td>2022-12-31</td>
+      <td>distal ureter</td>
+      <td>RIGHT</td>
+      <td>5 mm</td>
+      <td>-</td>
+      <td>Yes</td>
+      <td>morphine, tamsulosin, ketorolac</td>
+      <td>-</td>
+    </tr>
+    <tr>
+      <td>HID.108...</td>
+      <td>2020-12-18</td>
+      <td>kidney</td>
+      <td>-</td>
+      <td>-</td>
+      <td>cystoscopy (LEFT)</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+    </tr>
+    <tr>
+      <td>HID.907...</td>
+      <td>2018-04-03</td>
+      <td>kidney</td>
+      <td>-</td>
+      <td>-</td>
+      <td>stent + nephrostomy</td>
+      <td>-</td>
+      <td>-</td>
+      <td>acute kidney injury</td>
+    </tr>
+  </table>
+</div>
+
+<!-- ================================================================== -->
+<!-- SECTION 7: Relations and Temporal/Assertion Reference               -->
+<!-- ================================================================== -->
+<div class="section">
+  <h2>7. Connecting Events: Relations and Context Labels</h2>
+
+  <h3>Relations Between Events</h3>
+
+  <p class="glue">
+    Events within the same note can be linked to each other. A procedure can be linked to the
+    stone it was treating. A complication can be linked to the procedure that caused it.
+    A follow-up recommendation can be linked to the condition it is monitoring.
+    These links let researchers ask questions like "what complications occurred after ureteroscopy?"
+    by following the relation edges.
+  </p>
+
+  <table>
+    <tr><th>Relation Type</th><th>Meaning</th><th>Example</th></tr>
+    <tr><td>performed_for</td><td>Procedure done to treat a finding</td><td>ureteroscopy performed_for ureteral stone</td></tr>
+    <tr><td>caused_by</td><td>Complication caused by a treatment</td><td>AKI caused_by obstruction</td></tr>
+    <tr><td>follow_up_for</td><td>Recommendation monitors a condition</td><td>urology follow-up follow_up_for kidney stone</td></tr>
+    <tr><td>treated_by</td><td>Finding treated by a procedure</td><td>hydronephrosis treated_by stent placement</td></tr>
+    <tr><td>decompresses</td><td>Device relieves obstruction</td><td>nephrostomy tube decompresses hydronephrosis</td></tr>
+    <tr><td>temporally_linked</td><td>Events happened in sequence</td><td>stent placed temporally_linked to ureteroscopy</td></tr>
+    <tr><td>modifies</td><td>One event refines another</td><td>stone analysis modifies imaging finding</td></tr>
+    <tr><td>resolved_after</td><td>Condition resolved after treatment</td><td>hydronephrosis resolved_after stent placement</td></tr>
+    <tr><td>causes_obstruction</td><td>Stone causes urinary obstruction</td><td>ureteral stone causes_obstruction</td></tr>
+  </table>
+
+  <p class="glue-small">
+    Each relation records which two events are connected, the type of connection, and a brief
+    rationale explaining why the link exists. Relations are stored as part of the source event
+    and point to the target event by ID.
+  </p>
+
+  <h3>Temporal Status</h3>
+
+  <p class="glue-small">
+    Every event is tagged with when it happened relative to the current visit. This is critical
+    for answering time-sensitive questions correctly:
+  </p>
+
+  <table>
+    <tr><th>Value</th><th>Meaning</th><th>Note Text Example</th></tr>
+    <tr>
+      <td><span class="badge badge-current">CURRENT</span></td>
+      <td>This visit or actively present now</td>
+      <td>"5mm stone in right ureter"</td>
+    </tr>
+    <tr>
+      <td><span class="badge badge-historical">HISTORICAL</span></td>
+      <td>Happened before this visit</td>
+      <td>"history of nephrolithiasis"</td>
+    </tr>
+    <tr>
+      <td><span class="badge badge-future">FUTURE</span></td>
+      <td>Planned but not yet done</td>
+      <td>"will undergo ureteroscopy next week"</td>
+    </tr>
+  </table>
+
+  <div class="rationale-box">
+    A HISTORICAL procedure does not answer "what procedure was performed this visit?" A FUTURE recommendation is not a completed one. Without temporal tagging, a query for "patients who had ureteroscopy" would incorrectly include patients who only had it planned or who had it years ago.
+  </div>
+
+  <h3>Assertion Strength</h3>
+
+  <p class="glue-small">
+    Clinicians do not always state things with certainty. The system captures three levels:
+  </p>
+
+  <table>
+    <tr><th>Value</th><th>Meaning</th><th>Note Text Example</th></tr>
+    <tr>
+      <td><span class="badge badge-confirmed">CONFIRMED</span></td>
+      <td>Definitively present or performed</td>
+      <td>"CT shows 5mm calculus"</td>
+    </tr>
+    <tr>
+      <td><span class="badge badge-possible">POSSIBLE</span></td>
+      <td>Uncertain, pending confirmation</td>
+      <td>"possible robotic pyeloplasty pending results"</td>
+    </tr>
+    <tr>
+      <td><span class="badge badge-negated">NEGATED</span></td>
+      <td>Explicitly ruled out by the clinician</td>
+      <td>"without definite finding of ureteral calculus"</td>
+    </tr>
+  </table>
+
+  <p class="glue-small">
+    NEGATED events are extracted and stored, but they do not produce positive answers to
+    clinical questions. This preserves the clinically important distinction between "we looked
+    and it was not there" and "we did not look."
+  </p>
+
+  <h3>Experiencer</h3>
+
+  <p class="glue-small">
+    Most events happen to the patient, but some notes mention family history of kidney stones.
+    The experiencer field tracks who:
+  </p>
+
+  <table>
+    <tr><th>Value</th><th>When Used</th></tr>
+    <tr><td>PATIENT</td><td>The event happened to the patient (default, vast majority of events)</td></tr>
+    <tr><td>FAMILY_MEMBER</td><td>Family history: "mother has kidney stones"</td></tr>
+  </table>
+
+  <h3>Projection Exclusion Rules</h3>
+
+  <p class="glue-small">
+    Not every extracted event contributes a positive answer to a question. The projection system
+    applies exclusion rules so that only clinically appropriate events produce results:
+  </p>
+
+  <table>
+    <tr><th>Condition</th><th>Effect on Projection</th></tr>
+    <tr><td><span class="badge badge-negated">NEGATED</span> assertion</td><td>Excluded from positive answers ("stone not seen" does not answer "Where is the stone?")</td></tr>
+    <tr><td><span class="badge badge-future">FUTURE</span> temporal status</td><td>Excluded. Planned events have not occurred yet.</td></tr>
+    <tr><td><span class="badge badge-historical">HISTORICAL</span> temporal status</td><td>Excluded from <em>note-scope</em> questions (but included in timeline-scope)</td></tr>
+    <tr><td>PROVISIONAL / CUSTOM events</td><td>Excluded. Only fully validated events project.</td></tr>
+    <tr><td>Procedure status: planned / scheduled / deferred / canceled</td><td>Excluded from procedure-completion questions</td></tr>
+  </table>
+
+  <div class="rationale-box">
+    Without exclusion rules, a query for "was ureteroscopy performed?" would count future planned procedures and negated findings as positive answers. The rules ensure projections reflect what actually happened to the patient during the encounter.
+  </div>
+
+  <h3>Artifact Shape: What Gets Stored</h3>
+
+  <p class="glue-small">
+    Each annotated note produces a JSON artifact containing the full extraction:
+  </p>
+
+  <div style="background: #1E1E2E; border: 1px solid #45475A; border-radius: 4px; padding: 10pt 12pt; font-family: 'Courier New', monospace; font-size: 8.5pt; line-height: 1.6; margin-bottom: 8pt; white-space: pre; overflow-x: auto; color: #CDD6F4;"><span class="json-bracket">{</span>
+  <span class="json-key">"schema_version"</span>: <span class="json-str">"event-first"</span>,
+  <span class="json-key">"patient_id"</span>: <span class="json-str">"HID.907..."</span>,
+  <span class="json-key">"note_id"</span>: <span class="json-str">"OUT.IDX.0004721"</span>,
+  <span class="json-key">"events"</span>: <span class="json-bracket">[</span>
+    <span class="json-bracket">{</span>
+      <span class="json-key">"event_id"</span>: <span class="json-str">"evt-..."</span>,
+      <span class="json-key">"event_type"</span>: <span class="json-str">"imaging_finding"</span>,
+      <span class="json-key">"preferred_term"</span>: <span class="json-str">"hydronephrosis"</span>,
+      <span class="json-key">"assertion_strength"</span>: <span class="json-str">"CONFIRMED"</span>,
+      <span class="json-key">"temporal_status"</span>: <span class="json-str">"CURRENT"</span>,
+      <span class="json-key">"attributes"</span>: <span class="json-bracket">{</span> <span class="json-key">"laterality"</span>: <span class="json-str">"RIGHT"</span>, <span class="json-key">"severity"</span>: <span class="json-str">"moderate"</span> <span class="json-bracket">}</span>,
+      <span class="json-key">"evidence"</span>: <span class="json-bracket">{</span> <span class="json-key">"anchors"</span>: <span class="json-bracket">[{</span> <span class="json-key">"quote"</span>: <span class="json-str">"Right renal hydronephrosis"</span>, ... <span class="json-bracket">}]</span> <span class="json-bracket">}</span>,
+      <span class="json-key">"field_provenance"</span>: <span class="json-bracket">{</span>
+        <span class="json-key">"preferred_term"</span>: <span class="json-bracket">{</span> <span class="json-key">"source"</span>: <span class="json-str">"model"</span>, <span class="json-key">"overwrote_model"</span>: <span class="json-bool">false</span> <span class="json-bracket">}</span>,
+        <span class="json-key">"assertion_strength"</span>: <span class="json-bracket">{</span> <span class="json-key">"source"</span>: <span class="json-str">"model"</span>, <span class="json-key">"overwrote_model"</span>: <span class="json-bool">false</span> <span class="json-bracket">}</span>,
+        <span class="json-key">"laterality"</span>: <span class="json-bracket">{</span> <span class="json-key">"source"</span>: <span class="json-str">"candidate_binding"</span>, <span class="json-key">"overwrote_model"</span>: <span class="json-bool">false</span> <span class="json-bracket">}</span>
+      <span class="json-bracket">}</span>,
+      <span class="json-key">"relations"</span>: <span class="json-bracket">[...]</span>
+    <span class="json-bracket">}</span>
+  <span class="json-bracket">]</span>,
+  <span class="json-key">"projections"</span>: <span class="json-bracket">[</span>
+    <span class="json-bracket">{</span> <span class="json-key">"registry_id"</span>: <span class="json-str">"Q041"</span>, <span class="json-key">"answer"</span>: <span class="json-bracket">[</span><span class="json-str">"RIGHT"</span><span class="json-bracket">]</span>, <span class="json-key">"resolver"</span>: <span class="json-str">"event_attribute_values"</span> <span class="json-bracket">}</span>
+  <span class="json-bracket">]</span>
+<span class="json-bracket">}</span></div>
+
+  <p class="glue-small">
+    The <strong>field_provenance</strong> block records how each field was set. Whether the model proposed it,
+    deterministic enrichment filled it, or a guardrail overwrote the model. This audit trail enables
+    quality analysis: if a guardrail frequently overrides the model on a field, the extraction prompt
+    needs refinement.
+  </p>
+</div>
+
+<!-- ================================================================== -->
+<!-- SECTION 8: The 130 Questions by Domain                             -->
+<!-- ================================================================== -->
+<div class="section">
+  <h2>8. The 130 Questions by Domain</h2>
+
+  <p class="glue">
+    The registry questions were designed by clinicians and prioritized through a voting process.
+    Each question maps to exactly one of the five families. The distribution reflects clinical emphasis:
+  </p>
+
+  <table>
+    <tr><th>Family</th><th>Questions</th><th>Why</th></tr>
+    <tr><td>Procedures &amp; Devices</td><td style="text-align:center;font-weight:600;">66</td><td>Largest. Surgical detail drives most treatment-level research.</td></tr>
+    <tr><td>History &amp; Timeline</td><td style="text-align:center;font-weight:600;">31</td><td>Prior stone history, comorbidities, social factors</td></tr>
+    <tr><td>Outcomes &amp; Complications</td><td style="text-align:center;font-weight:600;">17</td><td>Complication rates, stone-free status, follow-up</td></tr>
+    <tr><td>Symptoms &amp; Imaging</td><td style="text-align:center;font-weight:600;">9</td><td>Stone characterization (size, location, obstruction)</td></tr>
+    <tr><td>Medications</td><td style="text-align:center;font-weight:600;">7</td><td>Drug class, dose, route, indication</td></tr>
+    <tr><td style="font-weight:600;">Total</td><td style="text-align:center;font-weight:600;">130</td><td></td></tr>
+  </table>
+
+  <p class="glue-small">
+    The complete list follows, grouped by family. Each question shows the resolver that computes
+    the answer and the expected answer shape. Duplicate entries appear when the clinician workbook
+    listed the same question under multiple procedure sub-contexts (PCNL vs. URS vs. SWL).
+  </p>
+
+  <div class="domain-block family-procedure">
+    <h4>Procedure &amp; Devices (66 questions)</h4>
+    <table><thead><tr><th>#</th><th>Question</th><th>Resolver</th><th>Shape</th></tr></thead><tbody>
+    <tr><td>1</td><td>Was genetic testing for kidney stones performed?</td><td><code>event_presence</code></td><td>categorical</td></tr>
+    <tr><td>2</td><td>Was a post-operative stent left?</td><td><code>event_presence</code></td><td>categorical</td></tr>
+    <tr><td>3</td><td>Was FANS used?</td><td><code>event_presence</code></td><td>categorical</td></tr>
+    <tr><td>4</td><td>How many tracts were used?</td><td><code>event_attribute_values</code></td><td>numeric</td></tr>
+    <tr><td>5</td><td>What was the PCNL tract size?</td><td><code>event_attribute_values</code></td><td>numeric</td></tr>
+    <tr><td>6</td><td>What was the shock rate used?</td><td><code>event_attribute_values</code></td><td>numeric</td></tr>
+    <tr><td>7</td><td>Which service obtained percutaneous access?</td><td><code>event_attribute_values</code></td><td>categorical</td></tr>
+    <tr><td>8</td><td>What was the genetic testing result?</td><td><code>event_attribute_values</code></td><td>categorical</td></tr>
+    <tr><td>9</td><td>Was a ureteral access sheath used?</td><td><code>event_presence</code></td><td>categorical</td></tr>
+    <tr><td>10</td><td>Was the URS aborted due to inability to access the ureter?</td><td><code>event_presence</code></td><td>categorical</td></tr>
+    <tr><td>11</td><td>What was used for drainage at the end of the case?</td><td><code>event_concepts</code></td><td>categorical</td></tr>
+    <tr><td>12</td><td>Was the stent left on a string/tether?</td><td><code>event_attribute_values</code></td><td>categorical</td></tr>
+    <tr><td>13</td><td>What was the type of laser used?</td><td><code>event_attribute_values</code></td><td>categorical</td></tr>
+    <tr><td>14</td><td>Was suction used?</td><td><code>event_presence</code></td><td>categorical</td></tr>
+    <tr><td>15</td><td>Was CVAC used?</td><td><code>event_presence</code></td><td>categorical</td></tr>
+    <tr><td>16</td><td>Was ECIRS used?</td><td><code>event_presence</code></td><td>categorical</td></tr>
+    <tr><td>17</td><td>What was the diameter of the UAS?</td><td><code>event_attribute_values</code></td><td>numeric</td></tr>
+    <tr><td>18</td><td>Was balloon dilation used?</td><td><code>event_presence</code></td><td>categorical</td></tr>
+    <tr><td>19</td><td>What was the maximum energy?</td><td><code>event_attribute_values</code></td><td>categorical</td></tr>
+    <tr><td>20</td><td>What was the total energy?</td><td><code>event_attribute_values</code></td><td>categorical</td></tr>
+    <tr><td>21</td><td>What was the type of stent used?</td><td><code>event_attribute_values</code></td><td>categorical</td></tr>
+    <tr><td>22</td><td>What was the length of the stent?</td><td><code>event_attribute_values</code></td><td>numeric</td></tr>
+    <tr><td>23</td><td>What was the laser setting power?</td><td><code>event_attribute_values</code></td><td>numeric</td></tr>
+    <tr><td>24</td><td>How was the patient positioned?</td><td><code>event_attribute_values</code></td><td>categorical</td></tr>
+    <tr><td>25</td><td>Was DISS used?</td><td><code>event_presence</code></td><td>categorical</td></tr>
+    <tr><td>26</td><td>Was a ramp up energy strategy used?</td><td><code>event_presence</code></td><td>numeric</td></tr>
+    <tr><td>27</td><td>What was the ureteroscope type?</td><td><code>event_attribute_values</code></td><td>categorical</td></tr>
+    <tr><td>28</td><td>What was the diameter of the stent?</td><td><code>event_attribute_values</code></td><td>numeric</td></tr>
+    <tr><td>29</td><td>What was the diameter of the balloon dilation?</td><td><code>event_attribute_values</code></td><td>numeric</td></tr>
+    <tr><td>30</td><td>What was the laser fiber type?</td><td><code>event_attribute_values</code></td><td>categorical</td></tr>
+    <tr><td>31</td><td>What was the make / model of ureteroscope?</td><td><code>event_attribute_values</code></td><td>categorical</td></tr>
+    <tr><td>32</td><td>How was the patient positioned?</td><td><code>event_attribute_values</code></td><td>categorical</td></tr>
+    <tr><td>33</td><td>Was DISS used?</td><td><code>event_presence</code></td><td>categorical</td></tr>
+    <tr><td>34</td><td>Was a 2 minute pause used?</td><td><code>event_presence</code></td><td>categorical</td></tr>
+    <tr><td>35</td><td>What was the laser setting power?</td><td><code>event_attribute_values</code></td><td>numeric</td></tr>
+    <tr><td>36</td><td>Was a ramp up energy strategy used?</td><td><code>event_presence</code></td><td>numeric</td></tr>
+    <tr><td>37</td><td>What was the lithotripsy technique?</td><td><code>event_concepts</code></td><td>categorical</td></tr>
+    <tr><td>38</td><td>What was the type of SWL machine?</td><td><code>event_attribute_values</code></td><td>categorical</td></tr>
+    <tr><td>39</td><td>What was the irrigation method?</td><td><code>event_attribute_values</code></td><td>categorical</td></tr>
+    <tr><td>40</td><td>What was the ureteroscope type?</td><td><code>event_attribute_values</code></td><td>categorical</td></tr>
+    <tr><td>41</td><td>What was the diameter of the stent?</td><td><code>event_attribute_values</code></td><td>numeric</td></tr>
+    <tr><td>42</td><td>What was the laser setting frequency?</td><td><code>event_attribute_values</code></td><td>numeric</td></tr>
+    <tr><td>43</td><td>Was a retrograde pyelogram performed?</td><td><code>event_presence</code></td><td>categorical</td></tr>
+    <tr><td>44</td><td>What was the size of the ureteroscope?</td><td><code>event_attribute_values</code></td><td>numeric</td></tr>
+    <tr><td>45</td><td>What were the findings of the retrograde pyelogram?</td><td><code>event_attribute_values</code></td><td>list</td></tr>
+    <tr><td>46</td><td>What was the laser fiber size?</td><td><code>event_attribute_values</code></td><td>numeric</td></tr>
+    <tr><td>47</td><td>Was coaxial dilation used?</td><td><code>event_presence</code></td><td>categorical</td></tr>
+    <tr><td>48</td><td>What was the length of the stent?</td><td><code>event_attribute_values</code></td><td>numeric</td></tr>
+    <tr><td>49</td><td>What was the diameter of the balloon dilation?</td><td><code>event_attribute_values</code></td><td>numeric</td></tr>
+    <tr><td>50</td><td>What was the lithotripter energy source?</td><td><code>event_attribute_values</code></td><td>categorical</td></tr>
+    <tr><td>51</td><td>What was the irrigation pressure?</td><td><code>event_attribute_values</code></td><td>numeric</td></tr>
+    <tr><td>52</td><td>Was a retroperc used?</td><td><code>event_presence</code></td><td>categorical</td></tr>
+    <tr><td>53</td><td>What was the laser setting frequency?</td><td><code>event_attribute_values</code></td><td>numeric</td></tr>
+    <tr><td>54</td><td>What was the laser setting power?</td><td><code>event_attribute_values</code></td><td>numeric</td></tr>
+    <tr><td>55</td><td>What was the diameter of coaxial dilation?</td><td><code>event_attribute_values</code></td><td>numeric</td></tr>
+    <tr><td>56</td><td>What was the length of the UAS?</td><td><code>event_attribute_values</code></td><td>numeric</td></tr>
+    <tr><td>57</td><td>Was a safety wire used?</td><td><code>event_presence</code></td><td>categorical</td></tr>
+    <tr><td>58</td><td>What was the laser fiber type?</td><td><code>event_attribute_values</code></td><td>categorical</td></tr>
+    <tr><td>59</td><td>What was the laser fiber type?</td><td><code>event_attribute_values</code></td><td>categorical</td></tr>
+    <tr><td>60</td><td>What was the suction pressure?</td><td><code>event_attribute_values</code></td><td>numeric</td></tr>
+    <tr><td>61</td><td>What was the make / model of ureteroscope?</td><td><code>event_attribute_values</code></td><td>categorical</td></tr>
+    <tr><td>62</td><td>What was the laser fiber size?</td><td><code>event_attribute_values</code></td><td>numeric</td></tr>
+    <tr><td>63</td><td>Was a dual lumen catheter used</td><td><code>event_presence</code></td><td>categorical</td></tr>
+    <tr><td>64</td><td>What was the diameter of the dual lumen?</td><td><code>event_attribute_values</code></td><td>numeric</td></tr>
+    <tr><td>65</td><td>What irrigation type was used?</td><td><code>event_attribute_values</code></td><td>categorical</td></tr>
+    <tr><td>66</td><td>Was a safety wire used?</td><td><code>event_presence</code></td><td>categorical</td></tr>
+    </tbody></table>
+  </div>
+
+  <div class="domain-block family-history">
+    <h4>History &amp; Timeline (31 questions)</h4>
+    <table><thead><tr><th>#</th><th>Question</th><th>Resolver</th><th>Shape</th></tr></thead><tbody>
+    <tr><td>1</td><td>Has the patient ever had a kidney stone before index visit?</td><td><code>event_presence</code></td><td>timeline_fact</td></tr>
+    <tr><td>2</td><td>How many stones has the patient had prior to the index visit?</td><td><code>event_attribute_values</code></td><td>numeric</td></tr>
+    <tr><td>3</td><td>Has the patient ever had kidney stone surgery prior to the index visit?</td><td><code>event_presence</code></td><td>timeline_fact</td></tr>
+    <tr><td>4</td><td>What was the age of onset of first stone prior to the index visit?</td><td><code>event_attribute_values</code></td><td>numeric</td></tr>
+    <tr><td>5</td><td>Has the patient ever passed a stone prior to the index visit?</td><td><code>event_presence</code></td><td>timeline_fact</td></tr>
+    <tr><td>6</td><td>What urologic surgeries have the patients received prior to the index visit?</td><td><code>event_concepts</code></td><td>list</td></tr>
+    <tr><td>7</td><td>Has the patient had recurrent UTIs?</td><td><code>event_presence</code></td><td>categorical</td></tr>
+    <tr><td>8</td><td>Is there a family history of kidney stones?</td><td><code>event_presence</code></td><td>timeline_fact</td></tr>
+    <tr><td>9</td><td>What was the prior stone surgery type prior to the index visit?</td><td><code>event_concepts</code></td><td>timeline_fact</td></tr>
+    <tr><td>10</td><td>How many kidney stones has the patient passed?</td><td><code>event_attribute_values</code></td><td>numeric</td></tr>
+    <tr><td>11</td><td>Does the patient have transportation?</td><td><code>event_presence</code></td><td>categorical</td></tr>
+    <tr><td>12</td><td>What anatomic variants does the patient have?</td><td><code>event_concepts</code></td><td>categorical</td></tr>
+    <tr><td>13</td><td>Has the patient had a prior UTI?</td><td><code>event_presence</code></td><td>timeline_fact</td></tr>
+    <tr><td>14</td><td>Has the patient ever had a ureteral stent?</td><td><code>event_presence</code></td><td>timeline_fact</td></tr>
+    <tr><td>15</td><td>Has the patient had MRDO UTIs?</td><td><code>event_presence</code></td><td>categorical</td></tr>
+    <tr><td>16</td><td>How many prior stone surgeries were performed (of each type)</td><td><code>event_grouped_counts</code></td><td>numeric</td></tr>
+    <tr><td>17</td><td>Has the patient had kidney stones during pregnancy?</td><td><code>event_presence</code></td><td>categorical</td></tr>
+    <tr><td>18</td><td>What is the patient's frailty index?</td><td><code>event_attribute_values</code></td><td>categorical</td></tr>
+    <tr><td>19</td><td>Does the patient have food insecurity?</td><td><code>event_presence</code></td><td>categorical</td></tr>
+    <tr><td>20</td><td>Which family members have a history of kidney stones?</td><td><code>event_attribute_values</code></td><td>list</td></tr>
+    <tr><td>21</td><td>Has the patient been pregnant?</td><td><code>event_presence</code></td><td>categorical</td></tr>
+    <tr><td>22</td><td>What is the profession of the patient?</td><td><code>event_attribute_values</code></td><td>categorical</td></tr>
+    <tr><td>23</td><td>Is the patient on enteral nutrition?</td><td><code>event_presence</code></td><td>categorical</td></tr>
+    <tr><td>24</td><td>What is the education level of the patient?</td><td><code>event_attribute_values</code></td><td>categorical</td></tr>
+    <tr><td>25</td><td>Which family members have a history of kidney stones?</td><td><code>event_attribute_values</code></td><td>list</td></tr>
+    <tr><td>26</td><td>Is the patient on enteral nutrition?</td><td><code>event_presence</code></td><td>categorical</td></tr>
+    <tr><td>27</td><td>What type of tube feeds are used?</td><td><code>event_presence</code></td><td>categorical</td></tr>
+    <tr><td>28</td><td>Has the patient been pregnant?</td><td><code>event_presence</code></td><td>categorical</td></tr>
+    <tr><td>29</td><td>What is the education level of the patient?</td><td><code>event_attribute_values</code></td><td>categorical</td></tr>
+    <tr><td>30</td><td>What is the profession of the patient?</td><td><code>event_attribute_values</code></td><td>categorical</td></tr>
+    <tr><td>31</td><td>Is there a caregiver that helps at home?</td><td><code>event_presence</code></td><td>categorical</td></tr>
+    </tbody></table>
+  </div>
+
+  <div class="domain-block family-outcomes">
+    <h4>Outcomes &amp; Complications (17 questions)</h4>
+    <table><thead><tr><th>#</th><th>Question</th><th>Resolver</th><th>Shape</th></tr></thead><tbody>
+    <tr><td>1</td><td>What medical side effects were encountered?</td><td><code>event_concepts</code></td><td>categorical</td></tr>
+    <tr><td>2</td><td>Was there an intra-operative ureteral injury?</td><td><code>event_presence</code></td><td>categorical</td></tr>
+    <tr><td>3</td><td>What was the recommended diet change?</td><td><code>event_concepts</code></td><td>categorical</td></tr>
+    <tr><td>4</td><td>Was post-operative obstruction present?</td><td><code>event_presence</code></td><td>categorical</td></tr>
+    <tr><td>5</td><td>What was the baseline diet?</td><td><code>event_attribute_values</code></td><td>categorical</td></tr>
+    <tr><td>6</td><td>Did the patient experience urinary retention?</td><td><code>event_presence</code></td><td>categorical</td></tr>
+    <tr><td>7</td><td>Was a hematoma present after surgery</td><td><code>event_presence</code></td><td>categorical</td></tr>
+    <tr><td>8</td><td>Was a urine leak present after surgery?</td><td><code>event_presence</code></td><td>categorical</td></tr>
+    <tr><td>9</td><td>Did the patient experience an anesthetic complication?</td><td><code>event_concepts</code></td><td>categorical</td></tr>
+    <tr><td>10</td><td>Did the patient experience urinary retention?</td><td><code>event_presence</code></td><td>categorical</td></tr>
+    <tr><td>11</td><td>Was a hematoma present after surgery</td><td><code>event_presence</code></td><td>categorical</td></tr>
+    <tr><td>12</td><td>Did the patient experience an obstetric complication?</td><td><code>event_presence</code></td><td>categorical</td></tr>
+    <tr><td>13</td><td>Has the patient had any complications during pregnancy?</td><td><code>event_presence</code></td><td>categorical</td></tr>
+    <tr><td>14</td><td>Was increased physical activity recommended?</td><td><code>event_presence</code></td><td>categorical</td></tr>
+    <tr><td>15</td><td>Was the patient stone free or were there residual fragments after treatment?</td><td><code>event_concepts</code></td><td>categorical</td></tr>
+    <tr><td>16</td><td>Did the patient experience stone passage?</td><td><code>event_presence</code></td><td>categorical</td></tr>
+    <tr><td>17</td><td>Did the patient's symptoms resolve after treatment?</td><td><code>event_presence</code></td><td>categorical</td></tr>
+    </tbody></table>
+  </div>
+
+  <div class="domain-block family-symptoms">
+    <h4>Symptoms &amp; Imaging (9 questions)</h4>
+    <table><thead><tr><th>#</th><th>Question</th><th>Resolver</th><th>Shape</th></tr></thead><tbody>
+    <tr><td>1</td><td>Is the stone a staghorn calculus?</td><td><code>event_presence</code></td><td>categorical</td></tr>
+    <tr><td>2</td><td>What is the Hounsfield unit for the stone?</td><td><code>event_attribute_values</code></td><td>numeric</td></tr>
+    <tr><td>3</td><td>Was the patient symptomatic from this stone</td><td><code>event_presence</code></td><td>categorical</td></tr>
+    <tr><td>4</td><td>Where is the stone (stone location)?</td><td><code>event_attribute_values</code></td><td>categorical</td></tr>
+    <tr><td>5</td><td>Is hydronephrosis present?</td><td><code>event_presence</code></td><td>categorical</td></tr>
+    <tr><td>6</td><td>What were the patient's symptoms?</td><td><code>event_attribute_values</code></td><td>list</td></tr>
+    <tr><td>7</td><td>What is the laterality of the stone?</td><td><code>event_attribute_values</code></td><td>categorical</td></tr>
+    <tr><td>8</td><td>Was hydronephrosis present?</td><td><code>event_presence</code></td><td>categorical</td></tr>
+    <tr><td>9</td><td>What imaging modality was used to guide access?</td><td><code>event_attribute_values</code></td><td>categorical</td></tr>
+    </tbody></table>
+  </div>
+
+  <div class="domain-block family-medications">
+    <h4>Medications (7 questions)</h4>
+    <table><thead><tr><th>#</th><th>Question</th><th>Resolver</th><th>Shape</th></tr></thead><tbody>
+    <tr><td>1</td><td>What medication was given?</td><td><code>event_concepts</code></td><td>list</td></tr>
+    <tr><td>2</td><td>What was the date of administration / prescription?</td><td><code>event_attribute_values</code></td><td>categorical</td></tr>
+    <tr><td>3</td><td>What was the duration of the medication?</td><td><code>event_attribute_values</code></td><td>categorical</td></tr>
+    <tr><td>4</td><td>What was the frequency of dosing (i.e. once a day; twice a day)</td><td><code>event_attribute_values</code></td><td>numeric</td></tr>
+    <tr><td>5</td><td>What was the dose of medication</td><td><code>event_attribute_values</code></td><td>categorical</td></tr>
+    <tr><td>6</td><td>What was the context of medication administration (i.e. at home, intra-operatively, pre-op)</td><td><code>event_attribute_values</code></td><td>categorical</td></tr>
+    <tr><td>7</td><td>What was the route of medication administration</td><td><code>event_attribute_values</code></td><td>categorical</td></tr>
+    </tbody></table>
+  </div>
+</div>
+
+<!-- ================================================================== -->
+<!-- SECTION 9: Controlled Vocabularies                                  -->
+<!-- ================================================================== -->
+<div class="section">
+  <h2>9. Controlled Vocabularies</h2>
+
+  <p class="glue">
+    Raw clinical text is inconsistent. A surgeon writes "URS," another writes "ureteroscopy," a third writes "flexible ureteroscopy." All three mean the same procedure. The system handles this through two parallel vocabulary layers: one for event preferred terms, one for attribute values.
+  </p>
+
+  <h3>How Normalization Works</h3>
+
+  <p class="glue-small">
+    When the extraction model proposes an event, the normalization engine receives the raw preferred_term and each attribute value. It lowercases and strips punctuation to build a lookup key, then checks that key against the vocabulary tables. If a match exists, the raw text is replaced with the canonical form.
+  </p>
+
+  <div class="vocab-flow">
+    <div class="vf-box">Model output: "rt hydroureteronephrosis"</div>
+    <div class="vf-arrow">&#8595;</div>
+    <div class="vf-box">Lookup key: "rt hydroureteronephrosis"</div>
+    <div class="vf-arrow">&#8595;</div>
+    <div class="vf-box">Canonical term: "hydroureteronephrosis"</div>
+    <div class="vf-arrow">&#8595;</div>
+    <div class="vf-box">Status: CANONICAL (laterality extracted to attribute)</div>
+  </div>
+
+  <p class="glue-small">
+    If no alias matches, the event gets a PROVISIONAL status and a generated concept_id. PROVISIONAL events are valid extractions. They just indicate the vocabulary has not seen this exact phrasing before. The gap-reporting system flags these so new aliases can be added over time.
+  </p>
+
+  <h3>Event Preferred Terms</h3>
+
+  <p class="glue-small">
+    The event vocabulary maps 990 aliases to 252 canonical preferred terms across all 10 event types. Each (family, event_type) pair has its own lookup table. A few examples from the imaging_finding vocabulary:
+  </p>
+
+  <div class="vocab-example">"ureteral calculus"        &rarr; "ureteral stone"
+"uvj stone"                &rarr; "ureteral stone"
+"distal ureteral stone"   &rarr; "ureteral stone"
+"obstructing ureteral calculus" &rarr; "ureteral stone"
+"mild right hydronephrosis"    &rarr; "hydronephrosis"
+"moderate left hydronephrosis" &rarr; "hydronephrosis"
+"staghorn calculi"             &rarr; "staghorn calculus"</div>
+
+  <p class="glue-small">
+    The canonical term ("ureteral stone") is what gets stored in the event. Laterality, severity, and location are parsed into separate attributes. This separation prevents a combinatorial explosion. Instead of maintaining entries for every combination of laterality + severity + finding, the system normalizes the finding once and captures the modifiers as structured attribute values.
+  </p>
+
+  <h3>Attribute Vocabularies</h3>
+
+  <p class="glue-small">
+    The attribute vocabulary covers 57 controlled attributes across all event types, mapping 910 aliases to 327 canonical values. Each attribute is scoped to a specific (family, event_type, attribute) triple. Here is how the symptom vocabulary works:
+  </p>
+
+  <div class="vocab-example">"left flank pain"   &rarr; "LEFT FLANK PAIN"     (upper_tokens style)
+"l flank pain"      &rarr; "LEFT FLANK PAIN"
+"cva tenderness"    &rarr; "CVA TENDERNESS"
+"costovertebral angle tenderness" &rarr; "CVA TENDERNESS"
+"gross hematuria"   &rarr; "HEMATURIA"
+"blood in urine"    &rarr; "HEMATURIA"
+"colicky flank pain" &rarr; "RENAL COLIC"</div>
+
+  <p class="glue-small">
+    Canonical style varies by attribute. Symptoms use UPPER_TOKENS because they appear in structured output tables alongside coded values. Medication routes use the same convention (IV, PO, IM). Drug classes use lower_text (opioid, NSAID, alpha-blocker) because they read more naturally in prose summaries.
+  </p>
+
+  <h3>Vocabulary Coverage by Domain</h3>
+
+  <p class="glue-small">
+    The table below shows the largest attribute vocabularies. These are the attributes that see the most variation in clinical text and require the most aliases to normalize consistently.
+  </p>
+
+  <table>
+    <tr><th>Family</th><th>Event Type</th><th>Attribute</th><th>Canonical Values</th><th>Aliases</th></tr>
+    <tr><td>symptoms_imaging</td><td>symptom_presentation</td><td>symptoms</td><td>34</td><td>76</td></tr>
+    <tr><td>history_timeline</td><td>history_fact</td><td>history_kind</td><td>12</td><td>56</td></tr>
+    <tr><td>outcomes_complications</td><td>adverse_effect</td><td>reaction_type</td><td>26</td><td>52</td></tr>
+    <tr><td>medications</td><td>medication_exposure</td><td>frequency</td><td>15</td><td>51</td></tr>
+    <tr><td>medications</td><td>medication_exposure</td><td>drug_class</td><td>23</td><td>45</td></tr>
+    <tr><td>symptoms_imaging</td><td>imaging_finding</td><td>location</td><td>17</td><td>42</td></tr>
+    <tr><td>procedure_devices</td><td>device_event</td><td>device_type</td><td>18</td><td>34</td></tr>
+    <tr><td>outcomes_complications</td><td>recommendation_event</td><td>recommendation_type</td><td>9</td><td>30</td></tr>
+    <tr><td>symptoms_imaging</td><td>imaging_finding</td><td>comparison_status</td><td>8</td><td>24</td></tr>
+    <tr><td>medications</td><td>medication_exposure</td><td>indication</td><td>7</td><td>25</td></tr>
+  </table>
+
+  <h3>Vocab Guidelines: The Attribute Policy Layer</h3>
+
+  <p class="glue-small">
+    Each of the 57 attributes has an explicit policy that defines three things: what kind of vocabulary it uses, how canonical values are formatted, and whether the extraction model is allowed to introduce new values.
+  </p>
+
+  <table>
+    <tr><th>Property</th><th>Options</th><th>What It Controls</th></tr>
+    <tr><td>attribute_kind</td><td>controlled, semi_structured, free_text</td><td>Whether values must come from the vocabulary (controlled), follow a pattern like dates or measurements (semi_structured), or allow any text (free_text)</td></tr>
+    <tr><td>canonical_style</td><td>upper_tokens, lower_text, lower_or_snake, clinical_mixed, measurement_unit, numeric_or_text, date_or_span, free_text</td><td>The formatting convention for canonical values</td></tr>
+    <tr><td>allow_provisional</td><td>true / false</td><td>Whether unrecognized values are accepted (true) or rejected (false). Controlled attributes with allow_provisional=false will reject any value not in the vocabulary.</td></tr>
+  </table>
+
+  <p class="glue-small">
+    A concrete example. The attribute <code>imaging_finding.laterality</code> has kind=controlled, style=upper_tokens, allow_provisional=false. That means the only legal values are LEFT, RIGHT, and BILATERAL. If the model produces "rt" or "bilateral kidneys," the normalization engine maps it to the canonical form. If it produces something unmappable, the value is rejected and flagged.
+  </p>
+
+  <p class="glue-small">
+    Contrast that with <code>procedure_event.indication</code>: kind=controlled, style=lower_text, allow_provisional=true. The vocabulary has 9 canonical values (stone removal, stent placement, drainage, etc.), but if the model encounters a genuinely new indication like "stent exchange," it can accept the provisional value while the gap reporter flags it for vocabulary expansion.
+  </p>
+
+  <div class="rationale-box">
+    The vocabulary system trades upfront curation effort for downstream consistency. When a researcher queries "all patients with hydronephrosis," they get every instance. Not just the ones where the surgeon happened to write "hydronephrosis" rather than "mild right hydroureteronephrosis." The 910 attribute aliases and 990 event term aliases are what make that guarantee possible.
+  </div>
+</div>
+
+</body>
+</html>

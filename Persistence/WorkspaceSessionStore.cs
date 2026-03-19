@@ -22,6 +22,8 @@ namespace SelfContainedDeployment.Persistence
 
         public string Theme { get; set; }
 
+        public string ThemePack { get; set; }
+
         public string DefaultShellProfileId { get; set; }
 
         public int MaxPaneCountPerThread { get; set; }
@@ -353,6 +355,7 @@ namespace SelfContainedDeployment.Persistence
             {
                 "light" => ElementTheme.Light,
                 "dark" => ElementTheme.Dark,
+                "system" => ElementTheme.Default,
                 _ => ElementTheme.Default,
             };
         }
@@ -363,7 +366,7 @@ namespace SelfContainedDeployment.Persistence
             {
                 ElementTheme.Light => "light",
                 ElementTheme.Dark => "dark",
-                _ => "default",
+                _ => "system",
             };
         }
 

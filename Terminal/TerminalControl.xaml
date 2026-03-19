@@ -18,7 +18,7 @@
                 Background="{ThemeResource ShellSurfaceBackgroundBrush}"
                 BorderBrush="{ThemeResource ShellBorderBrush}"
                 BorderThickness="0,0,0,1"
-                Padding="6,1,28,2">
+                Padding="8,4,32,4">
             <Grid ColumnDefinitions="*,Auto"
                   ColumnSpacing="8">
                 <TextBlock x:Name="TerminalHeaderTitleText"
@@ -43,15 +43,16 @@
         <Grid Grid.Row="1"
               x:Name="TerminalContentHost">
             <Border x:Name="NativeTerminalViewport"
-                    Margin="8,6,8,8"
+                    Margin="0"
                     Background="{ThemeResource ShellSurfaceBackgroundBrush}"
-                    BorderBrush="{ThemeResource ShellBorderBrush}"
-                    BorderThickness="1">
+                    BorderBrush="Transparent"
+                    BorderThickness="0"
+                    Padding="8,6,8,8">
                 <Grid ColumnDefinitions="Auto,*">
                     <Border x:Name="ToolSessionRail"
                             Grid.Column="0"
                             Width="3"
-                            Margin="0,10,8,10"
+                            Margin="0,6,8,6"
                             HorizontalAlignment="Left"
                             VerticalAlignment="Stretch"
                             Background="#E05A5A"
@@ -61,7 +62,7 @@
 
                     <Grid x:Name="NativeTerminalHost"
                           Grid.Column="1"
-                          Margin="10,8,10,10"
+                          Margin="0"
                           AutomationProperties.AutomationId="terminal-webview" />
                 </Grid>
             </Border>

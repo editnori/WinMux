@@ -171,6 +171,7 @@ namespace SelfContainedDeployment
             {
                 SavedAt = DateTimeOffset.UtcNow.ToString("O"),
                 Theme = WorkspaceSessionStore.FormatTheme(SampleConfig.CurrentTheme),
+                ThemePack = SampleConfig.CurrentThemePackId,
                 DefaultShellProfileId = SampleConfig.DefaultShellProfileId,
                 MaxPaneCountPerThread = SampleConfig.MaxPaneCountPerThread,
                 PaneOpen = ShellSplitView.IsPaneOpen,
@@ -493,6 +494,7 @@ namespace SelfContainedDeployment
                 _paneContainersById.Clear();
 
                 SampleConfig.CurrentTheme = WorkspaceSessionStore.ParseTheme(snapshot.Theme);
+                SampleConfig.CurrentThemePackId = ShellTheme.NormalizePackId(snapshot.ThemePack);
                 SampleConfig.DefaultShellProfileId = ShellProfiles.Resolve(snapshot.DefaultShellProfileId).Id;
                 SampleConfig.MaxPaneCountPerThread = Math.Clamp(snapshot.MaxPaneCountPerThread, 2, 4);
                 _threadSequence = Math.Max(1, snapshot.ThreadSequence);

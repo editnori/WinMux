@@ -1,3 +1,10 @@
+:root {
+  --shell-background: #101216;
+  --shell-text: #f3f4f6;
+  --shell-subtext: #a7adb7;
+  --shell-faint: #7a808b;
+}
+
 html,
 body {
   margin: 0;
@@ -8,13 +15,15 @@ body {
 }
 
 html {
-  background: #09090b;
-  color: #fafafa;
+  background: var(--shell-background);
+  color: var(--shell-text);
 }
 
 html[data-theme="light"] {
-  background: #ffffff;
-  color: #18181b;
+  --shell-background: #f9fbfd;
+  --shell-text: #1a1e23;
+  --shell-subtext: #39424d;
+  --shell-faint: #55606d;
 }
 
 body {
@@ -64,5 +73,5 @@ body {
 
 .empty-body {
   font-size: 11px;
-  opacity: 0.62;
+  color: var(--shell-subtext);
 }

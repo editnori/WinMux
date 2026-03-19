@@ -3,6 +3,13 @@
   const diffRoot = document.getElementById('diff-root');
   const emptyState = document.getElementById('empty-state');
   const hasBridge = !!(window.chrome && window.chrome.webview);
+  const hostState = (window.__winmuxEditorHostState = window.__winmuxEditorHostState || {
+    ready: false,
+    hasBridge,
+    lastAppliedRequestId: '',
+    lastAppliedPath: '',
+    activeMode: 'file',
+  });
   const initialTheme = (() => {
     try {
       return new URLSearchParams(window.location.search).get('theme') === 'light' ? 'light' : 'dark';
@@ -10,10 +17,13 @@
       return 'dark';
     }
   })();
+  const monacoThemeName = 'winmux-shell';
 
   let editor = null;
   let compareEditor = null;
+  let diffNavigator = null;
   let currentTheme = initialTheme;
+  let currentPalette = buildDefaultPalette(initialTheme);
   let model = null;
   let originalModel = null;
   let modifiedModel = null;
@@ -42,8 +52,82 @@
     }
   }
 
-  function normalizeTheme(theme) {
-    return theme === 'light' ? 'winmux-light' : 'winmux-dark';
+  function normalizeTheme() {
+    return monacoThemeName;
+  }
+
+  function buildDefaultPalette(theme) {
+    if (theme === 'light') {
+      return {
+        background: '#F9FBFD',
+        text: '#1A1E23',
+        subtext: '#39424D',
+        faint: '#55606D',
+        lineHighlight: '#F2F6FA',
+        insertedTextBackground: '#16A34A40',
+        removedTextBackground: '#DC26263A',
+        insertedLineBackground: '#E8F5ED',
+        removedLineBackground: '#F9E8EA',
+        insertedGutterBackground: '#2A7A53',
+        removedGutterBackground: '#B75162',
+      };
+    }
+
+    return {
+      background: '#101216',
+      text: '#F3F4F6',
+      subtext: '#A7ADB7',
+      faint: '#7A808B',
+      lineHighlight: '#17191E',
+      insertedTextBackground: '#4ADE8036',
+      removedTextBackground: '#F8717136',
+      insertedLineBackground: '#183123',
+      removedLineBackground: '#341A20',
+      insertedGutterBackground: '#62C58D',
+      removedGutterBackground: '#F08A8A',
+    };
+  }
+
+  function buildMonacoTheme(theme, palette) {
+    return {
+      base: theme === 'light' ? 'vs' : 'vs-dark',
+      inherit: true,
+      rules: [],
+      colors: {
+        'editor.background': palette.background,
+        'editor.lineHighlightBackground': palette.lineHighlight,
+        'editorLineNumber.foreground': palette.faint,
+        'editorLineNumber.activeForeground': palette.text,
+        'editorOverviewRuler.border': '#00000000',
+        'diffEditor.diagonalFill': '#00000000',
+        'diffEditor.insertedTextBackground': palette.insertedTextBackground,
+        'diffEditor.removedTextBackground': palette.removedTextBackground,
+        'diffEditor.insertedTextBorder': '#00000000',
+        'diffEditor.removedTextBorder': '#00000000',
+        'diffEditor.insertedLineBackground': palette.insertedLineBackground,
+        'diffEditor.removedLineBackground': palette.removedLineBackground,
+        'diffEditorGutter.insertedLineBackground': palette.insertedGutterBackground,
+        'diffEditorGutter.removedLineBackground': palette.removedGutterBackground,
+      },
+    };
+  }
+
+  function applyPalette(palette, theme = currentTheme) {
+    currentPalette = {
+      ...buildDefaultPalette(theme),
+      ...(palette || {}),
+    };
+
+    const root = document.documentElement;
+    root.style.setProperty('--shell-background', currentPalette.background);
+    root.style.setProperty('--shell-text', currentPalette.text);
+    root.style.setProperty('--shell-subtext', currentPalette.subtext);
+    root.style.setProperty('--shell-faint', currentPalette.faint);
+
+    if (window.monaco) {
+      monaco.editor.defineTheme(normalizeTheme(theme), buildMonacoTheme(theme, currentPalette));
+      monaco.editor.setTheme(normalizeTheme(theme));
+    }
   }
 
   function setDomTheme(theme) {
@@ -51,6 +135,7 @@
     currentTheme = resolved;
     document.documentElement.dataset.theme = resolved;
     document.body.dataset.theme = resolved;
+    document.documentElement.style.colorScheme = resolved;
     return resolved;
   }
 
@@ -62,6 +147,7 @@
 
   function showMode(mode) {
     activeMode = mode === 'compare' ? 'compare' : 'file';
+    hostState.activeMode = activeMode;
     editorRoot.classList.toggle('hidden', activeMode !== 'file');
     diffRoot.classList.toggle('hidden', activeMode !== 'compare');
   }
@@ -141,15 +227,22 @@
       readOnly,
       lineNumbers,
       renderLineHighlight,
-      renderSideBySide: false,
+      renderSideBySide: true,
+      useInlineViewWhenSpaceIsLimited: false,
+      renderSideBySideInlineBreakpoint: 0,
       renderMarginRevertIcon: false,
-      diffWordWrap: 'on',
+      renderIndicators: true,
+      diffWordWrap: 'off',
       hideUnchangedRegions: {
         enabled: false,
       },
-      experimental: {
-        useTrueInlineView: true,
-      },
+      splitViewDefaultRatio: 0.5,
+    });
+    compareEditor.getModifiedEditor().updateOptions({
+      lineDecorationsWidth: 4,
+      padding: { top: 8, bottom: 10 },
+      lineNumbersMinChars: 1,
+      readOnly,
     });
     showMode('compare');
     setEmptyState(
@@ -173,8 +266,8 @@
     const renderLineHighlight = payload.renderLineHighlight || 'gutter';
 
     suppressChange = true;
-    monaco.editor.setTheme(normalizeTheme(theme));
-    setDomTheme(theme);
+    const resolvedTheme = setDomTheme(theme);
+    applyPalette(payload.palette || currentPalette, resolvedTheme);
 
     if (mode === 'compare') {
       applyCompareDocument(payload, language, readOnly, lineNumbers, renderLineHighlight);
@@ -184,67 +277,49 @@
 
     queueLayout();
     suppressChange = false;
+    hostState.lastAppliedRequestId = payload.requestId || '';
+    hostState.lastAppliedPath = payload.path || '';
     send('documentApplied', { requestId: payload.requestId || '' });
   }
 
   function scheduleChange() {
-    if (suppressChange || !editor || activeMode !== 'file') {
+    if (suppressChange || !window.monaco) {
+      return;
+    }
+
+    const activeEditor = activeMode === 'compare'
+      ? compareEditor?.getModifiedEditor?.()
+      : editor;
+    if (!activeEditor || activeEditor.getOption(monaco.editor.EditorOption.readOnly)) {
       return;
     }
 
     clearTimeout(changeTimer);
     changeTimer = setTimeout(() => {
-      send('contentChanged', { text: editor.getValue() });
+      send('contentChanged', { text: activeEditor.getValue() });
     }, 120);
   }
 
   function createEditors() {
-    monaco.editor.defineTheme('winmux-light', {
-      base: 'vs',
-      inherit: true,
-      rules: [],
-      colors: {
-        'editor.background': '#FFFFFF',
-        'editor.lineHighlightBackground': '#F8FAFC',
-        'editorLineNumber.foreground': '#A1A1AA',
-        'editorLineNumber.activeForeground': '#18181B',
-        'editorOverviewRuler.border': '#00000000',
-        'diffEditor.diagonalFill': '#00000000',
-        'diffEditor.insertedTextBackground': '#BBF7D066',
-        'diffEditor.removedTextBackground': '#FECACA88',
-        'diffEditor.insertedLineBackground': '#ECFDF3',
-        'diffEditor.removedLineBackground': '#FEF2F2',
-        'diffEditorGutter.insertedLineBackground': '#86EFAC',
-        'diffEditorGutter.removedLineBackground': '#FCA5A5',
-      },
-    });
-    monaco.editor.defineTheme('winmux-dark', {
-      base: 'vs-dark',
-      inherit: true,
-      rules: [],
-      colors: {
-        'editor.background': '#111214',
-        'editor.lineHighlightBackground': '#17191E',
-        'editorLineNumber.foreground': '#71717A',
-        'editorLineNumber.activeForeground': '#FAFAFA',
-        'editorOverviewRuler.border': '#00000000',
-        'diffEditor.diagonalFill': '#00000000',
-        'diffEditor.insertedTextBackground': '#16653466',
-        'diffEditor.removedTextBackground': '#7F1D1D80',
-        'diffEditor.insertedLineBackground': '#0F2217',
-        'diffEditor.removedLineBackground': '#271314',
-        'diffEditorGutter.insertedLineBackground': '#22C55E',
-        'diffEditorGutter.removedLineBackground': '#F87171',
-      },
-    });
+    hostState.ready = false;
+    applyPalette(currentPalette, currentTheme);
 
     editor = monaco.editor.create(editorRoot, {
       automaticLayout: false,
+      bracketPairColorization: { enabled: false },
       glyphMargin: false,
+      guides: {
+        bracketPairs: false,
+        highlightActiveBracketPair: false,
+        highlightActiveIndentation: false,
+        indentation: false,
+      },
       lineNumbers: 'on',
       minimap: { enabled: false },
+      occurrencesHighlight: 'off',
       overviewRulerBorder: false,
       renderLineHighlight: 'gutter',
+      selectionHighlight: false,
       roundedSelection: false,
       scrollBeyondLastLine: false,
       smoothScrolling: true,
@@ -252,7 +327,8 @@
       fontFamily: '"Cascadia Code", "Consolas", monospace',
       fontSize: 13,
       lineHeight: 20,
-      padding: { top: 12, bottom: 18 },
+      lineNumbersMinChars: 1,
+      padding: { top: 8, bottom: 10 },
       tabSize: 4,
       wordWrap: 'off',
       readOnly: true,
@@ -261,48 +337,92 @@
 
     compareEditor = monaco.editor.createDiffEditor(diffRoot, {
       automaticLayout: false,
+      bracketPairColorization: { enabled: false },
       glyphMargin: false,
+      guides: {
+        bracketPairs: false,
+        highlightActiveBracketPair: false,
+        highlightActiveIndentation: false,
+        indentation: false,
+      },
       lineNumbers: 'on',
       minimap: { enabled: false },
+      occurrencesHighlight: 'off',
       overviewRulerBorder: false,
-      renderOverviewRuler: true,
-      renderLineHighlight: 'line',
+      renderOverviewRuler: false,
+      renderLineHighlight: 'none',
       roundedSelection: false,
+      selectionHighlight: false,
       scrollBeyondLastLine: false,
       smoothScrolling: true,
       stickyScroll: { enabled: false },
       fontFamily: '"Cascadia Code", "Consolas", monospace',
       fontSize: 13,
       lineHeight: 20,
-      renderSideBySide: false,
+      lineNumbersMinChars: 1,
+      renderSideBySide: true,
+      useInlineViewWhenSpaceIsLimited: false,
+      renderSideBySideInlineBreakpoint: 0,
       renderMarginRevertIcon: false,
-      diffWordWrap: 'on',
+      renderIndicators: false,
+      diffWordWrap: 'off',
       hideUnchangedRegions: {
         enabled: false,
       },
-      experimental: {
-        useTrueInlineView: true,
-      },
+      splitViewDefaultRatio: 0.5,
       originalEditable: false,
       readOnly: true,
       theme: normalizeTheme(currentTheme),
     });
     compareEditor.getOriginalEditor().updateOptions({
-      lineDecorationsWidth: 12,
-      padding: { top: 12, bottom: 18 },
+      lineDecorationsWidth: 4,
+      padding: { top: 8, bottom: 10 },
+      lineNumbersMinChars: 1,
+      guides: {
+        bracketPairs: false,
+        highlightActiveBracketPair: false,
+        highlightActiveIndentation: false,
+        indentation: false,
+      },
+      matchBrackets: 'never',
+      occurrencesHighlight: 'off',
       readOnly: true,
+      renderLineHighlight: 'none',
+      selectionHighlight: false,
+      wordWrap: 'off',
     });
     compareEditor.getModifiedEditor().updateOptions({
-      lineDecorationsWidth: 12,
-      padding: { top: 12, bottom: 18 },
-      readOnly: true,
+      lineDecorationsWidth: 4,
+      padding: { top: 8, bottom: 10 },
+      lineNumbersMinChars: 1,
+      guides: {
+        bracketPairs: false,
+        highlightActiveBracketPair: false,
+        highlightActiveIndentation: false,
+        indentation: false,
+      },
+      matchBrackets: 'never',
+      occurrencesHighlight: 'off',
+      readOnly: false,
+      renderLineHighlight: 'none',
+      selectionHighlight: false,
+      wordWrap: 'off',
+    });
+    diffNavigator = monaco.editor.createDiffNavigator(compareEditor, {
+      followsCaret: true,
+      ignoreCharChanges: false,
+      alwaysRevealFirst: true,
     });
 
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
       send('saveRequested');
     });
+    compareEditor.getModifiedEditor().addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+      send('saveRequested');
+    });
 
     editor.onDidChangeModelContent(scheduleChange);
+    compareEditor.getModifiedEditor().onDidChangeModelContent(scheduleChange);
     resizeObserver = new ResizeObserver(() => {
       queueLayout();
     });
@@ -321,6 +441,7 @@
       renderLineHighlight: 'gutter',
     });
 
+    hostState.ready = true;
     send('ready');
   }
 
@@ -328,18 +449,25 @@
     setDocument(payload) {
       applyDocument(payload || {});
     },
-    setTheme(theme) {
+    setTheme(theme, palette) {
       const resolvedTheme = setDomTheme(theme);
-      if (window.monaco) {
-        monaco.editor.setTheme(normalizeTheme(resolvedTheme));
-      }
+      applyPalette(palette || currentPalette, resolvedTheme);
+    },
+    applyShellPalette(palette) {
+      applyPalette(palette || currentPalette, currentTheme);
     },
     focus() {
       if (activeMode === 'compare') {
-        compareEditor?.focus();
+        compareEditor?.getModifiedEditor?.().focus();
       } else {
         editor?.focus();
       }
+    },
+    goToPreviousDiff() {
+      diffNavigator?.previous();
+    },
+    goToNextDiff() {
+      diffNavigator?.next();
     },
     layout() {
       queueLayout();
@@ -367,6 +495,7 @@
   }
 
   setDomTheme(initialTheme);
+  applyPalette(currentPalette, initialTheme);
   require.config({ paths: { vs: './vendor/monaco/vs' } });
   require(['vs/editor/editor.main'], createEditors);
 })();

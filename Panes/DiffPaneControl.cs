@@ -13,6 +13,7 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Windows.Foundation;
+using Windows.System;
 
 namespace SelfContainedDeployment.Panes
 {
@@ -68,6 +69,8 @@ namespace SelfContainedDeployment.Panes
     {
         private static readonly Regex HunkHeaderRegex = new(@"@@ -(?<old>\d+)(?:,\d+)? \+(?<new>\d+)(?:,\d+)? @@", RegexOptions.Compiled);
         private const float MinFitWidthZoomFactor = 0.5f;
+        private const float MaxManualZoomFactor = 2.4f;
+        private const float ManualZoomStep = 0.12f;
         private const double DiffCharacterWidth = 7.2;
         private const int InitialDiffRenderLineBatch = 40;
         private const int SubsequentDiffRenderLineBatch = 192;
@@ -76,9 +79,12 @@ namespace SelfContainedDeployment.Panes
         private readonly Border _headerBorder;
         private readonly TextBlock _pathText;
         private readonly TextBlock _summaryText;
+        private readonly Button _previousChangeButton;
+        private readonly Button _nextChangeButton;
         private readonly StackPanel _diffLinesPanel;
         private readonly ScrollViewer _scrollViewer;
         private readonly Dictionary<string, FrameworkElement> _sectionAnchors = new(StringComparer.Ordinal);
+        private readonly List<FrameworkElement> _changeAnchors = new();
         private string _automationPaneId;
         private string _currentPath;
         private string _currentDiff;
@@ -91,6 +97,7 @@ namespace SelfContainedDeployment.Panes
         private int _renderGeneration;
         private bool _showLoadingState;
         private bool _disposed;
+        private int _lastChangeAnchorIndex = -1;
 
         public DiffPaneControl()
         {
@@ -102,19 +109,28 @@ namespace SelfContainedDeployment.Panes
             {
                 BorderBrush = ResolveBrush("ShellBorderBrush"),
                 BorderThickness = new Thickness(0, 0, 0, 1),
-                Padding = new Thickness(10, 7, 34, 7),
+                Padding = new Thickness(5, 3, 6, 3),
                 Background = ResolveBrush("ShellSurfaceBackgroundBrush"),
                 Visibility = Visibility.Collapsed,
             };
 
+            Grid headerLayout = new()
+            {
+                ColumnSpacing = 6,
+            };
+            headerLayout.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            headerLayout.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            headerLayout.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            headerLayout.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
             StackPanel headerStack = new()
             {
-                Spacing = 2,
+                Spacing = 1,
             };
 
             _pathText = new TextBlock
             {
-                FontSize = 12,
+                FontSize = 11.25,
                 FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
                 Foreground = ResolveBrush("ShellTextPrimaryBrush"),
                 TextTrimming = TextTrimming.CharacterEllipsis,
@@ -123,13 +139,23 @@ namespace SelfContainedDeployment.Panes
 
             _summaryText = new TextBlock
             {
-                FontSize = 11,
+                FontSize = 10.25,
                 Foreground = ResolveBrush("ShellTextTertiaryBrush"),
                 TextTrimming = TextTrimming.CharacterEllipsis,
             };
             headerStack.Children.Add(_summaryText);
 
-            _headerBorder.Child = headerStack;
+            headerLayout.Children.Add(headerStack);
+
+            _previousChangeButton = BuildNavigationButton("Prev", OnPreviousChangeClicked, "Previous diff section");
+            Grid.SetColumn(_previousChangeButton, 2);
+            headerLayout.Children.Add(_previousChangeButton);
+
+            _nextChangeButton = BuildNavigationButton("Next", OnNextChangeClicked, "Next diff section");
+            Grid.SetColumn(_nextChangeButton, 3);
+            headerLayout.Children.Add(_nextChangeButton);
+
+            _headerBorder.Child = headerLayout;
             _root.Children.Add(_headerBorder);
 
             _diffLinesPanel = new StackPanel
@@ -144,11 +170,12 @@ namespace SelfContainedDeployment.Panes
                 HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
                 ZoomMode = ZoomMode.Enabled,
                 MinZoomFactor = MinFitWidthZoomFactor,
-                MaxZoomFactor = 1.0f,
-                Padding = new Thickness(12, 12, 12, 12),
+                MaxZoomFactor = MaxManualZoomFactor,
+                Padding = new Thickness(8, 8, 10, 10),
                 Content = _diffLinesPanel,
                 Background = ResolveBrush("ShellSurfaceBackgroundBrush"),
             };
+            _scrollViewer.PointerWheelChanged += OnDiffScrollViewerPointerWheelChanged;
             _scrollViewer.SizeChanged += (_, _) =>
             {
                 UpdateDiffContentWidth();
@@ -169,6 +196,38 @@ namespace SelfContainedDeployment.Panes
         public string CurrentPath => _currentPath;
 
         public string CurrentDiff => _currentDiff;
+
+        public bool CanNavigateChanges => _changeAnchors.Count > 0;
+
+        private void OnDiffScrollViewerPointerWheelChanged(object sender, PointerRoutedEventArgs e)
+        {
+            if ((e.KeyModifiers & VirtualKeyModifiers.Control) != VirtualKeyModifiers.Control)
+            {
+                return;
+            }
+
+            int delta = e.GetCurrentPoint(_scrollViewer)?.Properties?.MouseWheelDelta ?? 0;
+            if (delta == 0)
+            {
+                return;
+            }
+
+            float currentZoomFactor = _scrollViewer.ZoomFactor <= 0 ? 1.0f : _scrollViewer.ZoomFactor;
+            float nextZoomFactor = Math.Clamp(
+                currentZoomFactor + (delta > 0 ? ManualZoomStep : -ManualZoomStep),
+                MinFitWidthZoomFactor,
+                MaxManualZoomFactor);
+            if (Math.Abs(currentZoomFactor - nextZoomFactor) < 0.01f)
+            {
+                return;
+            }
+
+            _autoFitWidthLocked = false;
+            _fitWidthRequested = false;
+            _lastAppliedZoomFactor = nextZoomFactor;
+            _scrollViewer.ChangeView(null, null, nextZoomFactor, true);
+            e.Handled = true;
+        }
 
         public bool ShowHeader
         {
@@ -206,6 +265,10 @@ namespace SelfContainedDeployment.Panes
             AutomationProperties.SetName(_pathText, _showHeader ? "Patch review path" : "Inline patch review path");
             AutomationProperties.SetAutomationId(_summaryText, $"{headerPrefix}-summary-{paneId}");
             AutomationProperties.SetName(_summaryText, _showHeader ? "Patch review summary" : "Inline patch review summary");
+            AutomationProperties.SetAutomationId(_previousChangeButton, $"{headerPrefix}-prev-change-{paneId}");
+            AutomationProperties.SetName(_previousChangeButton, "Previous diff section");
+            AutomationProperties.SetAutomationId(_nextChangeButton, $"{headerPrefix}-next-change-{paneId}");
+            AutomationProperties.SetName(_nextChangeButton, "Next diff section");
             AutomationProperties.SetAutomationId(_scrollViewer, $"shell-diff-pane-scroll-{paneId}");
             AutomationProperties.SetName(_scrollViewer, "Patch review scroll");
             AutomationProperties.SetAutomationId(_diffLinesPanel, $"shell-diff-pane-content-{paneId}");
@@ -228,6 +291,16 @@ namespace SelfContainedDeployment.Panes
             }
 
             RenderDiff(_currentDiff);
+        }
+
+        public void NavigateToPreviousChange()
+        {
+            NavigateToChange(forward: false);
+        }
+
+        public void NavigateToNextChange()
+        {
+            NavigateToChange(forward: true);
         }
 
         public void FocusPane()
@@ -268,7 +341,28 @@ namespace SelfContainedDeployment.Panes
             _currentFiles = Array.Empty<GitChangedFile>();
             _showLoadingState = false;
             _sectionAnchors.Clear();
+            _changeAnchors.Clear();
+            _lastChangeAnchorIndex = -1;
             _diffLinesPanel.Children.Clear();
+        }
+
+        private Button BuildNavigationButton(string label, RoutedEventHandler handler, string toolTip)
+        {
+            Button button = new()
+            {
+                Content = new TextBlock
+                {
+                    Text = label,
+                    FontSize = 10,
+                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                },
+                Style = Application.Current.Resources["ShellDiffNavigationButtonStyle"] as Style,
+                Visibility = Visibility.Collapsed,
+                IsEnabled = false,
+            };
+            ToolTipService.SetToolTip(button, toolTip);
+            button.Click += handler;
+            return button;
         }
 
         public void ApplyFitToWidth(bool autoLock)
@@ -396,7 +490,7 @@ namespace SelfContainedDeployment.Panes
                         Index = entry.Index,
                         Kind = kind,
                         Text = entry.Line,
-                        Foreground = SerializeBrush(ResolveBrush(ResolveDiffLineBrushKey(kind))),
+                        Foreground = SerializeBrush(ResolveDiffForeground(kind)),
                     };
                 }).ToList(),
             };
@@ -407,8 +501,11 @@ namespace SelfContainedDeployment.Panes
             Stopwatch stopwatch = Stopwatch.StartNew();
             int renderGeneration = ++_renderGeneration;
             _sectionAnchors.Clear();
+            _changeAnchors.Clear();
+            _lastChangeAnchorIndex = -1;
             _diffLinesPanel.Children.Clear();
             _maxVisibleLineLength = 0;
+            UpdateChangeNavigationState();
             if (string.IsNullOrWhiteSpace(diffText))
             {
                 TextBlock emptyText = new()
@@ -507,8 +604,11 @@ namespace SelfContainedDeployment.Panes
         {
             Stopwatch stopwatch = Stopwatch.StartNew();
             _sectionAnchors.Clear();
+            _changeAnchors.Clear();
+            _lastChangeAnchorIndex = -1;
             _diffLinesPanel.Children.Clear();
             _maxVisibleLineLength = 0;
+            UpdateChangeNavigationState();
 
             if (files is null || files.Count == 0)
             {
@@ -634,6 +734,10 @@ namespace SelfContainedDeployment.Panes
 
                 _maxVisibleLineLength = Math.Max(_maxVisibleLineLength, line?.Length ?? 0);
                 FrameworkElement row = BuildDiffLineRow(oldLineNumber, newLineNumber, line, kind);
+                if (kind == "hunk")
+                {
+                    row.Tag = "hunk";
+                }
                 AddDiffRow(row, cursor.NextIndex);
                 cursor.NextIndex++;
             }
@@ -647,6 +751,10 @@ namespace SelfContainedDeployment.Panes
                 DiffLineRenderItem item = items[index];
                 _maxVisibleLineLength = Math.Max(_maxVisibleLineLength, item.Line?.Length ?? 0);
                 FrameworkElement row = BuildDiffLineRow(item.OldLineNumber, item.NewLineNumber, item.Line, item.Kind);
+                if (item.Kind == "hunk")
+                {
+                    row.Tag = "hunk";
+                }
                 AddDiffRow(row, index);
             }
         }
@@ -690,6 +798,12 @@ namespace SelfContainedDeployment.Panes
         private void AddDiffRow(FrameworkElement row, int rowIndex)
         {
             _diffLinesPanel.Children.Add(row);
+            if (string.Equals(row?.Tag as string, "hunk", StringComparison.Ordinal))
+            {
+                _changeAnchors.Add(row);
+            }
+
+            UpdateChangeNavigationState();
         }
 
         private Border BuildSectionHeader(GitChangedFile file, bool selected)
@@ -699,8 +813,8 @@ namespace SelfContainedDeployment.Panes
                 Background = ResolveBrush(selected ? "ShellMutedSurfaceBrush" : "ShellSurfaceBackgroundBrush"),
                 BorderBrush = ResolveBrush(selected ? "ShellPaneActiveBorderBrush" : "ShellBorderBrush"),
                 BorderThickness = new Thickness(0, 1, 0, 0),
-                Padding = new Thickness(8, 8, 8, 6),
-                Margin = new Thickness(0, 10, 0, 2),
+                Padding = new Thickness(6, 7, 6, 5),
+                Margin = new Thickness(0, 8, 0, 2),
             };
 
             Grid layout = new()
@@ -723,13 +837,34 @@ namespace SelfContainedDeployment.Panes
             };
             layout.Children.Add(title);
 
-            TextBlock stats = new()
+            StackPanel stats = new()
             {
-                Text = $"+{file.AddedLines}  -{file.RemovedLines}",
-                FontSize = 11,
-                Foreground = ResolveBrush("ShellTextTertiaryBrush"),
-                HorizontalTextAlignment = TextAlignment.Right,
+                Orientation = Orientation.Horizontal,
+                Spacing = 8,
+                HorizontalAlignment = HorizontalAlignment.Right,
             };
+            if (file.AddedLines > 0)
+            {
+                stats.Children.Add(new TextBlock
+                {
+                    Text = $"+{file.AddedLines}",
+                    FontSize = 10.5,
+                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                    Foreground = ResolveDiffForeground("addition"),
+                });
+            }
+
+            if (file.RemovedLines > 0)
+            {
+                stats.Children.Add(new TextBlock
+                {
+                    Text = $"-{file.RemovedLines}",
+                    FontSize = 10.5,
+                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                    Foreground = ResolveDiffForeground("deletion"),
+                });
+            }
+
             Grid.SetColumn(stats, 1);
             layout.Children.Add(stats);
 
@@ -752,6 +887,98 @@ namespace SelfContainedDeployment.Panes
                 double offset = Math.Max(0, point.Y - 12);
                 _scrollViewer.ChangeView(null, offset, null, true);
             });
+        }
+
+        private void NavigateToChange(bool forward)
+        {
+            if (_changeAnchors.Count == 0)
+            {
+                return;
+            }
+
+            int nextIndex = ResolveNextChangeAnchorIndex(forward);
+            ScrollToChangeAnchor(nextIndex);
+        }
+
+        private int ResolveNextChangeAnchorIndex(bool forward)
+        {
+            if (_changeAnchors.Count == 0)
+            {
+                return -1;
+            }
+
+            if (_lastChangeAnchorIndex >= 0)
+            {
+                return forward
+                    ? (_lastChangeAnchorIndex + 1) % _changeAnchors.Count
+                    : (_lastChangeAnchorIndex - 1 + _changeAnchors.Count) % _changeAnchors.Count;
+            }
+
+            double currentOffset = _scrollViewer.VerticalOffset;
+            int candidateIndex = forward ? 0 : _changeAnchors.Count - 1;
+            for (int index = 0; index < _changeAnchors.Count; index++)
+            {
+                FrameworkElement anchor = _changeAnchors[index];
+                Point point = anchor.TransformToVisual(_diffLinesPanel).TransformPoint(new Point(0, 0));
+                if (forward && point.Y > currentOffset + 4)
+                {
+                    candidateIndex = index;
+                    break;
+                }
+
+                if (!forward && point.Y < currentOffset - 4)
+                {
+                    candidateIndex = index;
+                }
+            }
+
+            return candidateIndex;
+        }
+
+        private void ScrollToChangeAnchor(int index)
+        {
+            if (index < 0 || index >= _changeAnchors.Count)
+            {
+                return;
+            }
+
+            _lastChangeAnchorIndex = index;
+            FrameworkElement anchor = _changeAnchors[index];
+            DispatcherQueue?.TryEnqueue(() =>
+            {
+                _scrollViewer.UpdateLayout();
+                anchor.UpdateLayout();
+                Point point = anchor.TransformToVisual(_diffLinesPanel).TransformPoint(new Point(0, 0));
+                double offset = Math.Max(0, point.Y - 16);
+                _scrollViewer.ChangeView(null, offset, null, true);
+            });
+        }
+
+        private void UpdateChangeNavigationState()
+        {
+            bool hasAnchors = _changeAnchors.Count > 0;
+            Visibility visibility = hasAnchors ? Visibility.Visible : Visibility.Collapsed;
+            if (_previousChangeButton is not null)
+            {
+                _previousChangeButton.Visibility = visibility;
+                _previousChangeButton.IsEnabled = hasAnchors;
+            }
+
+            if (_nextChangeButton is not null)
+            {
+                _nextChangeButton.Visibility = visibility;
+                _nextChangeButton.IsEnabled = hasAnchors;
+            }
+        }
+
+        private void OnPreviousChangeClicked(object sender, RoutedEventArgs e)
+        {
+            NavigateToPreviousChange();
+        }
+
+        private void OnNextChangeClicked(object sender, RoutedEventArgs e)
+        {
+            NavigateToNextChange();
         }
 
         private static string FormatDiffPathLabel(string path)
@@ -820,25 +1047,35 @@ namespace SelfContainedDeployment.Panes
                 }));
         }
 
-        private static string ResolveDiffLineBrushKey(string kind)
+        private Brush ResolveDiffForeground(string kind)
         {
-            return kind switch
+            ElementTheme theme = ResolveEffectiveTheme();
+            Windows.UI.Color color = (theme, kind) switch
             {
-                "addition" => "ShellSuccessBrush",
-                "deletion" => "ShellDangerBrush",
-                "hunk" => "ShellInfoBrush",
-                "metadata" => "ShellTextSecondaryBrush",
-                "empty" => "ShellTextSecondaryBrush",
-                _ => "ShellTextPrimaryBrush",
+                (ElementTheme.Light, "addition") => Windows.UI.Color.FromArgb(0xFF, 0x17, 0x63, 0x41),
+                (ElementTheme.Light, "deletion") => Windows.UI.Color.FromArgb(0xFF, 0xB1, 0x3F, 0x50),
+                (ElementTheme.Light, "hunk") => Windows.UI.Color.FromArgb(0xFF, 0x1D, 0x4E, 0x89),
+                (ElementTheme.Light, "metadata") => Windows.UI.Color.FromArgb(0xFF, 0x4E, 0x5B, 0x68),
+                (ElementTheme.Light, "empty") => Windows.UI.Color.FromArgb(0xFF, 0x55, 0x60, 0x6D),
+                (ElementTheme.Dark, "addition") => Windows.UI.Color.FromArgb(0xFF, 0x7D, 0xD7, 0xA0),
+                (ElementTheme.Dark, "deletion") => Windows.UI.Color.FromArgb(0xFF, 0xFF, 0x9A, 0xA8),
+                (ElementTheme.Dark, "hunk") => Windows.UI.Color.FromArgb(0xFF, 0x7B, 0xB6, 0xFF),
+                (ElementTheme.Dark, "metadata") => Windows.UI.Color.FromArgb(0xFF, 0xB1, 0xB8, 0xC3),
+                (ElementTheme.Dark, "empty") => Windows.UI.Color.FromArgb(0xFF, 0xA7, 0xAD, 0xB7),
+                _ => (theme == ElementTheme.Light
+                    ? Windows.UI.Color.FromArgb(0xFF, 0x1A, 0x1E, 0x23)
+                    : Windows.UI.Color.FromArgb(0xFF, 0xF3, 0xF4, 0xF6)),
             };
+
+            return new SolidColorBrush(color);
         }
 
         private FrameworkElement BuildDiffLineRow(int? oldLineNumber, int? newLineNumber, string line, string kind)
         {
             Grid row = new()
             {
-                ColumnSpacing = 10,
-                Padding = new Thickness(8, 2, 8, 2),
+                ColumnSpacing = 3,
+                Padding = new Thickness(3, 1, 3, 1),
                 HorizontalAlignment = HorizontalAlignment.Stretch,
                 MinWidth = 0,
                 Background = ResolveLineBackground(kind),
@@ -862,7 +1099,7 @@ namespace SelfContainedDeployment.Panes
                 FontSize = 12,
                 IsTextSelectionEnabled = true,
                 TextWrapping = TextWrapping.NoWrap,
-                Foreground = ResolveBrush(ResolveDiffLineBrushKey(kind)),
+                Foreground = ResolveDiffForeground(kind),
                 Margin = new Thickness(0),
             };
 
@@ -928,7 +1165,7 @@ namespace SelfContainedDeployment.Panes
         private double EstimateDesiredContentWidth()
         {
             int maxLineLength = Math.Max(_maxVisibleLineLength, 18);
-            return 124d + (maxLineLength * DiffCharacterWidth);
+            return 108d + (maxLineLength * DiffCharacterWidth);
         }
 
         private TextBlock BuildLineNumberText(int? lineNumber)
@@ -936,9 +1173,9 @@ namespace SelfContainedDeployment.Panes
             return new TextBlock
             {
                 Text = lineNumber?.ToString() ?? string.Empty,
-                Width = 44,
+                Width = 24,
                 FontFamily = new FontFamily("Consolas"),
-                FontSize = 11,
+                FontSize = 10,
                 HorizontalTextAlignment = TextAlignment.Right,
                 Foreground = ResolveBrush("ShellTextTertiaryBrush"),
                 Opacity = lineNumber.HasValue ? 1 : 0.55,
@@ -950,14 +1187,14 @@ namespace SelfContainedDeployment.Panes
             ElementTheme theme = ResolveEffectiveTheme();
             Windows.UI.Color color = (theme, kind) switch
             {
-                (ElementTheme.Light, "addition") => Windows.UI.Color.FromArgb(0xFF, 0xF0, 0xFD, 0xF4),
-                (ElementTheme.Light, "deletion") => Windows.UI.Color.FromArgb(0xFF, 0xFE, 0xF2, 0xF2),
-                (ElementTheme.Light, "hunk") => Windows.UI.Color.FromArgb(0xFF, 0xEF, 0xF6, 0xFF),
-                (ElementTheme.Light, "metadata") => Windows.UI.Color.FromArgb(0xFF, 0xF8, 0xFA, 0xFC),
-                (ElementTheme.Dark, "addition") => Windows.UI.Color.FromArgb(0xFF, 0x0F, 0x1E, 0x14),
-                (ElementTheme.Dark, "deletion") => Windows.UI.Color.FromArgb(0xFF, 0x26, 0x13, 0x15),
-                (ElementTheme.Dark, "hunk") => Windows.UI.Color.FromArgb(0xFF, 0x0F, 0x17, 0x2A),
-                (ElementTheme.Dark, "metadata") => Windows.UI.Color.FromArgb(0xFF, 0x16, 0x18, 0x1D),
+                (ElementTheme.Light, "addition") => Windows.UI.Color.FromArgb(0xFF, 0xE4, 0xF3, 0xEA),
+                (ElementTheme.Light, "deletion") => Windows.UI.Color.FromArgb(0xFF, 0xFB, 0xE9, 0xED),
+                (ElementTheme.Light, "hunk") => Windows.UI.Color.FromArgb(0xFF, 0xEF, 0xF5, 0xFF),
+                (ElementTheme.Light, "metadata") => Windows.UI.Color.FromArgb(0xFF, 0xF6, 0xF8, 0xFB),
+                (ElementTheme.Dark, "addition") => Windows.UI.Color.FromArgb(0xFF, 0x15, 0x28, 0x1D),
+                (ElementTheme.Dark, "deletion") => Windows.UI.Color.FromArgb(0xFF, 0x33, 0x18, 0x1E),
+                (ElementTheme.Dark, "hunk") => Windows.UI.Color.FromArgb(0xFF, 0x10, 0x17, 0x24),
+                (ElementTheme.Dark, "metadata") => Windows.UI.Color.FromArgb(0xFF, 0x17, 0x1A, 0x20),
                 _ => Windows.UI.Color.FromArgb(0x00, 0x00, 0x00, 0x00),
             };
 

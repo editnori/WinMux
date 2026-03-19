@@ -28,6 +28,7 @@ namespace Microsoft.Terminal.Wpf {
 	/// </summary>
 	public partial class TerminalControl : UserControl {
 		private int accumulatedDelta = 0;
+		public event EventHandler InteractionOccurred;
 		public TerminalControl() {
 
 			this.InitializeComponent();
@@ -65,6 +66,7 @@ namespace Microsoft.Terminal.Wpf {
 
 			this.termContainer.TerminalScrolled += this.TermControl_TerminalScrolled;
 			this.termContainer.UserScrolled += this.TermControl_UserScrolled;
+			this.termContainer.InteractionOccurred += (_, _) => InteractionOccurred?.Invoke(this, EventArgs.Empty);
 			this.scrollbar.Scroll += this.Scrollbar_Scroll;
 
 			this.SizeChanged += this.TerminalControl_SizeChanged;

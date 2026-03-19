@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kidney Stone Ontology</title>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    background: #fff; color: #1F2937;
+    overflow: hidden; height: 100vh;
+  }
+
+  .controls {
+    position: fixed; top: 8px; right: 12px; z-index: 20;
+    display: flex; gap: 6px;
+  }
+  .controls button {
+    background: #fff; border: 1px solid #D1D5DB; color: #374151;
+    padding: 4px 12px; border-radius: 4px; font-size: 7.5pt; cursor: pointer;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+  }
+  .controls button:hover { background: #F3F4F6; }
+
+  #canvas { position: fixed; top: 0; left: 0; right: 0; bottom: 0; }
+  #canvas svg { width: 100%; height: 100%; }
+
+  /* Column headers */
+  .col-header {
+    font-family: "Segoe UI", sans-serif;
+    fill: #1E40AF; font-size: 10pt; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 2px;
+  }
+  .col-sub {
+    font-family: "Segoe UI", sans-serif;
+    fill: #6B7280; font-size: 7pt;
+  }
+  .col-line { stroke: #E5E7EB; stroke-width: 1; stroke-dasharray: 6,4; }
+
+  /* Tree */
+  .link { fill: none; stroke-width: 1.8px; }
+  .node { cursor: pointer; }
+  .node circle { stroke-width: 2px; }
+  .node circle:hover { filter: brightness(1.1); }
+  .node text { font-family: "Segoe UI", sans-serif; pointer-events: none; }
+  .node .lbl { fill: #1F2937; font-weight: 600; }
+
+  /* Inline detail blocks rendered via foreignObject */
+  .inline-block {
+    font-family: "Segoe UI", sans-serif;
+    font-size: 8pt; line-height: 1.55; color: #374151;
+  }
+  .inline-block .ib-section {
+    margin-top: 4px;
+  }
+  .inline-block .ib-heading {
+    font-size: 7pt; font-weight: 700; color: #1E40AF;
+    text-transform: uppercase; letter-spacing: 0.4px;
+    margin-bottom: 2px;
+  }
+  .inline-block .ib-list {
+    font-size: 7.5pt; color: #374151; line-height: 1.65;
+  }
+  .inline-block .ib-list .dot { color: #CBD5E1; }
+  .inline-block .ib-details {
+    font-size: 7pt; color: #6B7280; line-height: 1.65;
+  }
+  .inline-block .ib-rels {
+    font-size: 7pt; color: #92400E; line-height: 1.65;
+  }
+  .inline-block .ib-toggle {
+    font-size: 7pt; color: #2563EB; cursor: pointer;
+    font-weight: 500; margin-top: 1px; display: inline-block;
+  }
+  .inline-block .ib-toggle:hover { text-decoration: underline; }
+  .inline-block .ib-meta {
+    font-size: 6.5pt; color: #9CA3AF; margin-top: 2px;
+  }
+
+  /* Schema footer */
+  .schema {
+    position: fixed; bottom: 10px; left: 12px; z-index: 15;
+    background: #fff; border: 1px solid #E5E7EB; border-radius: 6px;
+    padding: 8px 12px; font-size: 6.5pt; color: #6B7280; line-height: 1.7;
+    max-width: 300px; box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+  }
+  .schema b { color: #374151; font-weight: 600; }
+  .schema .n { color: #2563EB; font-weight: 700; }
+  .schema .sk-title { font-size: 7.5pt; font-weight: 700; color: #1E3A5F; margin-bottom: 3px; cursor: pointer; }
+  .schema .sk-body { overflow: hidden; transition: max-height 0.3s; }
+  .schema.collapsed .sk-body { max-height: 0; }
+  .schema .divider { border-top: 1px solid #F3F4F6; margin: 3px 0; }
+  .schema .dots { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
+  .schema .dot-swatch { display: inline-block; width: 6px; height: 6px; border-radius: 50%; vertical-align: middle; margin-right: 2px; }
+</style>
+</head>
+<body>
+
+<div class="controls">
+  <button onclick="resetView()">Reset</button>
+  <button onclick="expandAll()">Expand All</button>
+  <button onclick="expandConcepts()">Show All Concepts</button>
+  <button onclick="collapseAll()">Collapse</button>
+</div>
+
+<div id="canvas"></div>
+
+<div class="schema" id="sk">
+  <div class="sk-title" onclick="document.getElementById('sk').classList.toggle('collapsed')">Schema Architecture &#9662;</div>
+  <div class="sk-body">
+    <b>Family</b> <span class="n">5</span> clinical domains grouping related facts<br>
+    <b>Event Type</b> <span class="n">10</span> categories of clinical fact<br>
+    <b>Concept</b> <span class="n">252</span> recognized things: hydronephrosis, tamsulosin<br>
+    <b>Details</b> <span class="n">89</span> structured fields: side, size, dose, severity<br>
+    <b>Links</b> <span class="n">9</span> relation types: performed for, caused by<br>
+    <div class="divider"></div>
+    <b>Vocab</b> <span class="n">990</span> aliases normalize to <span class="n">252</span> concepts<br>
+    <b>Policy</b> controlled / semi-structured / free text per field<br>
+    <b>Registry</b> <span class="n">130</span> questions answered via resolvers<br>
+    <div class="divider"></div>
+    <div class="dots">
+      <span><span class="dot-swatch" style="background:#3B82F6;"></span>History</span>
+      <span><span class="dot-swatch" style="background:#14B8A6;"></span>Imaging</span>
+      <span><span class="dot-swatch" style="background:#F59E0B;"></span>Procedures</span>
+      <span><span class="dot-swatch" style="background:#8B5CF6;"></span>Meds</span>
+      <span><span class="dot-swatch" style="background:#10B981;"></span>Outcomes</span>
+    </div>
+  </div>
+</div>
+
+<script>
+const DATA = [
+  { name: "Patient\nHistory", cn: "Patient History", code: "history_timeline", color: "#3B82F6",
+    children: [
+      { name: "Medical History", code: "history_fact", color: "#3B82F6",
+        concepts: ["chronic kidney disease","family hx of kidney stones","horseshoe kidney","kidney stone history","kidney stones during pregnancy","medullary sponge kidney","MDR UTI","obstetric complication","prior lithotripsy","prior nephrostomy","prior PCNL","prior ureteral stent","prior ureteroscopy","recurrent UTI","solitary kidney"],
+        details: ["status","count","timeframe","history kind","who","age of onset","prior intervention"], rels: [] },
+      { name: "Social & Support", code: "social_context_fact", color: "#3B82F6",
+        concepts: ["caregiver support","disability","education level","employed","employment status","housing instability","limited support","lives alone","no support","social isolation","transportation available","transportation barrier","unemployed","uninsured"],
+        details: ["support type","value","timeframe"], rels: [] }
+    ]},
+  { name: "Symptoms\n& Imaging", cn: "Symptoms & Imaging", code: "symptoms_imaging", color: "#14B8A6",
+    children: [
+      { name: "Symptoms", code: "symptom_presentation", color: "#14B8A6",
+        concepts: ["stone-related symptomatic presentation"],
+        details: ["symptoms","side","severity","context","exam findings","onset/duration"], rels: [] },
+      { name: "Imaging Findings", code: "imaging_finding", color: "#14B8A6",
+        concepts: ["bladder stone","calcium oxalate stone","calcium phosphate stone","calyceal diverticulum","calyceal rupture","cystine stone","delayed nephrogram","forniceal rupture","hydronephrosis","hydroureter","hydroureteronephrosis","kidney stone","medullary nephrocalcinosis","obstructive uropathy","perinephric stranding","periureteral stranding","renal parenchymal thinning","staghorn calculus","struvite stone","ureteral stone","ureteral stricture","uric acid stone","urinoma"],
+        details: ["side","location","severity","size","unit","HU","modality","status","anatomic detail","calyceal detail","stone count","burden","change from prior","comparison date","significance"],
+        rels: ["causes obstruction","treated by","modifies"] }
+    ]},
+  { name: "Procedures\n& Devices", cn: "Procedures & Devices", code: "procedure_devices", color: "#F59E0B",
+    children: [
+      { name: "Procedures", code: "procedure_event", color: "#F59E0B",
+        concepts: ["cystoscopy","electrohydraulic lithotripsy","ESWL","laser lithotripsy","lithotripsy","nephrectomy","nephrostogram","nephrostomy exchange","nephrostomy internalization","nephrostomy placement","nephrostomy removal","nephroureterectomy","open nephrolithotomy","percutaneous access","PCNL","pyeloplasty","retrograde pyelogram","stone basket retrieval","ultrasonic lithotripsy","ureteral stent exchange","ureteral stent placement","ureteral stent removal","ureteroscopy"],
+        details: ["side","status","approach","date","urgency","indication","target","anatomic target","laser power","laser freq","laser type","fiber type","fiber size","dilation","irrigation","suction","shock rate","max energy","total energy","SWL machine","lithotripter source"],
+        rels: ["performed for","treated by","temporally linked","modifies"] },
+      { name: "Devices", code: "device_event", color: "#F59E0B",
+        concepts: ["access sheath","catheter","cystoscope","dual lumen catheter","foley catheter","grasping forceps","guidewire","laser fiber","nephroscope","nephrostomy tube","nephroureteral stent","perc access needle","pigtail catheter","stone retrieval basket","suprapubic catheter","surgical drain","ureteral access sheath","ureteral catheter","ureteral stent","ureteroscope"],
+        details: ["device type","side","status","size","length","unit","indication","target","anatomic target","diameter","make/model"],
+        rels: ["performed for","decompresses","treated by","temporally linked","modifies"] }
+    ]},
+  { name: "Medications", cn: "Medications", code: "medications", color: "#8B5CF6",
+    children: [
+      { name: "Medication\nExposure", code: "medication_exposure", color: "#8B5CF6",
+        concepts: ["IV antibiotics","IV fluids","acetaminophen","acetaminophen-codeine","alfuzosin","allopurinol","amoxicillin","amoxicillin-pot clavulanate","ampicillin-sulbactam","azithromycin","bupivacaine","calcium citrate","cefazolin","cefepime","cefpodoxime","ceftriaxone","cefuroxime","celecoxib","cephalexin","chlorthalidone","ciprofloxacin","clindamycin","colchicine","d-penicillamine","dexamethasone","diclofenac","diphenhydramine","doxazosin","dutasteride","enoxaparin","ertapenem","febuxostat","fentanyl","finasteride","fosfomycin","gabapentin","gentamicin","granisetron","hydrochlorothiazide","hydrocodone","hydrocodone-acetaminophen","hydromorphone","ibuprofen","indomethacin","ketorolac","lactated ringers","levofloxacin","lidocaine","lisinopril","meloxicam","meropenem","methylprednisolone","metoclopramide","metronidazole","mirabegron","morphine","naproxen","nitrofurantoin","normal saline","ondansetron","oxybutynin","oxycodone","oxycodone-acetaminophen","phenazopyridine","piperacillin-tazobactam","potassium chloride","potassium citrate","prednisone","pregabalin","prochlorperazine","promethazine","silodosin","sodium bicarbonate","sodium citrate-citric acid","solifenacin","spironolactone","tamsulosin","terazosin","thiazide diuretic","tiopronin","tolterodine","tramadol","trimethoprim","TMP-SMX","trospium","vancomycin","vitamin D","warfarin"],
+        details: ["drug class","dose","route","frequency","duration","date","reason","context","status"],
+        rels: ["caused by"] }
+    ]},
+  { name: "Outcomes &\nComplications", cn: "Outcomes & Complications", code: "outcomes_complications", color: "#10B981",
+    children: [
+      { name: "Complications", code: "adverse_effect", color: "#10B981",
+        concepts: ["acute kidney injury","allergic reaction","anaphylaxis","anesthetic complication","bacteremia","bladder spasm","bleeding","clot retention","contrast reaction","dizziness","fever","gross hematuria","hives","nausea","nausea and vomiting","obstructive nephropathy","perinephric hematoma","pyelonephritis","pyonephrosis","rash","sepsis","steinstrasse","subcapsular hematoma","ureteral injury","urinary retention","UTI","urosepsis","vomiting","wound complication"],
+        details: ["reaction type","severity","suspected cause","timing","status"],
+        rels: ["caused by","temporally linked"] },
+      { name: "Outcomes", code: "outcome_event", color: "#10B981",
+        concepts: ["culture negative","culture positive","fever resolution","infection resolved","no stone passage","pain controlled","partial stone clearance","readmission","renal function improved","renal function stable","residual stone","stent intolerance","stone free","stone passage","stone recurrence","symptom resolution"],
+        details: ["status","timing","value","qualifier","count","change from prior","comparison date"],
+        rels: ["resolved after","temporally linked","modifies"] },
+      { name: "Recommendations", code: "recommendation_event", color: "#10B981",
+        concepts: ["24hr urine collection","activity modification","dietary modification","elective ESWL","elective PCNL","elective ureteroscopy","hydration","low oxalate diet","low purine diet","low sodium diet","medical expulsive therapy","metabolic workup","nephrology referral","pharmacotherapy","PCP follow-up","repeat imaging","return precautions","stent removal","stone analysis","strain urine","thiazide therapy","urology follow-up","urology referral"],
+        details: ["type","status","target","qualifier","indication"],
+        rels: ["follow-up for","modifies"] }
+    ]}
+];
+
+const virtualRoot = { name: "", cn: "", color: "#1E3A5F", children: DATA };
+const container = document.getElementById("canvas");
+let W = container.clientWidth, H = container.clientHeight;
+const svg = d3.select("#canvas").append("svg").attr("width", W).attr("height", H);
+const gBack = svg.append("g");
+const gMain = svg.append("g");
+
+const zoomB = d3.zoom().scaleExtent([0.1, 4]).on("zoom", e => {
+  gMain.attr("transform", e.transform);
+  gBack.attr("transform", e.transform);
+});
+svg.call(zoomB);
+
+const root = d3.hierarchy(virtualRoot);
+root.x0 = 0; root.y0 = 0;
+root.children.forEach(d => { d._children = d.children; d.children = null; });
+
+// Track which leaves show all concepts
+const expandedConcepts = new Set();
+
+const colW = 300;
+const treeFn = d3.tree().nodeSize([120, colW]).separation((a,b) => a.parent===b.parent ? 1 : 1.2);
+let nid = 0;
+
+function drawCols() {
+  gBack.selectAll("*").remove();
+  const cols = [
+    { x: 0, label: "FAMILY", sub: "5 clinical domains" },
+    { x: colW, label: "EVENT TYPE", sub: "10 categories" },
+    { x: colW * 2 + 20, label: "CONCEPTS", sub: "252 recognized terms" },
+  ];
+  cols.forEach(C => {
+    gBack.append("line").attr("class","col-line")
+      .attr("x1", C.x - 50).attr("x2", C.x - 50).attr("y1", -4000).attr("y2", 4000);
+    gBack.append("text").attr("class","col-header")
+      .attr("x", C.x - 44).attr("y", -520).text(C.label);
+    gBack.append("text").attr("class","col-sub")
+      .attr("x", C.x - 44).attr("y", -506).text(C.sub);
+  });
+}
+
+function buildInlineHTML(d, showAll) {
+  const data = d.data;
+  if (!data.concepts) return "";
+  const all = showAll || data.concepts.length <= 5;
+  const shown = all ? data.concepts : data.concepts.slice(0, 4);
+  const remaining = data.concepts.length - shown.length;
+  const nodeId = d.id;
+
+  let h = "";
+
+  // Concepts section
+  h += `<div class="ib-section">`;
+  h += `<div class="ib-heading">Concepts (${data.concepts.length})</div>`;
+  h += `<div class="ib-list">`;
+  h += shown.join(`<span class="dot"> · </span>`);
+  if (!all && remaining > 0) {
+    h += `<span class="dot"> · </span>`;
+    h += `<span class="ib-toggle" onclick="toggleConcepts(${nodeId})">+ ${remaining} more</span>`;
+  }
+  h += `</div>`;
+  h += `</div>`;
+
+  // Details
+  h += `<div class="ib-section">`;
+  h += `<div class="ib-heading">Details (${data.details.length})</div>`;
+  h += `<div class="ib-details">${data.details.join(`<span class="dot"> · </span>`)}</div>`;
+  h += `</div>`;
+
+  // Relations
+  if (data.rels && data.rels.length) {
+    h += `<div class="ib-section">`;
+    h += `<div class="ib-heading">Links (${data.rels.length})</div>`;
+    h += `<div class="ib-rels">${data.rels.join(`<span class="dot"> · </span>`)}</div>`;
+    h += `</div>`;
+  }
+
+  return h;
+}
+
+// Expose toggle function globally
+window.toggleConcepts = function(nodeId) {
+  if (expandedConcepts.has(nodeId)) expandedConcepts.delete(nodeId);
+  else expandedConcepts.add(nodeId);
+  // Re-render inline blocks
+  gMain.selectAll("foreignObject.ib").each(function(d) {
+    if (d.id === nodeId) {
+      d3.select(this).select(".inline-block")
+        .html(buildInlineHTML(d, expandedConcepts.has(d.id)));
+    }
+  });
+};
+
+function update(src) {
+  treeFn(root);
+  const allNodes = root.descendants(), allLinks = root.links();
+  const nodes = allNodes.filter(d => d.depth > 0);
+  const links = allLinks.filter(d => d.source.depth > 0);
+
+  drawCols();
+
+  const offY = -colW;
+  nodes.forEach(d => { d.dy = d.y + offY; d.dx = d.x; });
+
+  // Links
+  const lnk = gMain.selectAll("path.link").data(links, d => d.target.id || (d.target.id = ++nid));
+  lnk.enter().insert("path","g").attr("class","link")
+    .attr("d", () => { const o={x:src.x0||0,y:(src.y0||0)+offY}; return diag(o,o); })
+    .style("stroke", d => d3.color(d.source.data.color).brighter(0.7))
+    .merge(lnk).transition().duration(400)
+    .attr("d", d => diag({x:d.source.dx,y:d.source.dy},{x:d.target.dx,y:d.target.dy}))
+    .style("stroke", d => d3.color(d.source.data.color).brighter(0.7));
+  lnk.exit().transition().duration(200).attr("d",()=>{const o={x:src.dx||src.x0||0,y:src.dy||(src.y0||0)+offY};return diag(o,o);}).remove();
+
+  // Nodes
+  const nd = gMain.selectAll("g.node").data(nodes, d => d.id || (d.id = ++nid));
+  const enter = nd.enter().append("g").attr("class","node")
+    .attr("transform", () => `translate(${(src.y0||0)+offY},${src.x0||0})`)
+    .on("click", (ev,d) => { ev.stopPropagation(); clickNode(d); });
+
+  enter.append("circle").attr("r",0)
+    .style("fill", d => d.data.color)
+    .style("stroke", d => d3.color(d.data.color).darker(0.3));
+
+  // Labels
+  enter.each(function(d) {
+    const el = d3.select(this);
+    const lines = d.data.name.split("\n");
+    const leaf = !d.children && !d._children;
+    const anc = leaf ? "start" : "end";
+    const dx = leaf ? 12 : -14;
+    const fs = d.depth===1 ? "9.5pt" : "8.5pt";
+
+    const t = el.append("text").attr("class","lbl").attr("text-anchor",anc).style("font-size",fs);
+    lines.forEach((ln,i) => {
+      t.append("tspan").attr("x",dx)
+        .attr("dy", i===0 ? (lines.length>1?"-0.3em":"0.35em") : "1.15em")
+        .text(ln);
+    });
+
+    // Inline concept/detail block for leaf nodes
+    if (d.data.concepts) {
+      const yOff = lines.length > 1 ? 18 : 12;
+      const fo = el.append("foreignObject")
+        .attr("class", "ib")
+        .attr("x", 12).attr("y", yOff)
+        .attr("width", 280).attr("height", 1)
+        .style("overflow", "visible");
+      fo.append("xhtml:div").attr("class", "inline-block")
+        .html(buildInlineHTML(d, expandedConcepts.has(d.id)));
+    }
+
+    // Hint for collapsed families
+    if (d._children) {
+      el.append("text").attr("class","lbl hint-text")
+        .attr("x",dx).attr("text-anchor",anc)
+        .attr("dy", lines.length>1?"2.3em":"1.7em")
+        .style("font-size","7pt").style("fill","#9CA3AF").style("font-weight","400")
+        .text("click to expand");
+    }
+  });
+
+  const merged = enter.merge(nd);
+  merged.transition().duration(400).attr("transform", d => `translate(${d.dy},${d.dx})`);
+  merged.select("circle").transition().duration(400)
+    .attr("r", d => d.depth===1?11 : d._children?8 : 6);
+  merged.select(".hint-text").style("display", d => d._children ? "block" : "none");
+
+  nd.exit().transition().duration(200)
+    .attr("transform",()=>`translate(${src.dy||((src.y0||0)+offY)},${src.dx||src.x0||0})`)
+    .remove().select("circle").attr("r",0);
+
+  nodes.forEach(d => { d.x0=d.dx; d.y0=d.dy; });
+}
+
+function diag(s,d) { return `M${s.y},${s.x}C${(s.y+d.y)/2},${s.x} ${(s.y+d.y)/2},${d.x} ${d.y},${d.x}`; }
+
+function clickNode(d) {
+  if (d.children) { d._children=d.children; d.children=null; }
+  else if (d._children) { d.children=d._children; d._children=null; }
+  update(d);
+  const t = d3.zoomTransform(svg.node());
+  const ty = d.dy !== undefined ? d.dy : d.y - colW;
+  const tx = d.dx !== undefined ? d.dx : d.x;
+  svg.transition().duration(500).call(zoomB.transform,
+    d3.zoomIdentity.translate(W*0.15 - ty*t.k, H/2 - tx*t.k).scale(t.k));
+}
+
+function resetView() {
+  root.children.forEach(d => {
+    if (d.children) { d._children=d.children; d.children=null; }
+    if (d._children) d._children.forEach(c => { if(c.children){c._children=c.children;c.children=null;}});
+  });
+  expandedConcepts.clear();
+  update(root);
+  svg.transition().duration(500).call(zoomB.transform, d3.zoomIdentity.translate(80, H/2));
+}
+
+function expandAll() {
+  (function exp(d){if(d._children){d.children=d._children;d._children=null;}if(d.children)d.children.forEach(exp);})(root);
+  update(root);
+  const ns=root.descendants().filter(d=>d.depth>0);
+  const xE=d3.extent(ns,d=>d.dx), yE=d3.extent(ns,d=>d.dy);
+  const sc=Math.min((W-40)/(yE[1]-yE[0]+500),(H-20)/(xE[1]-xE[0]+140))*0.75;
+  svg.transition().duration(600).call(zoomB.transform,
+    d3.zoomIdentity.translate(50-yE[0]*sc, H/2-(xE[0]+xE[1])/2*sc).scale(sc));
+}
+
+function expandConcepts() {
+  // Expand all families + show all concepts inline
+  (function exp(d){if(d._children){d.children=d._children;d._children=null;}if(d.children)d.children.forEach(exp);})(root);
+  root.descendants().forEach(d => { if(d.data.concepts) expandedConcepts.add(d.id); });
+  update(root);
+  // Re-render inline blocks with all concepts
+  gMain.selectAll("foreignObject.ib").each(function(d) {
+    d3.select(this).select(".inline-block").html(buildInlineHTML(d, true));
+  });
+  const ns=root.descendants().filter(d=>d.depth>0);
+  const xE=d3.extent(ns,d=>d.dx), yE=d3.extent(ns,d=>d.dy);
+  const sc=Math.min((W-40)/(yE[1]-yE[0]+500),(H-20)/(xE[1]-xE[0]+140))*0.65;
+  svg.transition().duration(600).call(zoomB.transform,
+    d3.zoomIdentity.translate(50-yE[0]*sc, H/2-(xE[0]+xE[1])/2*sc).scale(sc));
+}
+
+function collapseAll() { resetView(); }
+
+svg.call(zoomB.transform, d3.zoomIdentity.translate(80, H/2));
+update(root);
+
+window.addEventListener("resize", () => {
+  W=container.clientWidth; H=container.clientHeight;
+  svg.attr("width",W).attr("height",H);
+});
+</script>
+</body>
+</html>

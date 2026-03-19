@@ -4,12 +4,93 @@
     xmlns:muxc="using:Microsoft.UI.Xaml.Controls"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.ThemeDictionaries>
+                <ResourceDictionary x:Key="Default">
+                    <SolidColorBrush x:Key="TreeViewItemBackground" Color="#00000000" />
+                    <SolidColorBrush x:Key="TreeViewItemBackgroundPointerOver" Color="#141A22" />
+                    <SolidColorBrush x:Key="TreeViewItemBackgroundPressed" Color="#18202A" />
+                    <SolidColorBrush x:Key="TreeViewItemBackgroundDisabled" Color="#00101216" />
+                    <SolidColorBrush x:Key="TreeViewItemBackgroundSelected" Color="#1E2934" />
+                    <SolidColorBrush x:Key="TreeViewItemBackgroundSelectedPointerOver" Color="#253240" />
+                    <SolidColorBrush x:Key="TreeViewItemBackgroundSelectedPressed" Color="#2A3948" />
+                    <SolidColorBrush x:Key="TreeViewItemBackgroundSelectedDisabled" Color="#161C24" />
+                    <StaticResource x:Key="TreeViewItemForeground" ResourceKey="ShellTextPrimaryBrush" />
+                    <StaticResource x:Key="TreeViewItemForegroundPointerOver" ResourceKey="ShellTextPrimaryBrush" />
+                    <StaticResource x:Key="TreeViewItemForegroundPressed" ResourceKey="ShellTextPrimaryBrush" />
+                    <StaticResource x:Key="TreeViewItemForegroundDisabled" ResourceKey="ShellTextTertiaryBrush" />
+                    <StaticResource x:Key="TreeViewItemForegroundSelected" ResourceKey="ShellTextPrimaryBrush" />
+                    <StaticResource x:Key="TreeViewItemForegroundSelectedPointerOver" ResourceKey="ShellTextPrimaryBrush" />
+                    <StaticResource x:Key="TreeViewItemForegroundSelectedPressed" ResourceKey="ShellTextPrimaryBrush" />
+                    <StaticResource x:Key="TreeViewItemForegroundSelectedDisabled" ResourceKey="ShellTextTertiaryBrush" />
+                    <SolidColorBrush x:Key="TreeViewItemBorderBrush" Color="#00000000" />
+                    <SolidColorBrush x:Key="TreeViewItemBorderBrushPointerOver" Color="#243140" />
+                    <SolidColorBrush x:Key="TreeViewItemBorderBrushPressed" Color="#2B3A4A" />
+                    <SolidColorBrush x:Key="TreeViewItemBorderBrushDisabled" Color="#00000000" />
+                    <SolidColorBrush x:Key="TreeViewItemBorderBrushSelected" Color="#40566F" />
+                    <SolidColorBrush x:Key="TreeViewItemBorderBrushSelectedPointerOver" Color="#4D6886" />
+                    <SolidColorBrush x:Key="TreeViewItemBorderBrushSelectedPressed" Color="#557493" />
+                    <SolidColorBrush x:Key="TreeViewItemBorderBrushSelectedDisabled" Color="#2A3847" />
+                    <StaticResource x:Key="TreeViewItemSelectionIndicatorForeground" ResourceKey="ShellInfoBrush" />
+                    <StaticResource x:Key="TreeViewItemSelectionIndicatorForegroundPointerOver" ResourceKey="ShellInfoBrush" />
+                    <StaticResource x:Key="TreeViewItemSelectionIndicatorForegroundPressed" ResourceKey="ShellInfoBrush" />
+                    <StaticResource x:Key="TreeViewItemSelectionIndicatorForegroundDisabled" ResourceKey="ShellTextTertiaryBrush" />
+                </ResourceDictionary>
+
+                <ResourceDictionary x:Key="Light">
+                    <SolidColorBrush x:Key="TreeViewItemBackground" Color="#00000000" />
+                    <SolidColorBrush x:Key="TreeViewItemBackgroundPointerOver" Color="#E8EFF6" />
+                    <SolidColorBrush x:Key="TreeViewItemBackgroundPressed" Color="#E0E8F1" />
+                    <SolidColorBrush x:Key="TreeViewItemBackgroundDisabled" Color="#00F9FBFD" />
+                    <SolidColorBrush x:Key="TreeViewItemBackgroundSelected" Color="#D5E1EE" />
+                    <SolidColorBrush x:Key="TreeViewItemBackgroundSelectedPointerOver" Color="#CCDAEA" />
+                    <SolidColorBrush x:Key="TreeViewItemBackgroundSelectedPressed" Color="#C4D4E6" />
+                    <SolidColorBrush x:Key="TreeViewItemBackgroundSelectedDisabled" Color="#E6EDF5" />
+                    <StaticResource x:Key="TreeViewItemForeground" ResourceKey="ShellTextPrimaryBrush" />
+                    <StaticResource x:Key="TreeViewItemForegroundPointerOver" ResourceKey="ShellTextPrimaryBrush" />
+                    <StaticResource x:Key="TreeViewItemForegroundPressed" ResourceKey="ShellTextPrimaryBrush" />
+                    <StaticResource x:Key="TreeViewItemForegroundDisabled" ResourceKey="ShellTextTertiaryBrush" />
+                    <StaticResource x:Key="TreeViewItemForegroundSelected" ResourceKey="ShellTextPrimaryBrush" />
+                    <StaticResource x:Key="TreeViewItemForegroundSelectedPointerOver" ResourceKey="ShellTextPrimaryBrush" />
+                    <StaticResource x:Key="TreeViewItemForegroundSelectedPressed" ResourceKey="ShellTextPrimaryBrush" />
+                    <StaticResource x:Key="TreeViewItemForegroundSelectedDisabled" ResourceKey="ShellTextTertiaryBrush" />
+                    <SolidColorBrush x:Key="TreeViewItemBorderBrush" Color="#00000000" />
+                    <SolidColorBrush x:Key="TreeViewItemBorderBrushPointerOver" Color="#D4DFEA" />
+                    <SolidColorBrush x:Key="TreeViewItemBorderBrushPressed" Color="#C9D7E3" />
+                    <SolidColorBrush x:Key="TreeViewItemBorderBrushDisabled" Color="#00000000" />
+                    <SolidColorBrush x:Key="TreeViewItemBorderBrushSelected" Color="#9AB2CB" />
+                    <SolidColorBrush x:Key="TreeViewItemBorderBrushSelectedPointerOver" Color="#8AA6C4" />
+                    <SolidColorBrush x:Key="TreeViewItemBorderBrushSelectedPressed" Color="#7E9BBB" />
+                    <SolidColorBrush x:Key="TreeViewItemBorderBrushSelectedDisabled" Color="#C9D7E3" />
+                    <StaticResource x:Key="TreeViewItemSelectionIndicatorForeground" ResourceKey="ShellInfoBrush" />
+                    <StaticResource x:Key="TreeViewItemSelectionIndicatorForegroundPointerOver" ResourceKey="ShellInfoBrush" />
+                    <StaticResource x:Key="TreeViewItemSelectionIndicatorForegroundPressed" ResourceKey="ShellInfoBrush" />
+                    <StaticResource x:Key="TreeViewItemSelectionIndicatorForegroundDisabled" ResourceKey="ShellTextTertiaryBrush" />
+                </ResourceDictionary>
+            </ResourceDictionary.ThemeDictionaries>
+
+            <Thickness x:Key="TreeViewItemBorderThemeThickness">1</Thickness>
+            <Thickness x:Key="TreeViewItemPresenterMargin">4,1</Thickness>
+            <Thickness x:Key="TreeViewItemPresenterPadding">0,2,0,4</Thickness>
+
+            <Style TargetType="muxc:TreeViewItem">
+                <Setter Property="MinHeight" Value="22" />
+                <Setter Property="Padding" Value="0" />
+                <Setter Property="Margin" Value="0" />
+                <Setter Property="CornerRadius" Value="4" />
+                <Setter Property="Foreground" Value="{ThemeResource TreeViewItemForeground}" />
+                <Setter Property="GlyphBrush" Value="{ThemeResource TreeViewItemForeground}" />
+            </Style>
+        </ResourceDictionary>
+    </UserControl.Resources>
+
     <ScrollViewer x:Name="FilesContentScrollViewer"
                   AutomationProperties.AutomationId="shell-inspector-files"
                   VerticalScrollBarVisibility="Auto"
                   HorizontalScrollBarVisibility="Disabled">
-        <StackPanel Padding="10,8,10,10"
-                    Spacing="8">
+        <StackPanel Padding="8,8,8,9"
+                    Spacing="6">
             <StackPanel Spacing="4">
                 <TextBlock Text="DIRECTORY"
                            Style="{StaticResource ShellInspectorLabelTextStyle}" />
@@ -28,7 +109,7 @@
 
             <muxc:TreeView x:Name="DirectoryTreeView"
                            AutomationProperties.AutomationId="shell-directory-tree"
-                           Margin="-8,-2,0,0"
+                           Margin="-12,-1,0,0"
                            SelectionMode="Single"
                            DoubleTapped="OnDirectoryTreeDoubleTapped"
                            KeyDown="OnDirectoryTreeKeyDown">

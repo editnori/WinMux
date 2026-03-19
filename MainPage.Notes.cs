@@ -1272,6 +1272,7 @@ namespace SelfContainedDeployment
             AppendInspectorNotesRenderKeyValue(builder, thread?.Id);
             AppendInspectorNotesRenderKeyValue(builder, _activeThread?.Id);
             AppendInspectorNotesRenderKeyValue(builder, ResolveTheme(SampleConfig.CurrentTheme).ToString());
+            AppendInspectorNotesRenderKeyValue(builder, SampleConfig.CurrentThemePackId);
 
             if (scope == NotesListScope.Thread)
             {

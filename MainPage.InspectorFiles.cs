@@ -704,9 +704,9 @@ namespace SelfContainedDeployment
         {
             Grid row = new()
             {
-                MinHeight = 24,
-                ColumnSpacing = 6,
-                Margin = new Thickness(-6, 1, 0, 1),
+                MinHeight = 22,
+                ColumnSpacing = 5,
+                Margin = new Thickness(-10, 0, 0, 0),
             };
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -721,7 +721,7 @@ namespace SelfContainedDeployment
             Border accent = new()
             {
                 Width = 2,
-                Margin = new Thickness(0, 1, 0, 1),
+                Margin = new Thickness(0, 2, 0, 2),
                 CornerRadius = new CornerRadius(999),
                 Background = accentBrush,
                 Opacity = item.IsDirectory ? 0.45 : 0.82,
@@ -736,11 +736,10 @@ namespace SelfContainedDeployment
             TextBlock name = new()
             {
                 VerticalAlignment = VerticalAlignment.Center,
-                FontSize = 11.1,
+                FontSize = 11.25,
                 FontWeight = item.IsDirectory
                     ? Microsoft.UI.Text.FontWeights.SemiBold
-                    : Microsoft.UI.Text.FontWeights.Normal,
-                Foreground = AppBrush(InspectorDirectoryTree, "ShellTextPrimaryBrush"),
+                    : Microsoft.UI.Text.FontWeights.Medium,
                 Text = item.Name,
                 TextWrapping = TextWrapping.NoWrap,
                 TextTrimming = TextTrimming.CharacterEllipsis,
@@ -751,7 +750,7 @@ namespace SelfContainedDeployment
             StackPanel adornments = new()
             {
                 Orientation = Orientation.Horizontal,
-                Spacing = 4,
+                Spacing = 3,
                 VerticalAlignment = VerticalAlignment.Center,
             };
             Grid.SetColumn(adornments, 3);
@@ -792,7 +791,7 @@ namespace SelfContainedDeployment
             {
                 Text = item.StatusText,
                 FontFamily = new FontFamily("Consolas"),
-                FontSize = 10,
+                FontSize = 9.6,
                 FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
                 Foreground = item.StatusBrush,
                 VerticalAlignment = VerticalAlignment.Center,

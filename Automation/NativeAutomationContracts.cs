@@ -20,6 +20,10 @@ namespace SelfContainedDeployment.Automation
 
         public string Theme { get; set; }
 
+        public string ThemeMode { get; set; }
+
+        public string ThemePack { get; set; }
+
         public bool PaneOpen { get; set; }
 
         public bool InspectorOpen { get; set; }

@@ -70,21 +70,36 @@ namespace SelfContainedDeployment
             }
 
             ElementTheme resolvedTheme = ResolveChromeTheme(theme);
-            Windows.UI.Color background = resolvedTheme == ElementTheme.Light
-                ? Windows.UI.Color.FromArgb(0xFF, 0xF5, 0xF6, 0xF8)
-                : Windows.UI.Color.FromArgb(0xFF, 0x0C, 0x0D, 0x10);
-            Windows.UI.Color hoverBackground = resolvedTheme == ElementTheme.Light
-                ? Windows.UI.Color.FromArgb(0xFF, 0xF0, 0xF3, 0xF6)
-                : Windows.UI.Color.FromArgb(0xFF, 0x13, 0x16, 0x1B);
-            Windows.UI.Color pressedBackground = resolvedTheme == ElementTheme.Light
-                ? Windows.UI.Color.FromArgb(0xFF, 0xE7, 0xEB, 0xF0)
-                : Windows.UI.Color.FromArgb(0xFF, 0x17, 0x1A, 0x20);
-            Windows.UI.Color foreground = resolvedTheme == ElementTheme.Light
-                ? Windows.UI.Color.FromArgb(0xFF, 0x1B, 0x1F, 0x24)
-                : Windows.UI.Color.FromArgb(0xFF, 0xF3, 0xF4, 0xF6);
-            Windows.UI.Color inactiveForeground = resolvedTheme == ElementTheme.Light
-                ? Windows.UI.Color.FromArgb(0xFF, 0x7E, 0x86, 0x91)
-                : Windows.UI.Color.FromArgb(0xFF, 0x7A, 0x80, 0x8B);
+            Windows.UI.Color background = ShellTheme.ResolveColorForTheme(
+                resolvedTheme,
+                "ShellChromeBackgroundColor",
+                resolvedTheme == ElementTheme.Light
+                    ? Windows.UI.Color.FromArgb(0xFF, 0xF5, 0xF6, 0xF8)
+                    : Windows.UI.Color.FromArgb(0xFF, 0x0C, 0x0D, 0x10));
+            Windows.UI.Color hoverBackground = ShellTheme.ResolveColorForTheme(
+                resolvedTheme,
+                "ShellChromeHoverBackgroundColor",
+                resolvedTheme == ElementTheme.Light
+                    ? Windows.UI.Color.FromArgb(0xFF, 0xF0, 0xF3, 0xF6)
+                    : Windows.UI.Color.FromArgb(0xFF, 0x13, 0x16, 0x1B));
+            Windows.UI.Color pressedBackground = ShellTheme.ResolveColorForTheme(
+                resolvedTheme,
+                "ShellChromePressedBackgroundColor",
+                resolvedTheme == ElementTheme.Light
+                    ? Windows.UI.Color.FromArgb(0xFF, 0xE7, 0xEB, 0xF0)
+                    : Windows.UI.Color.FromArgb(0xFF, 0x17, 0x1A, 0x20));
+            Windows.UI.Color foreground = ShellTheme.ResolveColorForTheme(
+                resolvedTheme,
+                "ShellChromeForegroundColor",
+                resolvedTheme == ElementTheme.Light
+                    ? Windows.UI.Color.FromArgb(0xFF, 0x1B, 0x1F, 0x24)
+                    : Windows.UI.Color.FromArgb(0xFF, 0xF3, 0xF4, 0xF6));
+            Windows.UI.Color inactiveForeground = ShellTheme.ResolveColorForTheme(
+                resolvedTheme,
+                "ShellChromeInactiveForegroundColor",
+                resolvedTheme == ElementTheme.Light
+                    ? Windows.UI.Color.FromArgb(0xFF, 0x7E, 0x86, 0x91)
+                    : Windows.UI.Color.FromArgb(0xFF, 0x7A, 0x80, 0x8B));
 
             titleBar.BackgroundColor = background;
             titleBar.ForegroundColor = foreground;

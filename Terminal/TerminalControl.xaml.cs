@@ -4,6 +4,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Automation.Peers;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Terminal.Wpf;
@@ -18,6 +19,7 @@ using System.Reflection;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using WinUIEx.Messaging;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.UI;
 using NativeTerminalViewControl = SelfContainedDeployment.Terminal.SafeEasyTerminalControl;
@@ -65,6 +67,8 @@ namespace SelfContainedDeployment.Terminal
         private bool _replayRestorePending;
         private bool _replayRestoreFailed;
         private bool _pendingProgrammaticFocus;
+        private bool _paneSelected;
+        private bool _hostedSurfaceSuppressed;
         private int _cols = 120;
         private int _rows = 32;
         private string _sessionTitle = "Terminal";
@@ -81,6 +85,11 @@ namespace SelfContainedDeployment.Terminal
         private double? _sessionStartedMs;
         private double? _firstDisplayOutputMs;
         private NativeTerminalViewControl _nativeTerminalView;
+        private UIElement _nativeTerminalFocusProxy;
+        private Delegate _nativeTerminalMessageHookHandler;
+        private Delegate _nativeTerminalWindowMessageHandler;
+        private string _hostedSurfaceSuppressionTitle;
+        private string _hostedSurfaceSuppressionMessage;
 
         public event EventHandler<string> SessionTitleChanged;
         public event EventHandler RendererReady;
@@ -191,6 +200,7 @@ namespace SelfContainedDeployment.Terminal
 
         private void OnNativeTerminalLoaded(object sender, RoutedEventArgs e)
         {
+            AttachNativeTerminalInteractionProxy();
             MarkNativeTerminalReady();
         }
 
@@ -547,6 +557,17 @@ namespace SelfContainedDeployment.Terminal
             UpdateTerminalHeader();
         }
 
+        public void SetPaneSelected(bool selected)
+        {
+            if (_paneSelected == selected)
+            {
+                return;
+            }
+
+            _paneSelected = selected;
+            ApplyPaneSelectionChrome();
+        }
+
         public void SetHeaderTitleOverride(string title)
         {
             _headerTitleOverride = string.IsNullOrWhiteSpace(title) ? null : title.Trim();
@@ -594,8 +615,42 @@ namespace SelfContainedDeployment.Terminal
 
         public void SetLiveResizeMode(bool enabled)
         {
+            if (_liveResizeMode == enabled)
+            {
+                return;
+            }
+
             _liveResizeMode = enabled;
+            if (enabled)
+            {
+                ApplyHostedSurfaceVisibility();
+                HideStatus();
+                return;
+            }
+
+            ApplyHostedSurfaceVisibility();
+            UpdateStartupMask();
             RequestFit();
+        }
+
+        public void SetHostedSurfaceSuppressed(bool suppressed, string title = null, string message = null)
+        {
+            if (_hostedSurfaceSuppressed == suppressed &&
+                string.Equals(_hostedSurfaceSuppressionTitle, title, StringComparison.Ordinal) &&
+                string.Equals(_hostedSurfaceSuppressionMessage, message, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _hostedSurfaceSuppressed = suppressed;
+            _hostedSurfaceSuppressionTitle = suppressed ? title?.Trim() : null;
+            _hostedSurfaceSuppressionMessage = suppressed ? message?.Trim() : null;
+            ApplyHostedSurfaceVisibility();
+            UpdateStartupMask();
+            if (!suppressed && !_liveResizeMode)
+            {
+                RequestFit();
+            }
         }
 
         public Task<NativeAutomationTerminalSnapshot> GetTerminalSnapshotAsync()
@@ -709,7 +764,7 @@ namespace SelfContainedDeployment.Terminal
 
         private void ShowSuspendedState()
         {
-            NativeTerminalHost.Visibility = Visibility.Collapsed;
+            ApplyHostedSurfaceVisibility();
             ResetActiveToolSession(raiseCompletedEvent: false);
             if (StartupMask is not null)
             {
@@ -719,6 +774,21 @@ namespace SelfContainedDeployment.Terminal
             HideStatus();
             UpdateStartupMask();
             UpdateTerminalHeader();
+        }
+
+        private void ApplyHostedSurfaceVisibility()
+        {
+            if (NativeTerminalHost is null)
+            {
+                return;
+            }
+
+            bool showNativeHost = !_hostedSurfaceSuppressed
+                && !_liveResizeMode
+                && _nativeTerminalLoaded
+                && AutoStartSession
+                && !_sessionExited;
+            NativeTerminalHost.Visibility = showNativeHost ? Visibility.Visible : Visibility.Collapsed;
         }
 
         private static void CopySelectionToClipboard(string text)
@@ -1339,23 +1409,63 @@ namespace SelfContainedDeployment.Terminal
             InteractionRequested?.Invoke(this, EventArgs.Empty);
         }
 
-        private string ResolveThemeName()
+        private void OnNativeTerminalInteractionPointerPressed(object sender, PointerRoutedEventArgs e)
         {
-            ElementTheme resolved = _themePreference switch
+            RaiseInteractionRequested();
+        }
+
+        private void OnNativeTerminalInteractionGotFocus(object sender, RoutedEventArgs e)
+        {
+            RaiseInteractionRequested();
+        }
+
+        private void OnNativeTerminalInteractionGettingFocus(UIElement sender, GettingFocusEventArgs args)
+        {
+            RaiseInteractionRequested();
+        }
+
+        private void OnNativeTerminalInteractionMessageHook(object sender, WindowMessageEventArgs e)
+        {
+            switch ((WindowsMessages)e.Message.MessageId)
+            {
+                case WindowsMessages.MOUSEACTIVATE:
+                case WindowsMessages.SETFOCUS:
+                case WindowsMessages.LBUTTONDOWN:
+                case WindowsMessages.LBUTTONDBLCLK:
+                case WindowsMessages.RBUTTONDOWN:
+                case WindowsMessages.MBUTTONDOWN:
+                    RaiseInteractionRequested();
+                    break;
+            }
+        }
+
+        private ElementTheme ResolveEffectiveTheme()
+        {
+            return _themePreference switch
             {
                 ElementTheme.Light => ElementTheme.Light,
                 ElementTheme.Dark => ElementTheme.Dark,
                 _ => ActualTheme == ElementTheme.Light ? ElementTheme.Light : ElementTheme.Dark,
             };
+        }
 
-            return resolved == ElementTheme.Light ? "light" : "dark";
+        private string ResolveThemeName()
+        {
+            return ResolveEffectiveTheme() == ElementTheme.Light ? "light" : "dark";
+        }
+
+        private UIColor ResolveShellColor(string key, UIColor fallbackColor)
+        {
+            return ShellTheme.ResolveColorForTheme(ResolveEffectiveTheme(), key, fallbackColor);
         }
 
         private void ApplyBackgroundColor()
         {
-            UIColor backgroundColor = ResolveThemeName() == "light"
-                ? new UIColor { A = 255, R = 255, G = 255, B = 255 }
-                : new UIColor { A = 255, R = 9, G = 9, B = 11 };
+            UIColor backgroundColor = ResolveShellColor(
+                "ShellSurfaceBackgroundBrush",
+                ResolveEffectiveTheme() == ElementTheme.Light
+                    ? new UIColor { A = 255, R = 249, G = 251, B = 253 }
+                    : new UIColor { A = 255, R = 16, G = 18, B = 22 });
 
             SolidColorBrush brush = new(backgroundColor);
             if (TerminalRoot is not null)
@@ -1372,6 +1482,72 @@ namespace SelfContainedDeployment.Terminal
             {
                 StartupMask.Background = brush;
             }
+
+            ApplyPaneSelectionChrome();
+        }
+
+        private void ApplyPaneSelectionChrome()
+        {
+            bool lightTheme = ResolveEffectiveTheme() == ElementTheme.Light;
+            UIColor surfaceColor = ResolveShellColor(
+                "ShellSurfaceBackgroundBrush",
+                lightTheme
+                    ? new UIColor { A = 255, R = 249, G = 251, B = 253 }
+                    : new UIColor { A = 255, R = 16, G = 18, B = 22 });
+            UIColor borderColor = ResolveShellColor(
+                "ShellBorderBrush",
+                lightTheme
+                    ? new UIColor { A = 255, R = 184, G = 198, B = 212 }
+                    : new UIColor { A = 255, R = 30, G = 33, B = 39 });
+            UIColor accentColor = ResolveShellColor(
+                "ShellTerminalBrush",
+                lightTheme
+                    ? new UIColor { A = 255, R = 15, G = 118, B = 110 }
+                    : new UIColor { A = 255, R = 45, G = 212, B = 191 });
+
+            if (TerminalHeader is not null)
+            {
+                TerminalHeader.Background = new SolidColorBrush(surfaceColor);
+                TerminalHeader.BorderBrush = new SolidColorBrush(borderColor);
+            }
+
+            if (NativeTerminalViewport is not null)
+            {
+                NativeTerminalViewport.Background = new SolidColorBrush(surfaceColor);
+                NativeTerminalViewport.BorderBrush = new SolidColorBrush(new UIColor { A = 0, R = 0, G = 0, B = 0 });
+                NativeTerminalViewport.BorderThickness = new Thickness(0);
+            }
+        }
+
+        private static UIColor MixColors(UIColor baseColor, UIColor overlayColor, double overlayWeight)
+        {
+            double clampedWeight = Math.Clamp(overlayWeight, 0, 1);
+            double baseWeight = 1 - clampedWeight;
+            return new UIColor
+            {
+                A = 255,
+                R = (byte)Math.Round((baseColor.R * baseWeight) + (overlayColor.R * clampedWeight)),
+                G = (byte)Math.Round((baseColor.G * baseWeight) + (overlayColor.G * clampedWeight)),
+                B = (byte)Math.Round((baseColor.B * baseWeight) + (overlayColor.B * clampedWeight)),
+            };
+        }
+
+        private static UIColor LiftColor(UIColor color, bool lightTheme)
+        {
+            return MixColors(
+                color,
+                new UIColor { A = 255, R = 255, G = 255, B = 255 },
+                lightTheme ? 0.16 : 0.24);
+        }
+
+        private static DrawingColor ToDrawingColor(UIColor color)
+        {
+            return DrawingColor.FromArgb(color.A, color.R, color.G, color.B);
+        }
+
+        private static uint ToTerminalColor(UIColor color)
+        {
+            return EasyTerminalControl.ColorToVal(ToDrawingColor(color));
         }
 
         private void UpdateNativeTerminalTheme()
@@ -1386,11 +1562,12 @@ namespace SelfContainedDeployment.Terminal
                 return;
             }
 
+            TerminalTheme theme = CreateNativeTerminalTheme();
             _nativeTerminalView.FontFamilyWhenSettingTheme = new Microsoft.UI.Xaml.Media.FontFamily("Cascadia Mono");
             _nativeTerminalView.FontSizeWhenSettingTheme = NativeTerminalFontSize;
-            _nativeTerminalView.Theme = CreateNativeTerminalTheme();
+            _nativeTerminalView.Theme = theme;
             _nativeTerminalView.Terminal?.SetTheme(
-                CreateNativeTerminalTheme(),
+                theme,
                 "Cascadia Mono",
                 NativeTerminalFontSize,
                 ResolveExternalBackgroundColor());
@@ -1398,74 +1575,79 @@ namespace SelfContainedDeployment.Terminal
 
         private TerminalTheme CreateNativeTerminalTheme()
         {
-            string themeName = ResolveThemeName();
-            return themeName == "light"
-                ? CreateLightTheme()
-                : CreateDarkTheme();
-        }
-
-        private TerminalTheme CreateDarkTheme()
-        {
-            DrawingColor background = DrawingColor.FromArgb(0x10, 0x12, 0x16);
-            DrawingColor foreground = DrawingColor.FromArgb(0xF3, 0xF4, 0xF6);
+            bool lightTheme = ResolveEffectiveTheme() == ElementTheme.Light;
+            UIColor background = ResolveShellColor(
+                "ShellSurfaceBackgroundBrush",
+                lightTheme
+                    ? new UIColor { A = 255, R = 249, G = 251, B = 253 }
+                    : new UIColor { A = 255, R = 16, G = 18, B = 22 });
+            UIColor pageBackground = ResolveShellColor(
+                "ShellPageBackgroundBrush",
+                lightTheme
+                    ? new UIColor { A = 255, R = 242, G = 245, B = 248 }
+                    : new UIColor { A = 255, R = 12, G = 13, B = 16 });
+            UIColor foreground = ResolveShellColor(
+                "ShellTextPrimaryBrush",
+                lightTheme
+                    ? new UIColor { A = 255, R = 26, G = 30, B = 35 }
+                    : new UIColor { A = 255, R = 243, G = 244, B = 246 });
+            UIColor secondary = ResolveShellColor(
+                "ShellTextSecondaryBrush",
+                lightTheme
+                    ? new UIColor { A = 255, R = 57, G = 66, B = 77 }
+                    : new UIColor { A = 255, R = 167, G = 173, B = 183 });
+            UIColor tertiary = ResolveShellColor(
+                "ShellTextTertiaryBrush",
+                lightTheme
+                    ? new UIColor { A = 255, R = 85, G = 96, B = 109 }
+                    : new UIColor { A = 255, R = 122, G = 128, B = 139 });
+            UIColor success = ResolveShellColor("ShellSuccessBrush", lightTheme
+                ? new UIColor { A = 255, R = 22, G = 163, B = 74 }
+                : new UIColor { A = 255, R = 74, G = 222, B = 128 });
+            UIColor warning = ResolveShellColor("ShellWarningBrush", lightTheme
+                ? new UIColor { A = 255, R = 202, G = 138, B = 4 }
+                : new UIColor { A = 255, R = 251, G = 191, B = 36 });
+            UIColor danger = ResolveShellColor("ShellDangerBrush", lightTheme
+                ? new UIColor { A = 255, R = 220, G = 38, B = 38 }
+                : new UIColor { A = 255, R = 248, G = 113, B = 113 });
+            UIColor info = ResolveShellColor("ShellInfoBrush", lightTheme
+                ? new UIColor { A = 255, R = 37, G = 99, B = 235 }
+                : new UIColor { A = 255, R = 96, G = 165, B = 250 });
+            UIColor accent = ResolveShellColor("ShellTerminalBrush", lightTheme
+                ? new UIColor { A = 255, R = 15, G = 118, B = 110 }
+                : new UIColor { A = 255, R = 45, G = 212, B = 191 });
+            UIColor magenta = MixColors(info, danger, lightTheme ? 0.46 : 0.52);
+            UIColor lowWhite = lightTheme
+                ? ResolveShellColor("ShellMutedSurfaceBrush", new UIColor { A = 255, R = 238, G = 241, B = 244 })
+                : MixColors(background, foreground, 0.76);
+            UIColor brightWhite = lightTheme
+                ? LiftColor(background, true)
+                : LiftColor(foreground, false);
 
             return new TerminalTheme
             {
-                DefaultBackground = EasyTerminalControl.ColorToVal(background),
-                DefaultForeground = EasyTerminalControl.ColorToVal(foreground),
-                DefaultSelectionBackground = EasyTerminalControl.ColorToVal(DrawingColor.FromArgb(0x33, 0x33, 0x33)),
+                DefaultBackground = ToTerminalColor(background),
+                DefaultForeground = ToTerminalColor(foreground),
+                DefaultSelectionBackground = ToTerminalColor(MixColors(background, accent, lightTheme ? 0.18 : 0.24)),
                 CursorStyle = ResolveCursorStyle(),
                 ColorTable = new[]
                 {
-                    EasyTerminalControl.ColorToVal(DrawingColor.FromArgb(0x0C, 0x0D, 0x10)),
-                    EasyTerminalControl.ColorToVal(DrawingColor.FromArgb(0xF8, 0x71, 0x71)),
-                    EasyTerminalControl.ColorToVal(DrawingColor.FromArgb(0x4A, 0xDE, 0x80)),
-                    EasyTerminalControl.ColorToVal(DrawingColor.FromArgb(0xFB, 0xBF, 0x24)),
-                    EasyTerminalControl.ColorToVal(DrawingColor.FromArgb(0x94, 0xA3, 0xB8)),
-                    EasyTerminalControl.ColorToVal(DrawingColor.FromArgb(0xC0, 0x84, 0xFC)),
-                    EasyTerminalControl.ColorToVal(DrawingColor.FromArgb(0x22, 0xD3, 0xEE)),
-                    EasyTerminalControl.ColorToVal(DrawingColor.FromArgb(0xD4, 0xD4, 0xD8)),
-                    EasyTerminalControl.ColorToVal(DrawingColor.FromArgb(0x52, 0x52, 0x5B)),
-                    EasyTerminalControl.ColorToVal(DrawingColor.FromArgb(0xFC, 0xA5, 0xA5)),
-                    EasyTerminalControl.ColorToVal(DrawingColor.FromArgb(0x86, 0xEF, 0xAC)),
-                    EasyTerminalControl.ColorToVal(DrawingColor.FromArgb(0xFC, 0xD3, 0x4D)),
-                    EasyTerminalControl.ColorToVal(DrawingColor.FromArgb(0xCB, 0xD5, 0xE1)),
-                    EasyTerminalControl.ColorToVal(DrawingColor.FromArgb(0xD8, 0xB4, 0xFE)),
-                    EasyTerminalControl.ColorToVal(DrawingColor.FromArgb(0x67, 0xE8, 0xF9)),
-                    EasyTerminalControl.ColorToVal(DrawingColor.FromArgb(0xFF, 0xFF, 0xFF)),
-                },
-            };
-        }
-
-        private TerminalTheme CreateLightTheme()
-        {
-            DrawingColor background = DrawingColor.FromArgb(0xFB, 0xFC, 0xFD);
-            DrawingColor foreground = DrawingColor.FromArgb(0x1B, 0x1F, 0x24);
-
-            return new TerminalTheme
-            {
-                DefaultBackground = EasyTerminalControl.ColorToVal(background),
-                DefaultForeground = EasyTerminalControl.ColorToVal(foreground),
-                DefaultSelectionBackground = EasyTerminalControl.ColorToVal(DrawingColor.FromArgb(0xD7, 0xDF, 0xEA)),
-                CursorStyle = ResolveCursorStyle(),
-                ColorTable = new[]
-                {
-                    EasyTerminalControl.ColorToVal(DrawingColor.FromArgb(0x1B, 0x1F, 0x24)),
-                    EasyTerminalControl.ColorToVal(DrawingColor.FromArgb(0xDC, 0x26, 0x26)),
-                    EasyTerminalControl.ColorToVal(DrawingColor.FromArgb(0x16, 0xA3, 0x4A)),
-                    EasyTerminalControl.ColorToVal(DrawingColor.FromArgb(0xCA, 0x8A, 0x04)),
-                    EasyTerminalControl.ColorToVal(DrawingColor.FromArgb(0x25, 0x63, 0xEB)),
-                    EasyTerminalControl.ColorToVal(DrawingColor.FromArgb(0x93, 0x33, 0xEA)),
-                    EasyTerminalControl.ColorToVal(DrawingColor.FromArgb(0x0F, 0x76, 0x6E)),
-                    EasyTerminalControl.ColorToVal(DrawingColor.FromArgb(0xEE, 0xF1, 0xF4)),
-                    EasyTerminalControl.ColorToVal(DrawingColor.FromArgb(0x59, 0x60, 0x6A)),
-                    EasyTerminalControl.ColorToVal(DrawingColor.FromArgb(0xE1, 0x1D, 0x48)),
-                    EasyTerminalControl.ColorToVal(DrawingColor.FromArgb(0x16, 0xA3, 0x4A)),
-                    EasyTerminalControl.ColorToVal(DrawingColor.FromArgb(0xCA, 0x8A, 0x04)),
-                    EasyTerminalControl.ColorToVal(DrawingColor.FromArgb(0x25, 0x63, 0xEB)),
-                    EasyTerminalControl.ColorToVal(DrawingColor.FromArgb(0xA8, 0x55, 0xF7)),
-                    EasyTerminalControl.ColorToVal(DrawingColor.FromArgb(0x0D, 0x94, 0x88)),
-                    EasyTerminalControl.ColorToVal(DrawingColor.FromArgb(0xFA, 0xFA, 0xFA)),
+                    ToTerminalColor(lightTheme ? foreground : pageBackground),
+                    ToTerminalColor(danger),
+                    ToTerminalColor(success),
+                    ToTerminalColor(warning),
+                    ToTerminalColor(info),
+                    ToTerminalColor(magenta),
+                    ToTerminalColor(accent),
+                    ToTerminalColor(lowWhite),
+                    ToTerminalColor(tertiary),
+                    ToTerminalColor(LiftColor(danger, lightTheme)),
+                    ToTerminalColor(LiftColor(success, lightTheme)),
+                    ToTerminalColor(LiftColor(warning, lightTheme)),
+                    ToTerminalColor(LiftColor(info, lightTheme)),
+                    ToTerminalColor(LiftColor(magenta, lightTheme)),
+                    ToTerminalColor(LiftColor(accent, lightTheme)),
+                    ToTerminalColor(brightWhite),
                 },
             };
         }
@@ -1483,9 +1665,11 @@ namespace SelfContainedDeployment.Terminal
 
         private DrawingColor ResolveExternalBackgroundColor()
         {
-            return ResolveThemeName() == "light"
-                ? DrawingColor.FromArgb(0xF5, 0xF6, 0xF8)
-                : DrawingColor.FromArgb(0x0C, 0x0D, 0x10);
+            return ToDrawingColor(ResolveShellColor(
+                "ShellPageBackgroundBrush",
+                ResolveEffectiveTheme() == ElementTheme.Light
+                    ? new UIColor { A = 255, R = 242, G = 245, B = 248 }
+                    : new UIColor { A = 255, R = 12, G = 13, B = 16 }));
         }
 
         private void UpdateStartupMask()
@@ -1494,7 +1678,10 @@ namespace SelfContainedDeployment.Terminal
             {
                 // The native terminal uses its own HWND, so XAML overlays cannot stay above
                 // a live terminal surface. Keep the overlay only for suspended or not-yet-created panes.
-                bool allowOverlay = !AutoStartSession || _nativeTerminalView is null || NativeTerminalHost?.Visibility != Visibility.Visible;
+                bool allowOverlay = _hostedSurfaceSuppressed
+                    || !AutoStartSession
+                    || _nativeTerminalView is null
+                    || NativeTerminalHost?.Visibility != Visibility.Visible;
                 StartupMask.Visibility = allowOverlay ? Visibility.Visible : Visibility.Collapsed;
             }
 
@@ -1537,6 +1724,11 @@ namespace SelfContainedDeployment.Terminal
 
         private string ResolveStartupKicker()
         {
+            if (_hostedSurfaceSuppressed)
+            {
+                return "Dialog open";
+            }
+
             if (!AutoStartSession)
             {
                 return "Suspended pane";
@@ -1553,6 +1745,13 @@ namespace SelfContainedDeployment.Terminal
 
         private string ResolveStartupTitle()
         {
+            if (_hostedSurfaceSuppressed)
+            {
+                return string.IsNullOrWhiteSpace(_hostedSurfaceSuppressionTitle)
+                    ? "Hosted pane paused"
+                    : _hostedSurfaceSuppressionTitle;
+            }
+
             if (!AutoStartSession)
             {
                 return "Session suspended";
@@ -1569,6 +1768,13 @@ namespace SelfContainedDeployment.Terminal
 
         private string ResolveStartupMeta()
         {
+            if (_hostedSurfaceSuppressed)
+            {
+                return string.IsNullOrWhiteSpace(_hostedSurfaceSuppressionMessage)
+                    ? "Finish the dialog to return to the live terminal."
+                    : _hostedSurfaceSuppressionMessage;
+            }
+
             if (!AutoStartSession)
             {
                 return "This pane is suspended until you explicitly resume it.";
@@ -1602,13 +1808,9 @@ namespace SelfContainedDeployment.Terminal
 
         private void HideStartupMask()
         {
-            NativeTerminalHost.Visibility = Visibility.Visible;
+            ApplyHostedSurfaceVisibility();
             RequestFit();
-
-            if (StartupMask is not null)
-            {
-                StartupMask.Visibility = Visibility.Collapsed;
-            }
+            UpdateStartupMask();
         }
 
         private bool CanReceiveProgrammaticFocus()
@@ -1769,12 +1971,6 @@ namespace SelfContainedDeployment.Terminal
                 return _sessionTitle;
             }
 
-            string pathLeaf = ExtractPathLeaf(ResolveHeaderPath());
-            if (!string.IsNullOrWhiteSpace(pathLeaf))
-            {
-                return pathLeaf;
-            }
-
             return ResolveShellDisplayName(includeTerminalSuffix: true) ?? GetInitialTitle();
         }
 
@@ -1790,28 +1986,28 @@ namespace SelfContainedDeployment.Terminal
                 return SuspendedStatusText;
             }
 
-            string headerPath = ResolveHeaderPath();
             if (IsSessionExited())
             {
-                return JoinMetaSegments("Session ended", headerPath);
+                return _liveResizeMode
+                    ? JoinMetaSegments("Session ended", "resizing")
+                    : "Session ended";
             }
 
             if (!string.IsNullOrWhiteSpace(_activeToolSession))
             {
-                return JoinMetaSegments(ResolveToolSessionLabel(), headerPath);
+                return _liveResizeMode
+                    ? JoinMetaSegments(ResolveToolSessionLabel(), "resizing")
+                    : ResolveToolSessionLabel();
             }
 
             if (_replayRestorePending)
             {
-                return JoinMetaSegments("Restoring session", headerPath);
+                return _liveResizeMode
+                    ? JoinMetaSegments("Restoring session", "resizing")
+                    : "Restoring session";
             }
 
             string shellLabel = ResolveShellDisplayName(includeTerminalSuffix: false);
-            if (!string.IsNullOrWhiteSpace(headerPath))
-            {
-                return JoinMetaSegments(shellLabel, headerPath, _liveResizeMode ? "resizing" : null);
-            }
-
             return _liveResizeMode
                 ? JoinMetaSegments(shellLabel, "resizing")
                 : shellLabel ?? "Interactive shell";
@@ -1991,18 +2187,80 @@ namespace SelfContainedDeployment.Terminal
             };
             ApplyTerminalAutomationIsolation();
             _nativeTerminalView.Loaded += OnNativeTerminalLoaded;
-            _nativeTerminalView.GotFocus += (_, _) => RaiseInteractionRequested();
-            _nativeTerminalView.PointerPressed += (_, _) => RaiseInteractionRequested();
+            _nativeTerminalView.GotFocus += OnNativeTerminalInteractionGotFocus;
+            _nativeTerminalView.PointerPressed += OnNativeTerminalInteractionPointerPressed;
+            _nativeTerminalView.Terminal.InteractionOccurred += OnNativeTerminalInteractionOccurred;
+            AttachNativeTerminalInteractionProxy();
             NativeTerminalHost.Children.Add(_nativeTerminalView);
+            ApplyHostedSurfaceVisibility();
             TraceNativeTerminal("NativeTerminalView created");
             DispatcherQueue.TryEnqueue(() =>
             {
+                AttachNativeTerminalInteractionProxy();
                 if (_nativeTerminalView?.XamlRoot is not null)
                 {
                     TraceNativeTerminal("NativeTerminalView fallback-ready via XamlRoot");
                     MarkNativeTerminalReady();
                 }
             });
+        }
+
+        private void AttachNativeTerminalInteractionProxy()
+        {
+            if (_nativeTerminalFocusProxy is not null || _nativeTerminalView is null)
+            {
+                return;
+            }
+
+            if (_nativeTerminalView.FindName("termContainer") is not UIElement termContainer)
+            {
+                return;
+            }
+
+            _nativeTerminalFocusProxy = termContainer;
+            _nativeTerminalFocusProxy.GettingFocus += OnNativeTerminalInteractionGettingFocus;
+            _nativeTerminalFocusProxy.GotFocus += OnNativeTerminalInteractionGotFocus;
+            _nativeTerminalFocusProxy.AddHandler(
+                UIElement.PointerPressedEvent,
+                new PointerEventHandler(OnNativeTerminalInteractionPointerPressed),
+                handledEventsToo: true);
+
+            AttachNativeTerminalWindowMessageRelay("WindowMessageReceived", ref _nativeTerminalWindowMessageHandler);
+            AttachNativeTerminalWindowMessageRelay("MessageHook", ref _nativeTerminalMessageHookHandler);
+        }
+
+        private void OnNativeTerminalInteractionOccurred(object sender, EventArgs e)
+        {
+            RaiseInteractionRequested();
+        }
+
+        private void AttachNativeTerminalWindowMessageRelay(string eventName, ref Delegate eventHandler)
+        {
+            if (_nativeTerminalFocusProxy is null || eventHandler is not null)
+            {
+                return;
+            }
+
+            EventInfo messageEvent = _nativeTerminalFocusProxy.GetType().GetEvent(
+                eventName,
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (messageEvent is null)
+            {
+                return;
+            }
+
+            try
+            {
+                eventHandler = Delegate.CreateDelegate(
+                    messageEvent.EventHandlerType,
+                    this,
+                    nameof(OnNativeTerminalInteractionMessageHook));
+                messageEvent.AddEventHandler(_nativeTerminalFocusProxy, eventHandler);
+            }
+            catch
+            {
+                eventHandler = null;
+            }
         }
 
         private void ApplyTerminalAutomationIsolation()

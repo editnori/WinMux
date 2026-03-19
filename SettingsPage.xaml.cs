@@ -41,6 +41,13 @@ namespace SelfContainedDeployment
                     themeButton.IsChecked = true;
                 }
 
+                RadioButton themePackButton = themePackPanel.Children.OfType<RadioButton>()
+                    .First(button => string.Equals((string)button.Tag, SampleConfig.CurrentThemePackId, StringComparison.OrdinalIgnoreCase));
+                if (themePackButton.IsChecked != true)
+                {
+                    themePackButton.IsChecked = true;
+                }
+
                 RadioButton shellProfileButton = shellProfilePanel.Children.OfType<RadioButton>()
                     .First(button => string.Equals((string)button.Tag, SampleConfig.DefaultShellProfileId, System.StringComparison.OrdinalIgnoreCase));
                 if (shellProfileButton.IsChecked != true)
@@ -81,6 +88,17 @@ namespace SelfContainedDeployment
 
             ElementTheme selectedTheme = (ElementTheme)((RadioButton)sender).Tag;
             MainPage.Current?.ApplyTheme(selectedTheme);
+        }
+
+        private void OnThemePackRadioButtonChecked(object sender, RoutedEventArgs e)
+        {
+            if (_syncingControls)
+            {
+                return;
+            }
+
+            string selectedPackId = (string)((RadioButton)sender).Tag;
+            MainPage.Current?.ApplyThemePack(selectedPackId);
         }
 
         private void OnShellProfileRadioButtonChecked(object sender, RoutedEventArgs e)

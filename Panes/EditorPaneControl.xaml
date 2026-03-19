@@ -18,12 +18,12 @@
                 Background="{ThemeResource ShellSurfaceBackgroundBrush}"
                 BorderBrush="{ThemeResource ShellBorderBrush}"
                 BorderThickness="0,0,0,1"
-                Padding="8,3,32,3">
-            <Grid ColumnDefinitions="*,Auto"
-                  ColumnSpacing="10">
+                Padding="8,4,32,4">
+            <Grid ColumnDefinitions="*,Auto,Auto,Auto"
+                  ColumnSpacing="6">
                 <TextBlock x:Name="EditorHeaderPathText"
                            AutomationProperties.AutomationId="editor-pane-header-path"
-                           FontSize="10.5"
+                           FontSize="10.25"
                            FontWeight="SemiBold"
                            Foreground="{ThemeResource ShellTextPrimaryBrush}"
                            Text="Editor"
@@ -31,10 +31,28 @@
                 <TextBlock x:Name="EditorHeaderMetaText"
                            Grid.Column="1"
                            AutomationProperties.AutomationId="editor-pane-header-meta"
-                           FontSize="10.5"
+                           FontSize="10.25"
                            Foreground="{ThemeResource ShellTextSecondaryBrush}"
                            Text="Waiting"
                            TextTrimming="CharacterEllipsis" />
+                <Button x:Name="EditorPreviousDiffButton"
+                        Grid.Column="2"
+                        AutomationProperties.AutomationId="editor-pane-header-prev-diff"
+                        Click="OnEditorPreviousDiffClicked"
+                        Style="{StaticResource ShellDiffNavigationButtonStyle}"
+                        ToolTipService.ToolTip="Previous diff section"
+                        Visibility="Collapsed">
+                    <TextBlock FontSize="10" FontWeight="SemiBold" Text="Prev" />
+                </Button>
+                <Button x:Name="EditorNextDiffButton"
+                        Grid.Column="3"
+                        AutomationProperties.AutomationId="editor-pane-header-next-diff"
+                        Click="OnEditorNextDiffClicked"
+                        Style="{StaticResource ShellDiffNavigationButtonStyle}"
+                        ToolTipService.ToolTip="Next diff section"
+                        Visibility="Collapsed">
+                    <TextBlock FontSize="10" FontWeight="SemiBold" Text="Next" />
+                </Button>
             </Grid>
         </Border>
 

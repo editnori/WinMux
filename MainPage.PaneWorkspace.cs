@@ -75,7 +75,7 @@ namespace SelfContainedDeployment
             {
                 foreach (Border container in _paneContainersById.Values)
                 {
-                    container.Visibility = Visibility.Collapsed;
+                    SetPaneContainerVisibility(container, Visibility.Collapsed);
                 }
 
                 return;
@@ -86,7 +86,7 @@ namespace SelfContainedDeployment
             {
                 foreach (Border container in _paneContainersById.Values)
                 {
-                    container.Visibility = Visibility.Collapsed;
+                    SetPaneContainerVisibility(container, Visibility.Collapsed);
                 }
 
                 return;
@@ -94,7 +94,7 @@ namespace SelfContainedDeployment
 
             foreach (Border container in _paneContainersById.Values)
             {
-                container.Visibility = Visibility.Collapsed;
+                SetPaneContainerVisibility(container, Visibility.Collapsed);
             }
 
             switch (visiblePanes.Count)
@@ -146,9 +146,10 @@ namespace SelfContainedDeployment
                 border = new Border
                 {
                     BorderThickness = new Thickness(1, 0, 1, 1),
-                    CornerRadius = new CornerRadius(5),
+                    CornerRadius = new CornerRadius(0),
+                    Padding = new Thickness(1),
                     Child = containerContent,
-                    Margin = new Thickness(1, 0, 1, 1),
+                    Margin = new Thickness(0),
                     Tag = pane,
                 };
                 AutomationProperties.SetAutomationId(border, $"shell-pane-{pane.Id}");
@@ -166,7 +167,7 @@ namespace SelfContainedDeployment
             }
 
             border.Background = AppBrush(border, "ShellSurfaceBackgroundBrush");
-            border.Visibility = Visibility.Visible;
+            SetPaneContainerVisibility(border, Visibility.Visible);
             Grid.SetRow(border, row);
             Grid.SetColumn(border, column);
             Grid.SetRowSpan(border, rowSpan);
@@ -177,6 +178,20 @@ namespace SelfContainedDeployment
             }
 
             UpdatePaneZoomButtonState(border, pane);
+        }
+
+        private static void SetPaneContainerVisibility(Border container, Visibility visibility)
+        {
+            if (container is null)
+            {
+                return;
+            }
+
+            container.Visibility = visibility;
+            if (container.Tag is WorkspacePaneRecord pane && pane.View is FrameworkElement view)
+            {
+                view.Visibility = visibility;
+            }
         }
 
         private void RemovePaneSplitters()
@@ -217,7 +232,7 @@ namespace SelfContainedDeployment
 
         private static Thickness ResolvePaneZoomButtonMargin(WorkspacePaneRecord pane)
         {
-            return new Thickness(0, 0, 1, 0);
+            return new Thickness(0, 6, 6, 0);
         }
 
         private void UpdatePaneZoomButtonState(Border border, WorkspacePaneRecord pane)
@@ -383,6 +398,7 @@ namespace SelfContainedDeployment
             ResetPaneSplitPreview();
             ShowPaneSplitPreview();
             UpdatePaneSplitPreviewVisuals();
+            SetLiveResizeModeForVisiblePanes(true);
             ApplyPaneSplitterVisual(splitter, emphasized: true);
             splitter.CapturePointer(e.Pointer);
             e.Handled = true;
@@ -774,7 +790,32 @@ namespace SelfContainedDeployment
             ResetPaneSplitPreview();
             HidePaneSplitPreview();
             ClearActiveSplitterTracking();
+            SetLiveResizeModeForVisiblePanes(false);
             RequestLayoutForVisiblePanes();
+        }
+
+        private void SetLiveResizeModeForVisiblePanes(bool enabled)
+        {
+            if (_activeThread is null)
+            {
+                return;
+            }
+
+            foreach (WorkspacePaneRecord pane in GetVisiblePanes(_activeThread))
+            {
+                switch (pane)
+                {
+                    case TerminalPaneRecord terminalPane:
+                        terminalPane.Terminal.SetLiveResizeMode(enabled);
+                        break;
+                    case BrowserPaneRecord browserPane:
+                        browserPane.Browser.SetLiveResizeMode(enabled);
+                        break;
+                    case EditorPaneRecord editorPane:
+                        editorPane.Editor.SetLiveResizeMode(enabled);
+                        break;
+                }
+            }
         }
 
         private void CommitPaneSplitPreviewRatios()
@@ -1035,6 +1076,8 @@ namespace SelfContainedDeployment
         {
             WorkspacePaneRecord selectedPane = GetSelectedPane(_activeThread);
             bool lightTheme = ResolveTheme(SampleConfig.CurrentTheme) == ElementTheme.Light;
+            byte selectedFrameAlpha = lightTheme ? (byte)0x10 : (byte)0x16;
+            byte selectedBorderAlpha = lightTheme ? (byte)0x86 : (byte)0x82;
             foreach ((string paneId, Border border) in _paneContainersById)
             {
                 if (border.Tag is WorkspacePaneRecord taggedPane)
@@ -1046,14 +1089,21 @@ namespace SelfContainedDeployment
                 string accentKey = border.Tag is WorkspacePaneRecord chromePane
                     ? ResolvePaneAccentBrushKey(chromePane.Kind)
                     : "ShellPaneActiveBorderBrush";
+                if (border.Tag is TerminalPaneRecord terminalPane)
+                {
+                    terminalPane.Terminal.SetPaneSelected(isSelected);
+                }
+
                 Brush accentBrush = AppBrush(border, accentKey);
                 border.Background = isSelected
-                    ? CreateSidebarTintedBrush(accentBrush, lightTheme ? (byte)0x18 : (byte)0x12, Windows.UI.Color.FromArgb(0xFF, 0x33, 0x41, 0x55))
+                    ? CreateSidebarTintedBrush(accentBrush, selectedFrameAlpha, Windows.UI.Color.FromArgb(0xFF, 0x33, 0x41, 0x55))
                     : AppBrush(border, "ShellSurfaceBackgroundBrush");
                 border.BorderBrush = isSelected
-                    ? CreateSidebarTintedBrush(accentBrush, lightTheme ? (byte)0x86 : (byte)0x70, Windows.UI.Color.FromArgb(0xFF, 0x33, 0x41, 0x55))
+                    ? CreateSidebarTintedBrush(accentBrush, selectedBorderAlpha, Windows.UI.Color.FromArgb(0xFF, 0x33, 0x41, 0x55))
                     : AppBrush(border, "ShellBorderBrush");
-                border.BorderThickness = new Thickness(1, 0, 1, 1);
+                border.BorderThickness = isSelected
+                    ? new Thickness(1)
+                    : new Thickness(1, 0, 1, 1);
             }
 
             foreach ((_, TabViewItem item) in _tabItemsById)
